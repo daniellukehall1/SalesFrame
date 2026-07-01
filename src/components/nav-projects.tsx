@@ -44,6 +44,7 @@ export type AccountNavItem = {
   logoDomain: string
   logoStatus: "resolved" | "fallback" | "missing"
   logoUrl: string
+  logoCheckedAt: string
   icon: React.ReactNode
   opportunities: {
     id: string

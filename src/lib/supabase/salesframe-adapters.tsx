@@ -66,7 +66,15 @@ export function mapAccountRowsToNavItems(accounts: AccountRow[], opportunities: 
       logoDomain,
       logoStatus,
       logoUrl,
-      icon: <AccountLogoAvatar domain={logoDomain} logoUrl={logoUrl} name={account.name} />,
+      logoCheckedAt: account.logo_checked_at ?? "",
+      icon: (
+        <AccountLogoAvatar
+          domain={logoDomain}
+          logoUrl={logoUrl}
+          name={account.name}
+          retryKey={account.logo_checked_at}
+        />
+      ),
       opportunities: opportunities
         .filter((opportunity) => opportunity.account_id === account.id)
         .map((opportunity) => ({

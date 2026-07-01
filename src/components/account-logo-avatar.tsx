@@ -18,12 +18,14 @@ export function AccountLogoAvatar({
   domain,
   logoUrl,
   name,
+  retryKey,
   size = "sm",
 }: {
   className?: string
   domain?: string | null
   logoUrl?: string | null
   name: string
+  retryKey?: string | null
   size?: keyof typeof accountLogoSizeClasses
 }) {
   const [imageFailed, setImageFailed] = React.useState(false)
@@ -33,7 +35,7 @@ export function AccountLogoAvatar({
 
   React.useEffect(() => {
     setImageFailed(false)
-  }, [resolvedLogoUrl])
+  }, [resolvedLogoUrl, retryKey])
 
   return (
     <span

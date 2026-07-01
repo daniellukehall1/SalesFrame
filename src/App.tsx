@@ -447,6 +447,7 @@ const emptyAccount: AccountNavItem = {
   logoDomain: "",
   logoStatus: "missing",
   logoUrl: "",
+  logoCheckedAt: "",
   icon: <Building2Icon />,
   opportunities: [],
 }
@@ -3856,11 +3857,7 @@ function App() {
       }))
       setWorkspaceErrorMessage("")
       setAccountEnrichmentRunStatus("saved")
-      setAccountEnrichmentRunMessage(
-        Object.keys(response.appliedCoreUpdates).length
-          ? "Account enriched. Blank fields were filled and sales signals are ready to review."
-          : "Account enriched. Existing fields were preserved and sales signals are ready to review."
-      )
+      setAccountEnrichmentRunMessage("")
     } catch (caughtError: unknown) {
       const message = caughtError instanceof Error ? caughtError.message : "Account enrichment could not be completed."
 
@@ -6886,7 +6883,7 @@ function CreateAccountDialog({
     (sellerCompany.trim().length > 0 && sellerDomain.trim().length > 0 && productContext.trim().length > 0)
   const canUseOpportunity = !createOpportunity || opportunityName.trim().length > 0
   const canContinue =
-    step === 1 ? canContinueBasics && canUseEnrichment : step === 2 ? true : step === 3 ? canUseResearch && canUseOpenAi : canUseOpportunity
+    step === 1 ? canContinueBasics : step === 2 ? true : step === 3 ? canUseResearch && canUseEnrichment && canUseOpenAi : canUseOpportunity
   const canCreate = canContinueBasics && canUseEnrichment && canUseResearch && canUseOpenAi && canUseOpportunity
   const accountSteps: { label: string; icon: React.ElementType }[] = [
     { label: "Basics", icon: Building2Icon },
@@ -7047,7 +7044,7 @@ function CreateAccountDialog({
     setCreateError("")
     setCreateProgressMessage(
       aiEnrichmentEnabled
-        ? "Creating account. AI enrichment will continue in the background."
+        ? "Creating account. Customer research will continue in the background."
         : "Creating account and saving the account record."
     )
 
@@ -7202,37 +7199,6 @@ function CreateAccountDialog({
                 onChange={setCurrency}
               />
             </div>
-            <div
-              className={cn(
-                "flex flex-col gap-3 rounded-lg bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between",
-                aiEnrichmentEnabled && !canUseEnrichment && "bg-destructive/10"
-              )}
-            >
-              <div className="flex items-start gap-2">
-                <SparklesIcon className="mt-0.5 size-4 text-muted-foreground" />
-                <div>
-                  <p className="text-sm font-medium">AI Enrichment</p>
-                  <p className="text-xs text-muted-foreground">
-                    Fill blank account fields and prepare editable sales signals from trusted public sources.
-                  </p>
-                  {aiEnrichmentEnabled && !hasSavedOpenAiKey ? (
-                    <p className="mt-1 text-xs text-destructive">Add an OpenAI key in Settings before enrichment.</p>
-                  ) : aiEnrichmentEnabled && !normalizedWebsite.includes(".") ? (
-                    <p className="mt-1 text-xs text-destructive">Enter a website or domain before enrichment.</p>
-                  ) : null}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="create-account-ai-enrichment" className="text-sm text-muted-foreground">
-                  Run after create
-                </Label>
-                <Switch
-                  id="create-account-ai-enrichment"
-                  checked={aiEnrichmentEnabled}
-                  onCheckedChange={setAiEnrichmentEnabled}
-                />
-              </div>
-            </div>
             {duplicateAccount ? (
               <div className="grid gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
                 <div className="flex items-start gap-2">
@@ -7337,7 +7303,7 @@ function CreateAccountDialog({
                 <p className="mt-1 text-sm text-muted-foreground">
                   {hasSavedOpenAiKey
                     ? "Research and AI workflows will use the saved workspace key."
-                    : "Add a key in Settings before creating accounts or running customer research."}
+                    : "Add a key in Settings before creating accounts or running research."}
                 </p>
               </div>
               {!hasSavedOpenAiKey ? (
@@ -7348,14 +7314,44 @@ function CreateAccountDialog({
               ) : null}
             </div>
 
+            <div
+              className={cn(
+                "grid gap-3 rounded-lg bg-muted/30 p-3",
+                aiEnrichmentEnabled && !canUseEnrichment && "bg-destructive/10"
+              )}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-start gap-2">
+                  <SparklesIcon className="mt-0.5 size-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-sm font-medium">Customer Research</p>
+                    <p className="text-xs text-muted-foreground">
+                      Research this account, fill blank fields, and prepare sales signals from trusted public sources.
+                    </p>
+                    {aiEnrichmentEnabled && !hasSavedOpenAiKey ? (
+                      <p className="mt-1 text-xs text-destructive">Add an OpenAI key in Settings before customer research.</p>
+                    ) : aiEnrichmentEnabled && !normalizedWebsite.includes(".") ? (
+                      <p className="mt-1 text-xs text-destructive">Enter a website or domain before customer research.</p>
+                    ) : null}
+                  </div>
+                </div>
+                <Switch
+                  id="create-account-ai-enrichment"
+                  checked={aiEnrichmentEnabled}
+                  disabled={!hasSavedOpenAiKey}
+                  onCheckedChange={setAiEnrichmentEnabled}
+                />
+              </div>
+            </div>
+
             <div className="grid gap-3 rounded-lg bg-muted/30 p-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <SearchIcon className="size-4 text-muted-foreground" />
                   <div>
-                    <p className="text-sm font-medium">Customer Research</p>
+                    <p className="text-sm font-medium">Seller Research</p>
                     <p className="text-xs text-muted-foreground">
-                      {customerResearchEnabled ? "Used for future calls on this account." : "Optional account-level research."}
+                      {customerResearchEnabled ? "Used for future calls on this account." : "Optional seller context for future calls."}
                     </p>
                   </div>
                 </div>
@@ -7421,7 +7417,7 @@ function CreateAccountDialog({
                   {researchProfileMessage ||
                     (customerResearchEnabled
                       ? "Auto-filled from the domain and saved for future calls once this account is created."
-                      : "Turn on customer research to save product context for this account.")}
+                      : "Turn on seller research to save product context for this account.")}
                 </p>
               </div>
 
@@ -9064,6 +9060,7 @@ function AccountView({
               domain={account.logoDomain || accountDraft.website}
               logoUrl={account.logoUrl}
               name={accountDraft.accountName}
+              retryKey={`${account.logoCheckedAt}-${accountDraft.website}`}
               size="md"
             />
             <div className="min-w-0">
@@ -9517,7 +9514,7 @@ function AccountEnrichmentEditor({
   ]
   const primaryStatusMessage = saveMessage
     ? { message: saveMessage, status: saveStatus }
-    : runMessage
+    : runMessage && (runStatus === "saving" || runStatus === "error")
       ? { message: runMessage, status: runStatus }
       : null
   const runActionLabel = profile?.last_enriched_at ? "Refresh enrichment" : "Enrich account"

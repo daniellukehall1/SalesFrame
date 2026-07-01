@@ -452,9 +452,18 @@ export default async function handler(request: Request, _context: Context) {
     }
 
     const logoMetadata = buildAccountLogoMetadata(updatedAccount.website ?? accountDomain)
+    const logoUrlCanBePreserved =
+      logoMetadata.logo_domain &&
+      logoMetadata.logo_domain === updatedAccount.logo_domain &&
+      updatedAccount.logo_url
+    const nextLogoMetadata = {
+      ...logoMetadata,
+      logo_status: logoMetadata.logo_url || logoUrlCanBePreserved ? "resolved" : logoMetadata.logo_status,
+      logo_url: logoMetadata.logo_url || logoUrlCanBePreserved || null,
+    }
     const { data: accountWithLogo, error: logoError } = await supabase
       .from("accounts")
-      .update(logoMetadata)
+      .update(nextLogoMetadata)
       .eq("id", account.id)
       .select("*")
       .single()
