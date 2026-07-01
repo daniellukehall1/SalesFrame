@@ -1245,7 +1245,9 @@ test("sidebar account deletion allows an empty workspace", async () => {
   assert.doesNotMatch(navProjects, /accounts\.length <= 1/)
   assert.doesNotMatch(navProjects, /opportunityCount > 0 && opportunityCount <= account\.opportunities\.length/)
   assert.doesNotMatch(navProjects, /disabled=\{opportunityCount <= 1\}/)
-  assert.match(app, /title: "No accounts yet"/)
+  assert.match(app, /eyebrow: "Fresh workspace"/)
+  assert.match(app, /title: "Nothing here yet"/)
+  assert.match(app, /Start with one account/)
   assert.match(app, /primaryLabel: "Create account"/)
 })
 

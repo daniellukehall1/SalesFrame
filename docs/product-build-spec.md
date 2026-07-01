@@ -918,6 +918,7 @@ Database-backed search should preserve the same behaviour while moving larger da
   - Browser meeting capture requests app/window/tab/system audio where the browser supports it. SalesFrame treats the shared audio track as the customer side and the microphone stream as the seller side; it does not send or record display video.
   - Meeting audio preflight shows a plain status: `Customer audio detected: start call.` when the shared source returns customer audio, or `Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, in-person mic mode, or install SalesFrame Audio Connector.` when the selected native app/window does not expose audio.
   - Non-settings pages render loading, empty, error, and permission-denied states so async data boundaries can reuse the same UI.
+  - Loading, empty, error, permission, onboarding, and zero-state surfaces must follow `docs/design-language-states.md` so the app keeps the same human voice as the public homepage.
 - Sidebar context menu rule:
   - Open Account navigates to the account record.
   - Edit Account Fields opens a modal over the current page and saves seller-owned account fields without navigating.

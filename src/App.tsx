@@ -4942,8 +4942,8 @@ function AuthLoadingView({
             <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <AudioLinesIcon className="size-5" />
             </div>
-            <CardTitle>Loading SalesFrame</CardTitle>
-            <CardDescription>Checking your Supabase session.</CardDescription>
+            <CardTitle>Getting SalesFrame ready</CardTitle>
+            <CardDescription>Checking your session so we can drop you back into the right workspace.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             <Skeleton className="h-10 rounded-lg" />
@@ -5853,9 +5853,9 @@ function StartCallPreparingView({
           </div>
           <div className="min-w-0">
             <p className="text-sm font-medium text-muted-foreground">Preparing live call</p>
-            <h3 className="mt-1 text-xl font-semibold tracking-tight">Starting SalesFrame coach</h3>
+            <h3 className="mt-1 text-xl font-semibold tracking-tight">Getting your live coach ready</h3>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              SalesFrame is getting the AI coach, call context, and audio capture ready before opening the cockpit.
+              We are lining up the account context, first question, and audio capture before the cockpit opens.
             </p>
           </div>
         </div>
@@ -6015,39 +6015,39 @@ function StartRecordingDialog({
   ]
   const startPreparationSteps: StartCallPreparationStep[] = [
     {
-      label: "Checking AI readiness",
-      description: "Confirming the workspace OpenAI connection and live guidance service.",
+      label: "Checking the AI coach",
+      description: "Making sure your OpenAI connection can return a real first question.",
       icon: KeyRoundIcon,
       progress: 18,
     },
     {
-      label: "Attaching records",
-      description: "Saving the account, opportunity, call record, and selected playbooks.",
+      label: "Linking the right records",
+      description: "Connecting this call to the account, opportunity, and selected playbooks.",
       icon: DatabaseIcon,
       progress: 36,
     },
     {
       label: customerResearchEnabled ? "Gathering customer context" : "Loading opportunity context",
       description: customerResearchEnabled
-        ? "Preparing customer research, seller context, and account history for the live coach."
-        : "Loading account history, opportunity evidence, and previous call context.",
+        ? "Pulling the customer research and seller context the coach should use."
+        : "Reading the opportunity history and evidence already saved here.",
       icon: SearchIcon,
       progress: 56,
     },
     {
       label: "Warming up AI coach",
-      description: "Generating the first natural recommendation before the cockpit opens.",
+      description: "Writing the first recommendation so you are not staring at a blank cockpit.",
       icon: SparklesIcon,
       progress: 76,
     },
     {
-      label: "Preparing audio capture",
+      label: "Preparing audio",
       description:
         audioCaptureMode === "meeting_audio"
-          ? "Preparing your microphone and customer-side app, tab, or system audio."
+          ? "Getting your microphone and customer-side app, tab, or system audio ready."
           : audioCaptureMode === "in_person_microphone"
-            ? "Preparing mixed-room microphone capture for the live transcript."
-            : "Preparing microphone capture for the live transcript.",
+            ? "Getting the room microphone ready for an in-person transcript."
+            : "Getting your microphone ready for the live transcript.",
       icon: Mic2Icon,
       progress: 92,
     },
@@ -11440,7 +11440,7 @@ function LiveRail({
               ))}
               {visibleNotes.length === 0 ? (
                 <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  {hasSearch ? "No notes match this search." : "Waiting for AI notes."}
+                  {hasSearch ? "No notes match this search." : "Notes will land here as the call gets going."}
                 </div>
               ) : null}
             </TabsContent>
@@ -11470,7 +11470,7 @@ function LiveRail({
                   <Badge variant="outline">
                     <FileTextIcon className="size-3" />
                   </Badge>
-                  {hasSearch ? "No evidence matches this search" : "Waiting for call evidence"}
+                  {hasSearch ? "No evidence matches this search" : "Evidence will appear as the conversation answers playbook fields."}
                 </div>
               ) : null}
             </TabsContent>
@@ -11527,7 +11527,7 @@ function LiveRail({
               </MessageGroup>
               {visibleTranscript.length === 0 ? (
                 <div className="mt-3 rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-                  {hasSearch ? "No transcript lines match this search." : "Transcript will appear as the call runs."}
+                  {hasSearch ? "No transcript lines match this search." : "The transcript will appear here as people speak."}
                 </div>
               ) : null}
             </TabsContent>
@@ -14505,7 +14505,7 @@ function WorkspaceSwitchSkeleton({
               <CardDescription>Switching workspace</CardDescription>
               <CardTitle className="text-2xl">{workspace.name}</CardTitle>
               <p className="mt-2 text-sm text-muted-foreground">
-                Loading accounts, opportunities, calls, playbooks, and settings.
+                Give us a moment. We are bringing over the accounts, calls, and playbooks for this workspace.
               </p>
             </div>
           </div>
@@ -14643,9 +14643,9 @@ function WorkspaceStateView({
     secondaryAction: () => void
   }> = {
     loading: {
-      eyebrow: "Loading state",
-      title: "Loading workspace data",
-      body: "The app is waiting for accounts, opportunities, calls, and playbook coverage before showing the workspace.",
+      eyebrow: "Just a moment",
+      title: "Getting this workspace ready",
+      body: "We are loading the accounts, opportunities, calls, and playbooks that belong here.",
       icon: <Clock3Icon className="size-5" />,
       primaryLabel: "Finish loading",
       primaryAction: () => onStateChange("ready"),
@@ -14653,9 +14653,9 @@ function WorkspaceStateView({
       secondaryAction: () => onNavigate("settings"),
     },
     empty: {
-      eyebrow: "Empty state",
-      title: "No accounts yet",
-      body: "A new seller has no accounts, opportunities, or calls. The first useful action is creating an account record.",
+      eyebrow: "Fresh workspace",
+      title: "Nothing here yet",
+      body: "Start with one account. SalesFrame will build the selling context around it as calls and opportunities come in.",
       icon: <Building2Icon className="size-5" />,
       primaryLabel: "Create account",
       primaryAction: onCreateAccount,
@@ -14663,9 +14663,9 @@ function WorkspaceStateView({
       secondaryAction: () => onStateChange("ready"),
     },
     error: {
-      eyebrow: "Error state",
-      title: "Workspace could not load",
-      body: "Something failed while loading account, opportunity, or call data. The seller needs a clear retry path.",
+      eyebrow: "Something got stuck",
+      title: "We could not load this workspace",
+      body: "Give it another try. If it keeps happening, settings can help confirm the connection is still in shape.",
       icon: <CircleAlertIcon className="size-5" />,
       primaryLabel: "Try again",
       primaryAction: onRetry,
@@ -14673,9 +14673,9 @@ function WorkspaceStateView({
       secondaryAction: () => onNavigate("settings"),
     },
     "permission-denied": {
-      eyebrow: "Permission state",
-      title: "You do not have access to this workspace",
-      body: "The signed-in seller does not have permission to view this account set. Keep the user oriented and route them to setup.",
+      eyebrow: "Workspace access",
+      title: "This workspace is out of reach",
+      body: "You are signed in, but this workspace is not available to your account. Check settings or switch back to a workspace you can access.",
       icon: <ShieldCheckIcon className="size-5" />,
       primaryLabel: "Open settings",
       primaryAction: () => onNavigate("settings"),
