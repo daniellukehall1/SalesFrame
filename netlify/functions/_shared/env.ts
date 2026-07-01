@@ -9,6 +9,10 @@ export const requiredFrontendEnvNames = [
   "VITE_SUPABASE_PUBLISHABLE_KEY",
 ] as const
 
+export const optionalFrontendEnvNames = [
+  "VITE_LOGO_DEV_PUBLISHABLE_KEY",
+] as const
+
 export const requiredServerEnvNames = [
   "SUPABASE_SERVICE_ROLE_KEY",
   "OPENAI_KEY_ENCRYPTION_SECRET",
@@ -20,6 +24,11 @@ export const optionalServerEnvNames = [
   "OPENAI_TEXT_MODEL",
   "OPENAI_TRANSCRIPTION_MODEL",
   "OPENAI_RESEARCH_WEB_SEARCH",
+] as const
+
+export const optionalEnvNames = [
+  ...optionalFrontendEnvNames,
+  ...optionalServerEnvNames,
 ] as const
 
 export const requiredEnvNames = [

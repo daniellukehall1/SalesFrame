@@ -2,6 +2,7 @@ import type { Config, Context } from "@netlify/functions"
 
 import type { Json, TablesUpdate } from "../../src/lib/supabase/database.types"
 import { AppError, badRequest, dataResponse, errorResponse, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
+import { buildAccountLogoMetadata } from "./_shared/account-logo"
 import { callOpenAiWebSearchJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { authorizeAccount, requireUser } from "./_shared/supabase"
@@ -449,6 +450,17 @@ export default async function handler(request: Request, _context: Context) {
       if (error) throw new Error(error.message)
       updatedAccount = data
     }
+
+    const logoMetadata = buildAccountLogoMetadata(updatedAccount.website ?? accountDomain)
+    const { data: accountWithLogo, error: logoError } = await supabase
+      .from("accounts")
+      .update(logoMetadata)
+      .eq("id", account.id)
+      .select("*")
+      .single()
+
+    if (logoError) throw new Error(logoError.message)
+    updatedAccount = accountWithLogo
 
     const sourceFacts = [
       ...result.sourceFacts.map((fact) => ({

@@ -2,6 +2,8 @@ import type { Config, Context } from "@netlify/functions"
 
 import {
   getEnv,
+  optionalEnvNames,
+  optionalFrontendEnvNames,
   optionalServerEnvNames,
   requiredEnvNames,
   requiredFrontendEnvNames,
@@ -22,7 +24,7 @@ export default async (request: Request, _context: Context) => {
     await requireUser(request)
 
     const required = requiredEnvNames.map(getEnvStatus)
-    const optional = optionalServerEnvNames.map(getEnvStatus)
+    const optional = optionalEnvNames.map(getEnvStatus)
     const missing = required
       .filter((item) => !item.configured)
       .map((item) => item.name)
@@ -34,6 +36,7 @@ export default async (request: Request, _context: Context) => {
       optional,
       groups: {
         frontend: requiredFrontendEnvNames,
+        optionalFrontend: optionalFrontendEnvNames,
         server: requiredServerEnvNames,
       },
     })

@@ -23,6 +23,7 @@ import {
   type CallPlaybook,
   type CurrencyCode,
 } from "../../src/lib/salesframe-core"
+import { buildAccountLogoMetadata } from "./_shared/account-logo"
 import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson } from "./_shared/http"
 import { authorizeWorkspace, requireUser } from "./_shared/supabase"
 
@@ -231,6 +232,7 @@ export default async (request: Request, _context: Context) => {
         region: "Australia",
         website: rowValues.accountWebsite || null,
         workspace_id: workspaceId,
+        ...buildAccountLogoMetadata(rowValues.accountWebsite || null),
       }
       const response = await supabase.from("accounts").insert(accountPayload).select("id,name,website,currency").single()
 

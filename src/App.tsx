@@ -47,6 +47,7 @@ import {
 } from "lucide-react"
 
 import { AppSidebar } from "@/components/app-sidebar"
+import { AccountLogoAvatar } from "@/components/account-logo-avatar"
 import { AuthPage, type AuthMode } from "@/components/auth-page"
 import { CsvImportDialog } from "@/components/csv-import-dialog"
 import { LegalDocumentPage } from "@/components/legal-document-page"
@@ -55,6 +56,7 @@ import { MarketingLandingPage } from "@/components/marketing-landing-page"
 import { type AccountNavItem } from "@/components/nav-projects"
 import type { SignupFormValues } from "@/components/signup-form"
 import type { WorkspaceNavItem } from "@/components/workspace-switcher"
+import { buildAccountLogoMetadata } from "@/lib/account-logo"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
@@ -442,6 +444,9 @@ const emptyAccount: AccountNavItem = {
   description: "Create an account to begin",
   website: "",
   currency: defaultCurrencyCode,
+  logoDomain: "",
+  logoStatus: "missing",
+  logoUrl: "",
   icon: <Building2Icon />,
   opportunities: [],
 }
@@ -3085,13 +3090,16 @@ function App() {
       }
 
       if (isNewAccount) {
+        const normalizedWebsite = ""
         const account = await createSupabaseAccount({
           workspace_id: activeWorkspaceId,
           name: accountName,
+          website: normalizedWebsite || null,
           industry: accountIndustry,
           region: "Australia",
           currency: normalizeCurrencyCode(payload.accountCurrency),
           notes: "Created from the start call flow.",
+          ...buildAccountLogoMetadata(normalizedWebsite),
         })
 
         accountId = account.id
@@ -3429,10 +3437,11 @@ function App() {
         throw new Error("OpenAI API key is required before creating an account.")
       }
 
+      const normalizedWebsite = normalizeSellerDomain(payload.website)
       const account = await createSupabaseAccount({
         workspace_id: activeWorkspaceId,
         name: accountName,
-        website: normalizeSellerDomain(payload.website),
+        website: normalizedWebsite,
         industry: accountIndustry,
         employee_count: payload.employeeCount.trim(),
         region: payload.region.trim() || "Australia",
@@ -3441,6 +3450,7 @@ function App() {
         strategic_initiatives: payload.strategicInitiatives.trim(),
         competitors: payload.competitors.trim(),
         notes: payload.accountNotes.trim(),
+        ...buildAccountLogoMetadata(normalizedWebsite),
       })
 
       let opportunityId = ""
@@ -3513,15 +3523,13 @@ function App() {
           try {
             const enrichment = await requestAccountEnrichment(account.id)
 
+            const enrichedAccountNav = mapAccountRowsToNavItems([enrichment.account], [])[0]
             setWorkspaceAccounts((accounts) =>
               accounts.map((item) =>
                 item.id === enrichment.account.id
                   ? {
-                      ...item,
-                      currency: normalizeCurrencyCode(enrichment.account.currency),
-                      description: enrichment.account.industry ?? "Account",
-                      name: enrichment.account.name,
-                      website: enrichment.account.website ?? "",
+                      ...enrichedAccountNav,
+                      opportunities: item.opportunities,
                     }
                   : item
               )
@@ -3626,11 +3634,12 @@ function App() {
 
     const accountName = payload.accountName.trim() || currentAccount.name
     const industry = payload.industry.trim() || currentAccount.description
+    const normalizedWebsite = normalizeSellerDomain(payload.website)
 
     try {
       await updateSupabaseAccount(payload.accountId, {
         name: accountName,
-        website: normalizeSellerDomain(payload.website),
+        website: normalizedWebsite,
         industry,
         employee_count: payload.employeeCount.trim(),
         region: payload.region.trim() || "Australia",
@@ -3639,6 +3648,7 @@ function App() {
         strategic_initiatives: payload.strategicInitiatives.trim(),
         competitors: payload.competitors.trim(),
         notes: payload.accountNotes.trim(),
+        ...buildAccountLogoMetadata(normalizedWebsite),
       })
 
       setEditAccountId(null)
@@ -3750,9 +3760,10 @@ function App() {
     setAccountRecordSaveMessage("")
 
     try {
+      const normalizedWebsite = normalizeSellerDomain(draft.website)
       const updatedAccount = await updateSupabaseAccount(activeAccount.id, {
         name: draft.accountName.trim() || "Untitled account",
-        website: normalizeSellerDomain(draft.website),
+        website: normalizedWebsite,
         industry: draft.industry.trim() || "Account",
         employee_count: draft.employeeCount.trim(),
         region: draft.region.trim() || "Australia",
@@ -3761,17 +3772,16 @@ function App() {
         strategic_initiatives: draft.strategicInitiatives.trim(),
         competitors: draft.competitors.trim(),
         notes: draft.accountNotes.trim(),
+        ...buildAccountLogoMetadata(normalizedWebsite),
       })
+      const updatedAccountNav = mapAccountRowsToNavItems([updatedAccount], [])[0]
 
       setWorkspaceAccounts((accounts) =>
         accounts.map((account) =>
           account.id === updatedAccount.id
             ? {
-                ...account,
-                description: updatedAccount.industry ?? "Account",
-                currency: normalizeCurrencyCode(updatedAccount.currency),
-                name: updatedAccount.name,
-                website: updatedAccount.website ?? "",
+                ...updatedAccountNav,
+                opportunities: account.opportunities,
               }
             : account
         )
@@ -5561,7 +5571,7 @@ function GlobalSearch({
         type: "Account",
         label: account.name,
         meta: account.description,
-        icon: <Building2Icon />,
+        icon: account.icon,
         searchText: [
           account.name,
           account.description,
@@ -9045,13 +9055,21 @@ function AccountView({
     <div className="grid w-full min-w-0 gap-4">
       <Card className="w-full min-w-0">
         <CardHeader>
-          <div>
-            <CardDescription>Account workspace</CardDescription>
-            <CardTitle className="text-2xl">{accountDraft.accountName}</CardTitle>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <CoverageBadge value={averageCoverage} />
-              <Badge variant="outline">{openGaps} open gaps</Badge>
-              <Badge variant="outline">{stakeholders} stakeholders</Badge>
+          <div className="flex min-w-0 items-center gap-3">
+            <AccountLogoAvatar
+              domain={account.logoDomain || accountDraft.website}
+              logoUrl={account.logoUrl}
+              name={accountDraft.accountName}
+              size="md"
+            />
+            <div className="min-w-0">
+              <CardDescription>Account workspace</CardDescription>
+              <CardTitle className="truncate text-2xl">{accountDraft.accountName}</CardTitle>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <CoverageBadge value={averageCoverage} />
+                <Badge variant="outline">{openGaps} open gaps</Badge>
+                <Badge variant="outline">{stakeholders} stakeholders</Badge>
+              </div>
             </div>
           </div>
           <CardAction className="flex flex-wrap items-center gap-2">

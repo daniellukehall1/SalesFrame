@@ -1,7 +1,7 @@
-import { Building2Icon } from "lucide-react"
-
+import { AccountLogoAvatar } from "@/components/account-logo-avatar"
 import type { AccountNavItem } from "@/components/nav-projects"
 import type { WorkspaceNavItem } from "@/components/workspace-switcher"
+import { buildAccountLogoUrl, normalizeAccountLogoDomain, type AccountLogoStatus } from "@/lib/account-logo"
 import { formatCloseDateValue } from "@/lib/date-utils"
 import { createStarterOpportunity } from "@/lib/record-factories"
 import {
@@ -48,21 +48,34 @@ export function mapWorkspaceRowToNavItem(row: WorkspaceRow): WorkspaceNavItem {
 }
 
 export function mapAccountRowsToNavItems(accounts: AccountRow[], opportunities: OpportunityRow[]) {
-  return accounts.map<AccountNavItem>((account) => ({
-    id: account.id,
-    name: account.name,
-    description: account.industry ?? "Account",
-    website: account.website ?? "",
-    currency: normalizeCurrencyCode(account.currency),
-    icon: <Building2Icon />,
-    opportunities: opportunities
-      .filter((opportunity) => opportunity.account_id === account.id)
-      .map((opportunity) => ({
-        id: opportunity.id,
-        name: opportunity.name,
-        stage: opportunity.stage,
-      })),
-  }))
+  return accounts.map<AccountNavItem>((account) => {
+    const logoDomain = account.logo_domain || normalizeAccountLogoDomain(account.website)
+    const logoUrl = buildAccountLogoUrl(logoDomain) || account.logo_url || ""
+    const logoStatus = ["resolved", "fallback", "missing"].includes(account.logo_status)
+      ? account.logo_status as AccountLogoStatus
+      : logoDomain
+        ? "resolved"
+        : "missing"
+
+    return {
+      id: account.id,
+      name: account.name,
+      description: account.industry ?? "Account",
+      website: account.website ?? "",
+      currency: normalizeCurrencyCode(account.currency),
+      logoDomain,
+      logoStatus,
+      logoUrl,
+      icon: <AccountLogoAvatar domain={logoDomain} logoUrl={logoUrl} name={account.name} />,
+      opportunities: opportunities
+        .filter((opportunity) => opportunity.account_id === account.id)
+        .map((opportunity) => ({
+          id: opportunity.id,
+          name: opportunity.name,
+          stage: opportunity.stage,
+        })),
+    }
+  })
 }
 
 export function mapAccountRowsToDrafts(accounts: AccountRow[], ownerName: string) {

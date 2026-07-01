@@ -41,6 +41,9 @@ export type AccountNavItem = {
   description: string
   website: string
   currency: CurrencyCode
+  logoDomain: string
+  logoStatus: "resolved" | "fallback" | "missing"
+  logoUrl: string
   icon: React.ReactNode
   opportunities: {
     id: string

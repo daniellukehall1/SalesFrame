@@ -11,6 +11,7 @@ import {
   type CsvImportSummary,
 } from "../../src/lib/csv-import"
 import { defaultCurrencyCode, normalizeCurrencyCode, type CurrencyCode } from "../../src/lib/salesframe-core"
+import { buildAccountLogoMetadata } from "./_shared/account-logo"
 import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson } from "./_shared/http"
 import { authorizeWorkspace, requireUser } from "./_shared/supabase"
 
@@ -112,6 +113,7 @@ export default async (request: Request, _context: Context) => {
             competitors: row.values.competitors ?? null,
             website: row.values.accountWebsite ?? null,
             workspace_id: workspaceId,
+            ...buildAccountLogoMetadata(row.values.accountWebsite ?? null),
           }
           const response = await supabase.from("accounts").insert(insertPayload).select("id").single()
 
@@ -190,6 +192,10 @@ function buildAccountUpdatePayload(
   assignIfPresent(updatePayload, "strategic_initiatives", values.strategicInitiatives)
   assignIfPresent(updatePayload, "competitors", values.competitors)
   assignIfPresent(updatePayload, "notes", values.accountNotes)
+
+  if (values.accountWebsite?.trim()) {
+    Object.assign(updatePayload, buildAccountLogoMetadata(values.accountWebsite))
+  }
 
   if (values.currency?.trim()) {
     updatePayload.currency = resolveImportCurrency(values.currency, defaultCurrency)

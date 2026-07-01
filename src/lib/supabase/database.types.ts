@@ -124,6 +124,11 @@ export type Database = {
           strategic_initiatives: string | null
           competitors: string | null
           notes: string | null
+          logo_domain: string | null
+          logo_url: string | null
+          logo_source: string
+          logo_status: string
+          logo_checked_at: string | null
           created_at: string
           updated_at: string
         },
@@ -141,6 +146,11 @@ export type Database = {
           strategic_initiatives?: string | null
           competitors?: string | null
           notes?: string | null
+          logo_domain?: string | null
+          logo_url?: string | null
+          logo_source?: string
+          logo_status?: string
+          logo_checked_at?: string | null
           created_at?: string
           updated_at?: string
         },
@@ -158,6 +168,11 @@ export type Database = {
           strategic_initiatives?: string | null
           competitors?: string | null
           notes?: string | null
+          logo_domain?: string | null
+          logo_url?: string | null
+          logo_source?: string
+          logo_status?: string
+          logo_checked_at?: string | null
           created_at?: string
           updated_at?: string
         }
