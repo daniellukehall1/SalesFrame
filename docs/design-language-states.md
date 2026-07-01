@@ -50,6 +50,11 @@ SalesFrame should sound like someone sitting beside the seller saying, "I have y
 6. Never use placeholder or internal QA language in production UI.
    - Avoid: "Empty state", "Permission state", "The seller needs a clear retry path", "not configured yet", "coming soon", "being prepared".
 
+7. Match the control to the real behavior.
+   - Use a toggle only for a persistent setting or a mode that stays on when the user leaves and comes back.
+   - Use a button for one-time work like "Run enrichment", "Refresh research", "Import accounts", or "Start call".
+   - Never pair a toggle with a button when both appear to perform the same job.
+
 ## State Patterns
 
 ### Empty States

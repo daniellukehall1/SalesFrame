@@ -3834,16 +3834,14 @@ function App() {
       }
 
       const response = await requestAccountEnrichment(activeAccount.id)
+      const enrichedAccountNav = mapAccountRowsToNavItems([response.account], [])[0]
 
       setWorkspaceAccounts((accounts) =>
         accounts.map((account) =>
           account.id === response.account.id
             ? {
-                ...account,
-                currency: normalizeCurrencyCode(response.account.currency),
-                description: response.account.industry ?? "Account",
-                name: response.account.name,
-                website: response.account.website ?? "",
+                ...enrichedAccountNav,
+                opportunities: account.opportunities,
               }
             : account
         )
@@ -6866,6 +6864,7 @@ function CreateAccountDialog({
   const [selectedPlaybooks, setSelectedPlaybooks] = React.useState<CallPlaybook[]>(defaultCallPlaybooks)
   const [nextStep, setNextStep] = React.useState("")
   const [pain, setPain] = React.useState("")
+  const wasOpenRef = React.useRef(open)
   const sellerDomainLookupSequenceRef = React.useRef(0)
   const sellerDomainLookupTimeoutRef = React.useRef<number | null>(null)
 
@@ -6943,12 +6942,17 @@ function CreateAccountDialog({
     }
   }, [])
 
+  React.useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      reset()
+    }
+
+    wasOpenRef.current = open
+  }, [open])
+
   const handleOpenChange = (value: boolean) => {
     if (!value && createSubmitting) return
     onOpenChange(value)
-    if (value) {
-      reset()
-    }
   }
 
   const handleWebsiteChange = (value: string) => {
@@ -7220,7 +7224,7 @@ function CreateAccountDialog({
               </div>
               <div className="flex items-center gap-2">
                 <Label htmlFor="create-account-ai-enrichment" className="text-sm text-muted-foreground">
-                  Enable
+                  Run after create
                 </Label>
                 <Switch
                   id="create-account-ai-enrichment"
@@ -9432,7 +9436,6 @@ function AccountEnrichmentEditor({
   onRunEnrichment: () => void
   onSave: (draft: AccountEnrichmentDraft) => Promise<RecordMutationResult> | RecordMutationResult
 }) {
-  const [enabled, setEnabled] = React.useState(false)
   const [draft, setDraft] = React.useState<AccountEnrichmentDraft>(() => mapAccountEnrichmentProfileToDraft(profile))
 
   React.useEffect(() => {
@@ -9517,26 +9520,18 @@ function AccountEnrichmentEditor({
     : runMessage
       ? { message: runMessage, status: runStatus }
       : null
+  const runActionLabel = profile?.last_enriched_at ? "Refresh enrichment" : "Enrich account"
 
   return (
     <Card className="min-w-0 xl:col-span-2">
       <CardHeader>
         <div>
           <CardTitle>AI Enriched Sales Signals</CardTitle>
-          <CardDescription>Editable account intelligence used to shape live questions</CardDescription>
+          <CardDescription>
+            Run enrichment when you want fresh account research; edit and save the signals you want SalesFrame to use.
+          </CardDescription>
         </div>
         <CardAction className="flex flex-wrap items-center gap-2">
-          <div className="flex h-7 items-center gap-2 rounded-[min(var(--radius-md),12px)] px-2.5">
-            <Label htmlFor="account-ai-enrichment-toggle" className="text-[0.8rem] leading-[1.4286] font-medium text-foreground">
-              AI Enrichment
-            </Label>
-            <Switch
-              id="account-ai-enrichment-toggle"
-              checked={enabled}
-              disabled={!hasSavedOpenAiKey || runStatus === "saving"}
-              onCheckedChange={setEnabled}
-            />
-          </div>
           {!hasSavedOpenAiKey ? (
             <Button type="button" size="sm" variant="outline" className="min-w-40 justify-center gap-2" onClick={onOpenSettings}>
               <KeyRoundIcon />
@@ -9548,11 +9543,11 @@ function AccountEnrichmentEditor({
               size="sm"
               variant="outline"
               className="min-w-40 justify-center gap-2"
-              disabled={!enabled || runStatus === "saving"}
+              disabled={runStatus === "saving"}
               onClick={onRunEnrichment}
             >
               <SparklesIcon />
-              {runStatus === "saving" ? "Enriching..." : "Enrich account"}
+              {runStatus === "saving" ? "Enriching..." : runActionLabel}
             </Button>
           )}
           <Button
