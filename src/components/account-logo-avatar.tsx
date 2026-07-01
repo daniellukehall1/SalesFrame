@@ -39,7 +39,7 @@ export function AccountLogoAvatar({
     <span
       aria-hidden="true"
       className={cn(
-        "inline-flex shrink-0 items-center justify-center border border-border/70 bg-background text-muted-foreground shadow-xs",
+        "inline-flex shrink-0 items-center justify-center border border-border bg-muted text-muted-foreground shadow-xs",
         accountLogoSizeClasses[size],
         className
       )}

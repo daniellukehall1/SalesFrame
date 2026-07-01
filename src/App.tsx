@@ -9072,7 +9072,7 @@ function AccountView({
               </div>
             </div>
           </div>
-          <CardAction className="flex flex-wrap items-center gap-2">
+          <CardAction className="col-span-full col-start-1 row-span-1 row-start-2 mt-3 flex flex-wrap items-center gap-2 justify-self-start sm:col-span-auto sm:col-start-2 sm:row-span-2 sm:row-start-1 sm:mt-0 sm:justify-self-end">
             <StartRecordingDialog
               accounts={[account]}
               accountResearchById={accountResearchById}
