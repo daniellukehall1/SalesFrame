@@ -1,0 +1,1 @@
+-- Seed data is currently handled by migrations so local resets and hosted pushes stay aligned.

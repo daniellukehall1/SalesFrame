@@ -1,0 +1,63 @@
+import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
+import { test } from "node:test"
+
+const root = new URL("../../", import.meta.url)
+
+async function read(path) {
+  return readFile(new URL(path, root), "utf8")
+}
+
+test("live-call eval manifest covers the required elite pipeline scenarios", async () => {
+  const manifest = JSON.parse(await read("tests/fixtures/live-call-evals.json"))
+  const fixtureIds = new Set(manifest.fixtures.map((fixture) => fixture.id))
+
+  assert.equal(manifest.acceptanceTargets.duplicateTranscriptRate, 0)
+  assert.equal(manifest.acceptanceTargets.averageTurnFragmentationMax, 1.5)
+  assert.equal(manifest.acceptanceTargets.buyerAnswerToNextQuestionMedianMsMax, 3000)
+  assert.equal(manifest.acceptanceTargets.openingHeavyQuestionRate, 0)
+  assert.equal(manifest.acceptanceTargets.methodologyEvidenceAccuracyMin, 0.85)
+  assert.equal(manifest.acceptanceTargets.nextQuestionQualityMin, 0.8)
+
+  assert.deepEqual(
+    [...fixtureIds].sort(),
+    [
+      "in-person-mixed-room",
+      "interruption-overlap",
+      "long-seller-question-buyer-answer",
+      "quiet-buyer-audio",
+      "remote-single-seller-customer",
+      "seller-mic-only",
+      "tab-audio-plus-mic",
+    ].sort()
+  )
+})
+
+test("live-call implementation references the eval acceptance behaviors", async () => {
+  const app = await read("src/App.tsx")
+  const preflight = await read("src/lib/call-audio-preflight.ts")
+  const realtime = await read("src/lib/realtime-transcription.ts")
+  const assembler = await read("src/lib/turn-assembler.ts")
+  const liveGuidance = await read("netlify/functions/live-guidance.ts")
+
+  assert.match(preflight, /Customer audio detected: start call\./)
+  assert.match(preflight, /Native app audio is not available through this browser/)
+  assert.match(preflight, /function getMeetingAudioDisplayOptions/)
+  assert.match(preflight, /systemAudio: "include"/)
+  assert.match(preflight, /windowAudio: "system"/)
+  assert.match(preflight, /function getSupportedAudioConstraints/)
+  assert.match(preflight, /noiseSuppression: true/)
+  assert.match(preflight, /autoGainControl: false/)
+  assert.match(realtime, /realtimeTranscriptProfiles/)
+  assert.match(realtime, /sourceTranscriptionDelay/)
+  assert.match(realtime, /silenceCommitMs: 2200/)
+  assert.match(realtime, /voiceThreshold: 0\.018/)
+  assert.match(realtime, /noiseFloorMultiplier/)
+  assert.match(realtime, /minimumActivationMs/)
+  assert.doesNotMatch(app, /latestTurnIsSeller && !feedbackCountChanged/)
+  assert.match(app, /turnsSinceLastFullGuidance >= 2/)
+  assert.match(app, /shouldRefreshQuestion/)
+  assert.match(assembler, /duplicate_realtime_event/)
+  assert.match(liveGuidance, /buyer answered/)
+  assert.match(liveGuidance, /Do not ask late-stage methodology questions/)
+})

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="x-apple-disable-message-reformatting">
+    <title>Welcome to SalesFrame</title>
+  </head>
+  <body style="margin:0;padding:0;background:#ffffff;color:#000000;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+      Welcome to SalesFrame. Confirm your email and start your first call.
+    </div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#ffffff;">
+      <tr>
+        <td align="center" style="padding:32px 20px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:640px;">
+            <tr>
+              <td style="padding:0 0 56px;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td style="font-size:28px;line-height:1;font-weight:500;letter-spacing:-0.03em;color:#000000;">
+                      SalesFrame&reg;
+                    </td>
+                    <td width="14"></td>
+                    <td aria-hidden="true" style="width:34px;height:34px;">
+                      <table role="presentation" width="34" height="34" cellspacing="0" cellpadding="0" border="0">
+                        <tr>
+                          <td align="center" valign="middle" style="width:34px;height:34px;">
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                              <tr>
+                                <td style="width:2px;height:10px;background:#000000;border-radius:99px;"></td>
+                                <td width="4"></td>
+                                <td style="width:2px;height:18px;background:#000000;border-radius:99px;"></td>
+                                <td width="4"></td>
+                                <td style="width:2px;height:26px;background:#000000;border-radius:99px;"></td>
+                                <td width="4"></td>
+                                <td style="width:2px;height:18px;background:#000000;border-radius:99px;"></td>
+                                <td width="4"></td>
+                                <td style="width:2px;height:10px;background:#000000;border-radius:99px;"></td>
+                              </tr>
+                            </table>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:0 0 12px;font-size:18px;line-height:1.35;color:#000000;opacity:0.48;">
+                Hey there, nice to meet you,<br>
+                Let's sell some stuff
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:0 0 24px;font-size:44px;line-height:1.02;font-weight:500;letter-spacing:-0.055em;color:#000000;">
+                Glad you stopped in.<br>
+                SalesFrame is built to help you sell.<br>
+                Now, where do you want to start?
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:0 0 28px;font-size:16px;line-height:1.65;color:#262626;">
+                Confirm your email to finish setting up SalesFrame. Once you're in, your first move is simple:
+                connect your OpenAI key, choose or create an opportunity, and start your first live call.
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:0 0 48px;">
+                <a
+                  href="{{ .ConfirmationURL }}"
+                  style="display:inline-block;border:1px solid #000000;border-radius:10px;background:#000000;color:#ffffff;font-size:16px;line-height:1;text-decoration:none;padding:16px 22px;font-weight:600;"
+                >
+                  Start your first call
+                </a>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:0 0 18px;font-size:13px;line-height:1.6;color:#737373;">
+                If the button does not work, copy and paste this link into your browser:
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:0 0 40px;font-size:12px;line-height:1.6;color:#525252;word-break:break-all;">
+                {{ .ConfirmationURL }}
+              </td>
+            </tr>
+
+            <tr>
+              <td style="border-top:1px solid #e5e5e5;padding:22px 0 0;font-size:13px;line-height:1.6;color:#737373;">
+                You received this because {{ .Email }} was used to create a SalesFrame account.
+                Questions? Reach us at
+                <a href="mailto:hello@salesframe.ai" style="color:#000000;text-decoration:underline;">hello@salesframe.ai</a>.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

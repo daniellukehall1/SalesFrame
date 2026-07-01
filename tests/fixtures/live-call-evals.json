@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "description": "SalesFrame live-call eval manifest. Replace synthetic fixture paths with consented sales-call audio before running acoustic benchmarks.",
+  "acceptanceTargets": {
+    "duplicateTranscriptRate": 0,
+    "averageTurnFragmentationMax": 1.5,
+    "buyerAnswerToNextQuestionMedianMsMax": 3000,
+    "openingHeavyQuestionRate": 0,
+    "methodologyEvidenceAccuracyMin": 0.85,
+    "nextQuestionQualityMin": 0.8
+  },
+  "metrics": [
+    "duplicate transcript rate",
+    "missed buyer speech rate",
+    "average turn fragmentation",
+    "median buyer-answer-to-next-question latency",
+    "methodology evidence accuracy",
+    "next-question quality score"
+  ],
+  "fixtures": [
+    {
+      "id": "remote-single-seller-customer",
+      "captureMode": "meeting_audio",
+      "audioFixture": "synthetic/remote-single-seller-customer.webm",
+      "requiredSources": ["seller_mic", "meeting_audio"],
+      "expected": {
+        "customerAudioRequired": true,
+        "noExactDuplicateFinalRows": true,
+        "opensWithLowPressureQuestion": true
+      }
+    },
+    {
+      "id": "seller-mic-only",
+      "captureMode": "microphone",
+      "audioFixture": "synthetic/seller-mic-only.webm",
+      "requiredSources": ["mixed_audio"],
+      "expected": {
+        "warnsBuyerAudioMayBeIncomplete": true,
+        "noFallbackQuestions": true
+      }
+    },
+    {
+      "id": "tab-audio-plus-mic",
+      "captureMode": "meeting_audio",
+      "audioFixture": "synthetic/tab-audio-plus-mic.webm",
+      "requiredSources": ["seller_mic", "meeting_audio"],
+      "expected": {
+        "sellerDefaultsToMic": true,
+        "customerDefaultsToMeetingAudio": true
+      }
+    },
+    {
+      "id": "in-person-mixed-room",
+      "captureMode": "in_person_microphone",
+      "audioFixture": "synthetic/in-person-mixed-room.webm",
+      "requiredSources": ["in_person_microphone"],
+      "expected": {
+        "speakerLabelsEditable": true,
+        "startsWithSellerAndCustomerOnly": true
+      }
+    },
+    {
+      "id": "interruption-overlap",
+      "captureMode": "meeting_audio",
+      "audioFixture": "synthetic/interruption-overlap.webm",
+      "requiredSources": ["seller_mic", "meeting_audio"],
+      "expected": {
+        "doesNotOverwritePreviousTurns": true,
+        "suppressesExactDuplicates": true
+      }
+    },
+    {
+      "id": "quiet-buyer-audio",
+      "captureMode": "meeting_audio",
+      "audioFixture": "synthetic/quiet-buyer-audio.webm",
+      "requiredSources": ["seller_mic", "meeting_audio"],
+      "expected": {
+        "blocksWhenCustomerAudioDead": true,
+        "showsAudioHealth": true
+      }
+    },
+    {
+      "id": "long-seller-question-buyer-answer",
+      "captureMode": "meeting_audio",
+      "audioFixture": "synthetic/long-seller-question-buyer-answer.webm",
+      "requiredSources": ["seller_mic", "meeting_audio"],
+      "expected": {
+        "doesNotRefreshQuestionOnSellerTurnOnly": true,
+        "refreshesAfterBuyerFinalTurn": true,
+        "buyerAnswerToNextQuestionMedianMsMax": 3000
+      }
+    }
+  ]
+}

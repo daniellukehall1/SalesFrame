@@ -1,0 +1,12 @@
+node_modules
+.pnpm-store
+dist
+.env
+.env.*
+!.env.example
+.DS_Store
+supabase/.branches
+supabase/.temp
+
+# Local Netlify folder
+.netlify
