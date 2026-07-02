@@ -139,6 +139,7 @@ export function useCallCapture() {
   const activeTranscriptTurnsRef = React.useRef<Map<AudioSourceKind, TranscriptTurn>>(new Map())
   const realtimeSegmentedItemsRef = React.useRef<Set<string>>(new Set())
   const realtimeSpeakerLabelsRef = React.useRef<Map<string, TranscriptSpeaker>>(new Map())
+  const stopInFlightRef = React.useRef(false)
   const transcriptTurnSequenceRef = React.useRef(0)
 
   const cleanup = React.useCallback(() => {
@@ -464,14 +465,30 @@ export function useCallCapture() {
   )
 
   const stopCall = React.useCallback(async () => {
+    if (stopInFlightRef.current) return null
+    stopInFlightRef.current = true
+
     const config = activeConfigRef.current
-    if (!config) return null
+    if (!config) {
+      cleanup()
+      setActiveCallId("")
+      setAudioPreflight(null)
+      setStatus((currentStatus) => (currentStatus === "idle" ? "idle" : "stopped"))
+      stopInFlightRef.current = false
+      return null
+    }
 
     setStatus("stopping")
+    let blob = createRecordingBlob(chunksRef.current, mediaRecorderRef.current?.mimeType)
 
     try {
-      flushRealtimeAudioBuffers(realtimeDataChannelsRef.current)
-      await waitForRealtimeFlush()
+      try {
+        flushRealtimeAudioBuffers(realtimeDataChannelsRef.current)
+        await waitForRealtimeFlush()
+      } catch (caughtError: unknown) {
+        setError(getUserFacingErrorMessage(caughtError, "Realtime transcript finalisation needs attention."))
+      }
+
       if (enableRollingDiarization) {
         void sendRollingDiarizationChunk({
           config,
@@ -482,55 +499,57 @@ export function useCallCapture() {
           rollingStartedAtRef: rollingDiarizationStartedAtMsRef,
         })
       }
-      const blob = await stopRecorder(mediaRecorderRef.current, chunksRef.current)
+      blob = await stopRecorder(mediaRecorderRef.current, chunksRef.current)
+    } catch (caughtError: unknown) {
+      setError(getUserFacingErrorMessage(caughtError, "Call capture stopped, but final recording cleanup needs attention."))
+    } finally {
       cleanup()
+      activeConfigRef.current = null
+      mediaRecorderRef.current = null
+      setActiveCallId("")
+      setAudioPreflight(null)
+    }
 
-      const endedAt = new Date().toISOString()
-      const durationSeconds = Math.max(
-        0,
-        Math.round((new Date(endedAt).getTime() - new Date(config.startedAt).getTime()) / 1000)
-      )
+    const endedAt = new Date().toISOString()
+    const durationSeconds = Math.max(
+      0,
+      Math.round((new Date(endedAt).getTime() - new Date(config.startedAt).getTime()) / 1000)
+    )
 
+    try {
       await updateCall(config.callId, {
         duration_seconds: durationSeconds,
         ended_at: endedAt,
         status: "processing",
       })
-
-      let uploadFailed = false
-      let recordingStoragePath: string | null = null
-      if (blob.size > 0) {
-        try {
-          const upload = await uploadCallRecording({
-            callId: config.callId,
-            file: blob,
-            workspaceId: config.workspaceId,
-          })
-          recordingStoragePath = upload.path
-        } catch (caughtError: unknown) {
-          uploadFailed = true
-          setStatus("upload-failed")
-          setError(getUserFacingErrorMessage(caughtError, "Recording upload failed."))
-        }
-      }
-
-      activeConfigRef.current = null
-      mediaRecorderRef.current = null
-      setActiveCallId("")
-      setAudioPreflight(null)
-      if (!uploadFailed) setStatus("stopped")
-
-      return {
-        callId: config.callId,
-        durationSeconds,
-        endedAt,
-        recordingStoragePath,
-      }
     } catch (caughtError: unknown) {
-      cleanup()
-      setStatus("error")
-      setError(getUserFacingErrorMessage(caughtError, "Call capture could not stop."))
-      throw caughtError
+      setError(getUserFacingErrorMessage(caughtError, "Call stopped, but final status could not be saved."))
+    }
+
+    let uploadFailed = false
+    let recordingStoragePath: string | null = null
+    if (blob.size > 0) {
+      try {
+        const upload = await uploadCallRecording({
+          callId: config.callId,
+          file: blob,
+          workspaceId: config.workspaceId,
+        })
+        recordingStoragePath = upload.path
+      } catch (caughtError: unknown) {
+        uploadFailed = true
+        setError(getUserFacingErrorMessage(caughtError, "Recording upload failed."))
+      }
+    }
+
+    setStatus(uploadFailed ? "upload-failed" : "stopped")
+    stopInFlightRef.current = false
+
+    return {
+      callId: config.callId,
+      durationSeconds,
+      endedAt,
+      recordingStoragePath,
     }
   }, [cleanup])
 

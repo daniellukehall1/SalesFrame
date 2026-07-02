@@ -1985,13 +1985,16 @@ function App() {
   const [postCallGenerating, setPostCallGenerating] = React.useState(false)
   const [postCallError, setPostCallError] = React.useState("")
   const callCapture = useCallCapture()
+  const [isStoppingCall, setIsStoppingCall] = React.useState(false)
   const isCallLive =
     Boolean(callCapture.activeCallId) ||
     isRecording ||
     ["requesting-permission", "connecting", "recording", "paused", "stopping"].includes(callCapture.status)
   const canStopActiveCall =
     Boolean(activeCallId || callCapture.activeCallId) &&
-    (isRecording || ["requesting-permission", "connecting", "recording", "paused"].includes(callCapture.status))
+    (isStoppingCall ||
+      isRecording ||
+      ["requesting-permission", "connecting", "recording", "paused", "stopping"].includes(callCapture.status))
   const startingRecordingRef = React.useRef(false)
   const workspaceLoadTimeoutRef = React.useRef<number | null>(null)
   const pageLoadTimeoutRef = React.useRef<number | null>(null)
@@ -2791,6 +2794,8 @@ function App() {
       return
     }
 
+    if (isStoppingCall) return
+
     const stoppingCallId = activeCallId || callCapture.activeCallId || activeCallIdRef.current
 
     if (!stoppingCallId) {
@@ -2799,11 +2804,13 @@ function App() {
       return
     }
 
+    let stoppedCallId = stoppingCallId
+
     try {
+      setIsStoppingCall(true)
       setPostCallError("")
-      setPostCallGenerating(true)
       const stoppedCall = await callCapture.stopCall()
-      const stoppedCallId = stoppedCall?.callId ?? stoppingCallId
+      stoppedCallId = stoppedCall?.callId ?? stoppingCallId
       if (stoppedCall) {
         setWorkspaceCalls((items) =>
           items.map((call) =>
@@ -2822,9 +2829,22 @@ function App() {
       }
       setIsRecording(false)
       setActiveCallId("")
+      activeCallIdRef.current = ""
       setActiveCallStartedAt("")
       handleNavigate("post-call")
+    } catch (caughtError: unknown) {
+      setIsRecording(false)
+      setActiveCallId("")
+      activeCallIdRef.current = ""
+      setActiveCallStartedAt("")
+      handleNavigate("post-call")
+      setWorkspaceErrorMessage(getUserFacingErrorMessage(caughtError, "Call stopped locally, but final save needs attention."))
+    } finally {
+      setIsStoppingCall(false)
+    }
 
+    try {
+      setPostCallGenerating(true)
       const output = await requestPostCallOutputs(stoppedCallId)
       setPostCallOutputsByCallId((items) => ({
         ...items,
@@ -2833,7 +2853,6 @@ function App() {
       setWorkspaceRefreshToken((value) => value + 1)
     } catch (caughtError: unknown) {
       setPostCallError(getUserFacingErrorMessage(caughtError, "Post-call outputs could not be created."))
-      setWorkspaceErrorMessage(getUserFacingErrorMessage(caughtError, "Call could not be stopped."))
     } finally {
       setPostCallGenerating(false)
     }
@@ -4675,6 +4694,7 @@ function App() {
                 callType={callType}
                 elapsed={elapsed}
                 isRecording={canStopActiveCall}
+                isStopping={isStoppingCall || callCapture.status === "stopping"}
                 opportunity={activeOpportunity}
                 onCallTypeChange={setCallType}
                 onRecordingChange={handleRecordingChange}
@@ -4736,6 +4756,7 @@ function App() {
                 customerResearch={customerResearch}
                 elapsed={elapsed}
                 isRecording={canStopActiveCall}
+                isStoppingCall={isStoppingCall || callCapture.status === "stopping"}
                 initialLiveGuidance={activeCallId ? liveGuidanceByCallId[activeCallId] ?? null : null}
                 manualCoach={manualCoachState}
                 notes={notes}
@@ -5756,6 +5777,7 @@ function CommandBar({
   callType,
   elapsed,
   isRecording,
+  isStopping,
   opportunity,
   onCallTypeChange,
   onRecordingChange,
@@ -5765,6 +5787,7 @@ function CommandBar({
   callType: string
   elapsed: number
   isRecording: boolean
+  isStopping: boolean
   opportunity: Opportunity
   onCallTypeChange: (value: string) => void
   onRecordingChange: (value: boolean) => void
@@ -5800,11 +5823,12 @@ function CommandBar({
         </Button>
         <Button
           className="gap-2"
+          disabled={isStopping}
           variant={isRecording ? "destructive" : "default"}
           onClick={() => onRecordingChange(!isRecording)}
         >
           {isRecording ? <SquareIcon /> : <PlayIcon />}
-          {isRecording ? "Stop call" : "Start call"}
+          {isStopping ? "Stopping call" : isRecording ? "Stop call" : "Start call"}
         </Button>
       </div>
     </div>
@@ -9716,6 +9740,7 @@ function WorkspaceView({
   elapsed,
   initialLiveGuidance,
   isRecording,
+  isStoppingCall,
   manualCoach,
   notes,
   opportunity,
@@ -9762,6 +9787,7 @@ function WorkspaceView({
   elapsed: number
   initialLiveGuidance: LiveGuidance | null
   isRecording: boolean
+  isStoppingCall: boolean
   manualCoach: ManualCoachState
   notes: string[]
   opportunity: Opportunity
@@ -10022,12 +10048,12 @@ function WorkspaceView({
           {isRecording ? (
             <Button
               className="gap-2"
-              disabled={captureStatus === "stopping"}
+              disabled={isStoppingCall}
               variant="destructive"
               onClick={() => void onStopRecording()}
             >
               <SquareIcon />
-              {captureStatus === "stopping" ? "Stopping call" : "Stop call"}
+              {isStoppingCall ? "Stopping call" : "Stop call"}
             </Button>
           ) : account.id && opportunity.id ? (
             <StartRecordingDialog
@@ -10065,7 +10091,7 @@ function WorkspaceView({
           audioPreflight={audioPreflight}
           captureError={captureError}
           capturePermissionState={capturePermissionState}
-          captureStatus={captureStatus}
+          captureStatus={isStoppingCall ? "stopping" : captureStatus}
           guidance={liveGuidance}
           isRecording={isRecording}
           notes={notes}
