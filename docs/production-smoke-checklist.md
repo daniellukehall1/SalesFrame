@@ -4,8 +4,12 @@ Run this before every production deploy.
 
 ## Netlify And Supabase
 
+- Local release gate completes with `pnpm check`.
+- Secret scan completes with no tracked OpenAI, GitHub, Supabase secret, service-role, or credentialed database URLs.
 - Netlify build completes with `pnpm build`.
-- Netlify environment variables are configured: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_KEY_ENCRYPTION_SECRET`.
+- Netlify environment variables are configured: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_LOGO_DEV_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_KEY_ENCRYPTION_SECRET`.
+- `VITE_LOGO_DEV_PUBLISHABLE_KEY` is scoped to both Netlify Builds and Functions so account logos render in the browser and refresh during account enrichment.
+- Account logos render from Logo.dev on a real account domain such as `usemultiplier.com`; image requests should not send an app-origin referrer unless that origin is explicitly allowlisted in Logo.dev.
 - Supabase service-role key has not been shared in chat, committed, or stored in a browser-visible variable.
 - Supabase RLS policies are enabled for workspace-owned tables.
 - `call-recordings` and `call-artifacts` buckets are private.
@@ -16,6 +20,7 @@ Run this before every production deploy.
 - Signed-in users can create and switch workspaces.
 - Cross-workspace account, opportunity, call, customer research, realtime transcription, and post-call requests return `403`.
 - Missing auth returns `401`; invalid input returns `400`.
+- Repeated AI requests are throttled with `429` before they can create runaway OpenAI spend.
 
 ## Call Lifecycle
 

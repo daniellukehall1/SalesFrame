@@ -3,6 +3,7 @@ import type { Config, Context } from "@netlify/functions"
 import { badRequest, dataResponse, errorResponse, methodNotAllowed } from "./_shared/http"
 import { transcribeDiarizedAudio } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeCall, requireUser } from "./_shared/supabase"
 
 const maxChunkSizeBytes = 6 * 1024 * 1024
@@ -26,6 +27,12 @@ export default async (request: Request, _context: Context) => {
 
     const { supabase, user } = await requireUser(request)
     const call = await authorizeCall(user.id, callId)
+    assertRateLimit({
+      key: `${user.id}:${call.id}`,
+      limit: 60,
+      name: "call diarization",
+      windowMs: 10 * 60 * 1000,
+    })
 
     const apiKey = await getDecryptedOpenAiKey(supabase, user.id, call.workspace_id)
     const diarized = await transcribeDiarizedAudio({

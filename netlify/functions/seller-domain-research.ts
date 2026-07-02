@@ -4,6 +4,7 @@ import { getEnv } from "./_shared/env"
 import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeWorkspace, requireUser } from "./_shared/supabase"
 
 type SellerDomainResearchPayload = {
@@ -128,6 +129,12 @@ export default async (request: Request, _context: Context) => {
       supabase,
       userId: user.id,
       workspaceId: payload.workspaceId,
+    })
+    assertRateLimit({
+      key: `${user.id}:${payload.workspaceId ?? domain}`,
+      limit: 30,
+      name: "seller research",
+      windowMs: 10 * 60 * 1000,
     })
 
     const result = assertSellerDomainResearchResult(

@@ -87,7 +87,7 @@ async function readFunctionPayload<T>(response: Response): Promise<FunctionEnvel
     if (!response.ok) {
       return {
         error: {
-          message: text.slice(0, 240) || "Request failed.",
+          message: text.slice(0, 240) || "SalesFrame could not finish that request. Try again in a moment.",
         },
       }
     }
@@ -106,7 +106,7 @@ function getFunctionErrorMessage(payload: unknown) {
   ) {
     const code = (payload.error as { code?: unknown }).code
     if (code === "account_enrichment_storage_missing") {
-      return "Account enrichment is being prepared for this workspace. You can keep using the account record and try enrichment again shortly."
+      return "Customer research is still getting ready for this workspace. Your account is saved, and you can try research again in a moment."
     }
 
     const message = (payload.error as { message?: unknown }).message
@@ -114,7 +114,7 @@ function getFunctionErrorMessage(payload: unknown) {
     if (typeof message === "string" && message.trim()) return message
   }
 
-  return "Request failed."
+  return "SalesFrame could not finish that request. Try again in a moment."
 }
 
 async function callFunction<T>(path: string, options: FunctionRequestOptions = {}): Promise<T> {

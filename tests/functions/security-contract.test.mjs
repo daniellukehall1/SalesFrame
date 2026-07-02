@@ -1,11 +1,24 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import { test } from "node:test"
+import ts from "typescript"
 
 const root = new URL("../../", import.meta.url)
 
 async function read(path) {
   return readFile(new URL(path, root), "utf8")
+}
+
+async function loadSharedHttpModule() {
+  const source = await read("netlify/functions/_shared/http.ts")
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+  })
+
+  return import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`)
 }
 
 test("protected OpenAI functions use typed envelopes and authorization helpers", async () => {
@@ -59,8 +72,9 @@ test("protected OpenAI functions use typed envelopes and authorization helpers",
   assert.match(accountEnrichment, /account_enrichment_profiles/)
   assert.match(accountEnrichment, /account_enrichment_runs/)
   assert.match(accountEnrichment, /account_enrichment_storage_missing/)
-  assert.match(accountEnrichment, /Account enrichment is being prepared for this workspace/)
+  assert.match(accountEnrichment, /Customer research is still getting ready for this workspace/)
   assert.doesNotMatch(accountEnrichment, /Apply the latest Supabase migration/)
+  assert.doesNotMatch(accountEnrichment, /being prepared/)
   assert.match(accountEnrichment, /function normalizeEmployeeCountCoreField/)
   assert.match(accountEnrichment, /Rejected for employee count because the source describes users, customers, members, or another scale metric rather than workforce headcount/)
   assert.match(accountEnrichment, /callOpenAiWebSearchJson/)
@@ -88,21 +102,116 @@ test("post-call outputs run a speaker correction pass before generation", async 
 test("shared HTTP errors use structured codes and expected statuses", async () => {
   const http = await read("netlify/functions/_shared/http.ts")
   const functionsClient = await read("src/lib/server-functions.ts")
+  const browserSupabaseClient = await read("src/lib/supabase/client.ts")
 
   assert.match(http, /class AppError/)
   assert.match(http, /code: appError\.code/)
+  assert.match(http, /"Cache-Control": "no-store"/)
+  assert.match(http, /"Content-Type": "application\/json"/)
+  assert.match(http, /"Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"/)
+  assert.match(http, /"Referrer-Policy": "strict-origin-when-cross-origin"/)
+  assert.match(http, /"Strict-Transport-Security": "max-age=31536000; includeSubDomains"/)
+  assert.match(http, /"X-Content-Type-Options": "nosniff"/)
+  assert.match(http, /"X-Frame-Options": "DENY"/)
   assert.match(http, /badRequest/)
   assert.match(http, /unauthorized/)
   assert.match(http, /forbidden/)
   assert.match(http, /notFound/)
+  assert.match(http, /tooManyRequests/)
+  assert.match(http, /rate_limit_exceeded/)
+  assert.match(http, /429/)
   assert.match(http, /server_configuration_missing/)
-  assert.match(http, /SalesFrame AI services are not configured for this environment\./)
+  assert.match(http, /SalesFrame could not reach its AI services\. Contact support if this keeps happening\./)
+  assert.doesNotMatch(http, /not configured/)
+  assert.match(http, /new AppError\("server_error", defaultMessage\)/)
+  assert.doesNotMatch(http, /new AppError\("server_error", error instanceof Error \? error\.message/)
+  assert.match(http, /getPublicErrorMessage/)
+  assert.match(http, /technicalErrorPatterns/)
+  assert.match(http, /duplicate key value violates/)
+  assert.match(http, /parameter is not supported/)
+  assert.match(http, /SalesFrame could not finish the AI step\. Try again in a moment\./)
   assert.match(http, /isMissingServerConfiguration/)
+  assert.match(browserSupabaseClient, /SalesFrame could not connect to the workspace service\. Contact support if this keeps happening\./)
+  assert.doesNotMatch(browserSupabaseClient, /Missing Supabase environment variables/)
   assert.match(functionsClient, /async function readFunctionPayload/)
   assert.match(functionsClient, /await response\.text\(\)/)
   assert.match(functionsClient, /JSON\.parse\(text\)/)
   assert.match(functionsClient, /function getFunctionErrorMessage/)
   assert.doesNotMatch(functionsClient, /await response\.json\(\)/)
+})
+
+test("shared HTTP error envelopes sanitize internal database and provider messages", async () => {
+  const { badRequest, errorResponse, upstreamFailure } = await loadSharedHttpModule()
+
+  const databaseResponse = errorResponse(
+    new Error('duplicate key value violates unique constraint "transcript_segments_call_source_openai_segment_unique_idx"')
+  )
+  const databasePayload = await databaseResponse.json()
+
+  assert.equal(databaseResponse.status, 500)
+  assert.equal(databasePayload.error.code, "server_error")
+  assert.equal(databasePayload.error.message, "SalesFrame could not finish that request. Try again in a moment.")
+
+  const providerResponse = errorResponse(
+    upstreamFailure("The 'delay' parameter is not supported for this model.", "openai_request_failed")
+  )
+  const providerPayload = await providerResponse.json()
+
+  assert.equal(providerResponse.status, 502)
+  assert.equal(providerPayload.error.code, "openai_request_failed")
+  assert.equal(providerPayload.error.message, "SalesFrame could not finish the AI step. Try again in a moment.")
+
+  const validationResponse = errorResponse(badRequest("workspaceId is required.", "workspace_id_required"))
+  const validationPayload = await validationResponse.json()
+
+  assert.equal(validationResponse.status, 400)
+  assert.equal(validationPayload.error.code, "workspace_id_required")
+  assert.equal(validationPayload.error.message, "workspaceId is required.")
+})
+
+test("expensive AI functions enforce authenticated rate limits", async () => {
+  const rateLimit = await read("netlify/functions/_shared/rate-limit.ts")
+  const customerResearch = await read("netlify/functions/customer-research.ts")
+  const accountEnrichment = await read("netlify/functions/account-enrichment.ts")
+  const sellerDomainResearch = await read("netlify/functions/seller-domain-research.ts")
+  const liveGuidance = await read("netlify/functions/live-guidance.ts")
+  const liveState = await read("netlify/functions/live-state.ts")
+  const speakerAttribution = await read("netlify/functions/speaker-attribution.ts")
+  const realtimeTranscription = await read("netlify/functions/realtime-transcription.ts")
+  const callDiarization = await read("netlify/functions/call-diarization.ts")
+  const postCallOutputs = await read("netlify/functions/post-call-outputs.ts")
+  const smokeChecklist = await read("docs/production-smoke-checklist.md")
+
+  assert.match(rateLimit, /export function assertRateLimit/)
+  assert.match(rateLimit, /tooManyRequests/)
+  assert.match(rateLimit, /maxBuckets = 5000/)
+  assert.match(rateLimit, /cleanupExpiredBuckets/)
+
+  for (const source of [
+    customerResearch,
+    accountEnrichment,
+    sellerDomainResearch,
+    liveGuidance,
+    liveState,
+    speakerAttribution,
+    realtimeTranscription,
+    callDiarization,
+    postCallOutputs,
+  ]) {
+    assert.match(source, /assertRateLimit/)
+    assert.match(source, /requireUser\(request\)/)
+  }
+
+  assert.match(customerResearch, /name: "customer research"/)
+  assert.match(accountEnrichment, /name: "account enrichment"/)
+  assert.match(sellerDomainResearch, /name: "seller research"/)
+  assert.match(liveGuidance, /name: "live guidance"/)
+  assert.match(liveState, /name: "live state"/)
+  assert.match(speakerAttribution, /name: "speaker attribution"/)
+  assert.match(realtimeTranscription, /name: "realtime transcription setup"/)
+  assert.match(callDiarization, /name: "call diarization"/)
+  assert.match(postCallOutputs, /name: "post-call generation"/)
+  assert.match(smokeChecklist, /Repeated AI requests are throttled with `429`/)
 })
 
 test("environment readiness endpoint requires an authenticated user", async () => {
@@ -118,7 +227,9 @@ test("OpenAI helper supports strict structured output schemas", async () => {
   assert.match(openai, /type: "json_schema"/)
   assert.match(openai, /callOpenAiWebSearchJson/)
   assert.match(openai, /type: "web_search"/)
+  assert.match(openai, /tool_choice: useWebSearch \? "required" : undefined/)
   assert.match(openai, /web_search_call\.action\.sources/)
+  assert.doesNotMatch(openai, /web_search_preview/)
   assert.match(openai, /schemaName/)
   assert.match(openai, /strictSchema/)
   assert.match(openai, /async function readOpenAiPayload/)

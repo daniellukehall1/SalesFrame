@@ -37,6 +37,7 @@ export function LegalDocumentPage({
           <Button
             variant="ghost"
             size="icon-sm"
+            className="size-10 md:size-7"
             aria-label="Toggle theme"
             onClick={() => onDarkModeChange(!darkMode)}
           >
@@ -79,7 +80,13 @@ export function LegalDocumentPage({
               </section>
             ))}
             <div className="rounded-lg bg-muted/40 p-4">
-              <p>For questions about this document, contact {legalContactEmail}.</p>
+              <p>
+                For questions about this document, contact{" "}
+                <a className="font-medium text-foreground underline underline-offset-4" href={`mailto:${legalContactEmail}`}>
+                  {legalContactEmail}
+                </a>
+                .
+              </p>
             </div>
           </CardContent>
         </Card>

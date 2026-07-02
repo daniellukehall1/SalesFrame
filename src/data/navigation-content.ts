@@ -86,9 +86,9 @@ export const sectionCards: Record<string, { kicker: string; title: string; body:
       body: "The product is not just post-call notes. It gives the seller the next best question while the customer is still talking.",
     },
     {
-      kicker: "CRM",
-      title: "CRM sync",
-      body: "Account and opportunity records are structured so CRM writeback can be added cleanly.",
+      kicker: "Records",
+      title: "Clean account context",
+      body: "Account and opportunity data stays consistent across calls, notes, research, and post-call outputs.",
     },
   ],
 }

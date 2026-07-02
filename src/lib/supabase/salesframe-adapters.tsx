@@ -1,7 +1,13 @@
 import { AccountLogoAvatar } from "@/components/account-logo-avatar"
 import type { AccountNavItem } from "@/components/nav-projects"
 import type { WorkspaceNavItem } from "@/components/workspace-switcher"
-import { buildAccountLogoUrl, normalizeAccountLogoDomain, type AccountLogoStatus } from "@/lib/account-logo"
+import {
+  buildAccountLogoFallbackUrl,
+  buildAccountLogoUrl,
+  normalizeAccountLogoDomain,
+  type AccountLogoStatus,
+} from "@/lib/account-logo"
+import { formatCurrencyAmount } from "@/lib/currency-utils"
 import { formatCloseDateValue } from "@/lib/date-utils"
 import { createStarterOpportunity } from "@/lib/record-factories"
 import {
@@ -49,8 +55,8 @@ export function mapWorkspaceRowToNavItem(row: WorkspaceRow): WorkspaceNavItem {
 
 export function mapAccountRowsToNavItems(accounts: AccountRow[], opportunities: OpportunityRow[]) {
   return accounts.map<AccountNavItem>((account) => {
-    const logoDomain = account.logo_domain || normalizeAccountLogoDomain(account.website)
-    const logoUrl = buildAccountLogoUrl(logoDomain) || account.logo_url || ""
+    const logoDomain = normalizeAccountLogoDomain(account.website) || account.logo_domain || ""
+    const logoUrl = account.logo_url || buildAccountLogoUrl(logoDomain) || buildAccountLogoFallbackUrl(logoDomain) || ""
     const logoStatus = ["resolved", "fallback", "missing"].includes(account.logo_status)
       ? account.logo_status as AccountLogoStatus
       : logoDomain
@@ -112,20 +118,25 @@ export function mapAccountRowToDraft(account: AccountRow, ownerName: string): Ac
 }
 
 export function mapOpportunityRowsToDrafts({
+  accounts = [],
   opportunities,
   playbooks,
   playbookAssignments,
   ownerName,
 }: {
+  accounts?: AccountRow[]
   opportunities: OpportunityRow[]
   playbooks: PlaybookRow[]
   playbookAssignments: OpportunityPlaybookRow[]
   ownerName: string
 }) {
+  const accountById = new Map(accounts.map((account) => [account.id, account]))
+
   return Object.fromEntries(
     opportunities.map((opportunity) => [
       opportunity.id,
       mapOpportunityRowToDraft({
+        accountCurrency: accountById.get(opportunity.account_id)?.currency,
         opportunity,
         playbooks,
         playbookAssignments,
@@ -190,11 +201,13 @@ export function mapCallRowsToSummaries(calls: CallRow[]): CallSummary[] {
 }
 
 export function mapOpportunityRowToDraft({
+  accountCurrency,
   opportunity,
   playbooks,
   playbookAssignments,
   ownerName,
 }: {
+  accountCurrency?: string | null
   opportunity: OpportunityRow
   playbooks: PlaybookRow[]
   playbookAssignments: OpportunityPlaybookRow[]
@@ -203,7 +216,7 @@ export function mapOpportunityRowToDraft({
   return {
     opportunityName: opportunity.name,
     stage: opportunity.stage,
-    amount: opportunity.amount ?? "Unqualified",
+    amount: formatCurrencyAmount(opportunity.amount, normalizeCurrencyCode(accountCurrency)),
     closeDate: formatCloseDateValue(opportunity.close_date_note ?? opportunity.close_date),
     owner: ownerName,
     source: opportunity.source ?? "Manual update",

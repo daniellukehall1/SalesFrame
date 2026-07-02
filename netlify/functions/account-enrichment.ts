@@ -5,6 +5,7 @@ import { AppError, badRequest, dataResponse, errorResponse, methodNotAllowed, re
 import { buildAccountLogoMetadata } from "./_shared/account-logo"
 import { callOpenAiWebSearchJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeAccount, requireUser } from "./_shared/supabase"
 
 type AccountEnrichmentPayload = {
@@ -184,7 +185,7 @@ function isMissingRelationError(error: { code?: string; message?: string } | nul
 function missingEnrichmentStorageError() {
   return new AppError(
     "account_enrichment_storage_missing",
-    "Account enrichment is being prepared for this workspace. You can keep using the account record and try enrichment again shortly.",
+    "Customer research is still getting ready for this workspace. Your account is saved, and you can try research again in a moment.",
     503
   )
 }
@@ -395,6 +396,13 @@ export default async function handler(request: Request, _context: Context) {
     if (!accountName) throw badRequest("Account name is required before enrichment.", "account_name_required")
     if (!accountDomain) throw badRequest("Website or domain is required before enrichment.", "account_domain_required")
 
+    assertRateLimit({
+      key: `${user.id}:${authorizedAccount.workspace_id}`,
+      limit: 12,
+      name: "account enrichment",
+      windowMs: 10 * 60 * 1000,
+    })
+
     const [profileStorageCheck, runStorageCheck] = await Promise.all([
       supabase.from("account_enrichment_profiles").select("id").limit(1),
       supabase.from("account_enrichment_runs").select("id").limit(1),
@@ -451,7 +459,7 @@ export default async function handler(request: Request, _context: Context) {
       updatedAccount = data
     }
 
-    const logoMetadata = buildAccountLogoMetadata(updatedAccount.website ?? accountDomain)
+    const logoMetadata = buildAccountLogoMetadata(updatedAccount.website || accountDomain)
     const logoUrlCanBePreserved =
       logoMetadata.logo_domain &&
       logoMetadata.logo_domain === updatedAccount.logo_domain &&

@@ -26,9 +26,16 @@ function useIsMobileLandingViewport() {
     const handleChange = () => setIsMobile(mediaQuery.matches)
 
     handleChange()
-    mediaQuery.addEventListener("change", handleChange)
 
-    return () => mediaQuery.removeEventListener("change", handleChange)
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange)
+
+      return () => mediaQuery.removeEventListener("change", handleChange)
+    }
+
+    mediaQuery.addListener(handleChange)
+
+    return () => mediaQuery.removeListener(handleChange)
   }, [])
 
   return isMobile
@@ -90,6 +97,9 @@ const landingOutlineButtonClass =
 const landingContactButtonClass =
   "landing-action-button landing-contact-button gap-2 border-white/80 bg-white/10 text-white shadow-sm backdrop-blur-sm hover:border-white hover:bg-white hover:text-black focus-visible:border-white focus-visible:ring-white/30 sm:gap-3"
 
+const landingTextButtonClass =
+  "rounded-sm outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-black/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+
 export function MarketingLandingPage({
   onLogin,
   onSignup,
@@ -102,6 +112,7 @@ export function MarketingLandingPage({
   const targetTimeRef = React.useRef(0)
   const seekingRef = React.useRef(false)
   const videoReadyRef = React.useRef(false)
+  const copyResetTimeoutRef = React.useRef<number | null>(null)
   const [actionsVisible, setActionsVisible] = React.useState(false)
   const [copied, setCopied] = React.useState(false)
   const [videoReady, setVideoReady] = React.useState(false)
@@ -161,6 +172,14 @@ export function MarketingLandingPage({
     return () => window.removeEventListener("mousemove", handleMouseMove)
   }, [seekToTarget])
 
+  React.useEffect(() => {
+    return () => {
+      if (copyResetTimeoutRef.current !== null) {
+        window.clearTimeout(copyResetTimeoutRef.current)
+      }
+    }
+  }, [])
+
   const handleLoadedMetadata = () => {
     const video = videoRef.current
 
@@ -191,7 +210,13 @@ export function MarketingLandingPage({
     try {
       await navigator.clipboard.writeText(contactEmail)
       setCopied(true)
-      window.setTimeout(() => setCopied(false), 1800)
+      if (copyResetTimeoutRef.current !== null) {
+        window.clearTimeout(copyResetTimeoutRef.current)
+      }
+      copyResetTimeoutRef.current = window.setTimeout(() => {
+        setCopied(false)
+        copyResetTimeoutRef.current = null
+      }, 1800)
     } catch {
       window.location.href = `mailto:${contactEmail}`
     }
@@ -233,7 +258,7 @@ export function MarketingLandingPage({
       <header className="fixed inset-x-0 top-0 z-10 flex items-center justify-between px-5 py-4 sm:px-8 sm:py-5">
         <button
           type="button"
-          className="flex items-center gap-3 text-left"
+          className={`${landingTextButtonClass} flex items-center gap-3 text-left`}
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         >
           <span className="text-[21px] tracking-tight text-black sm:text-[26px]" style={{ fontFamily: "var(--font-heading)" }}>
@@ -244,7 +269,7 @@ export function MarketingLandingPage({
 
         <button
           type="button"
-          className="text-[17px] text-black underline underline-offset-2 transition-opacity hover:opacity-60 sm:text-[21px] md:text-[23px]"
+          className={`${landingTextButtonClass} text-[17px] text-black underline underline-offset-2 hover:opacity-60 sm:text-[21px] md:text-[23px]`}
           onClick={() => handleContactIntent("SalesFrame enquiry")}
         >
           Get in touch

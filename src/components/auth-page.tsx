@@ -45,31 +45,31 @@ export function AuthPage({
       <section className="hidden border-r bg-sidebar p-8 lg:flex lg:flex-col">
         <div className="flex items-center gap-3">
           <div className="flex size-9 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-            <AudioLinesIcon className="size-4" />
+            <AudioLinesIcon aria-hidden="true" className="size-4" />
           </div>
           <div>
             <p className="font-medium">SalesFrame</p>
-            <p className="text-xs text-muted-foreground">Seller Copilot</p>
+            <p className="text-xs text-muted-foreground">Live call coach</p>
           </div>
         </div>
 
         <div className="mt-auto grid gap-5">
           <div>
             <h1 className="max-w-md text-3xl font-semibold tracking-tight">
-              Real-time sales methodology coaching, scoped by workspace.
+              One calm place for calls, accounts, opportunities, and the next best question.
             </h1>
             <p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">
-              Sign in to access accounts, opportunities, call recordings, settings, and workspace context.
+              SalesFrame keeps the sales method in the background, so the seller can stay present in the conversation.
             </p>
           </div>
           <div className="grid gap-3 text-sm">
             <div className="flex items-center gap-3 rounded-lg border bg-background/50 p-3">
               <TargetIcon className="size-4 text-muted-foreground" />
-              <span>Opportunity and playbook context stay tied to the signed-in seller.</span>
+              <span>Every call starts with the right account, opportunity, and playbook context.</span>
             </div>
             <div className="flex items-center gap-3 rounded-lg border bg-background/50 p-3">
               <ShieldCheckIcon className="size-4 text-muted-foreground" />
-              <span>Secure workspace access keeps account and opportunity data separated.</span>
+              <span>Each workspace keeps its own records, settings, and AI key separate.</span>
             </div>
           </div>
         </div>
@@ -90,11 +90,11 @@ export function AuthPage({
             </Button>
             <div className="hidden items-center gap-3 sm:flex lg:hidden">
               <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <AudioLinesIcon className="size-4" />
+                <AudioLinesIcon aria-hidden="true" className="size-4" />
               </div>
               <div>
                 <p className="text-sm font-medium">SalesFrame</p>
-                <p className="text-xs text-muted-foreground">Seller Copilot</p>
+                <p className="text-xs text-muted-foreground">Live call coach</p>
               </div>
             </div>
           </div>
@@ -102,6 +102,7 @@ export function AuthPage({
             <Button
               variant="ghost"
               size="icon-sm"
+              className="size-10 md:size-7"
               aria-label="Toggle theme"
               onClick={() => onDarkModeChange(!darkMode)}
             >

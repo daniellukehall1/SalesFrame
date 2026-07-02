@@ -60,6 +60,7 @@ import {
 import type { CurrencyCode, Opportunity } from "@/lib/salesframe-core"
 import { requestAccountCsvImport, requestOpportunityCsvImport } from "@/lib/server-functions"
 import type { PlaybookRow } from "@/lib/supabase/salesframe-data"
+import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
 import { cn } from "@/lib/utils"
 
 type CsvImportStep = "upload" | "map" | "validate" | "review" | "summary"
@@ -110,6 +111,8 @@ export function CsvImportDialog({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const fields = getCsvImportFields(mode)
   const progress = getStepProgress(step)
+  const activeStepIndex = Math.max(0, importSteps.findIndex((item) => item.value === step))
+  const currentStep = importSteps[activeStepIndex] ?? importSteps[0]
   const previewRows = React.useMemo(
     () =>
       applyCsvRowDecisions(
@@ -283,7 +286,7 @@ export function CsvImportDialog({
       setStep("summary")
       onImportComplete()
     } catch (error) {
-      setParseMessage(error instanceof Error ? error.message : "CSV import failed.")
+      setParseMessage(getUserFacingErrorMessage(error, "CSV import failed."))
     } finally {
       setIsImporting(false)
     }
@@ -297,8 +300,15 @@ export function CsvImportDialog({
     const link = document.createElement("a")
     link.href = url
     link.download = `${mode}-import-errors.csv`
-    link.click()
-    URL.revokeObjectURL(url)
+    link.style.display = "none"
+    document.body.appendChild(link)
+
+    try {
+      link.click()
+    } finally {
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    }
   }
 
   function resetImportState() {
@@ -319,6 +329,7 @@ export function CsvImportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="grid max-h-[calc(100svh-2rem)] overflow-hidden sm:max-w-4xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
@@ -330,17 +341,21 @@ export function CsvImportDialog({
         </DialogHeader>
 
         <div className="grid gap-3">
-          <Progress value={progress} />
-          <div className="grid grid-cols-5 gap-2">
+          <p className="sr-only" aria-live="polite">
+            Step {activeStepIndex + 1} of {importSteps.length}: {currentStep.label}
+          </p>
+          <Progress value={progress} aria-label={`CSV import progress: ${currentStep.label}`} />
+          <div className="grid grid-cols-5 gap-2" role="list" aria-label="CSV import steps">
             {importSteps.map(({ value, label, icon: Icon }) => {
               const itemIndex = importSteps.findIndex((item) => item.value === value)
-              const activeIndex = importSteps.findIndex((item) => item.value === step)
               const isActive = step === value
-              const isComplete = activeIndex > itemIndex
+              const isComplete = activeStepIndex > itemIndex
 
               return (
                 <div
                   key={value}
+                  role="listitem"
+                  aria-current={isActive ? "step" : undefined}
                   className={cn(
                     "flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-sm",
                     isActive && "border-primary bg-primary/5",
@@ -403,6 +418,7 @@ export function CsvImportDialog({
                       type="button"
                       variant="ghost"
                       size="icon-sm"
+                      className="size-10 md:size-7"
                       aria-label="Remove selected CSV"
                       onClick={clearSelectedFile}
                     >
@@ -435,7 +451,7 @@ export function CsvImportDialog({
                           setMapping((current) => ({ ...current, [header]: value as CsvImportColumnMapping[string] }))
                         }
                       >
-                        <SelectTrigger className="w-full">
+                        <SelectTrigger className="w-full" aria-label={`Map CSV column ${header}`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -530,7 +546,7 @@ export function CsvImportDialog({
                             disabled={hasRowError}
                             onValueChange={(value) => handleDecisionChange(row, value as CsvImportAction)}
                           >
-                            <SelectTrigger className="w-full">
+                            <SelectTrigger className="w-full" aria-label={`Import action for row ${row.rowNumber}`}>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -581,7 +597,7 @@ export function CsvImportDialog({
                 <SummaryTile label="Failed" value={summary.failed} destructive={summary.failed > 0} />
               </div>
               {summary.failures.length ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4" role="alert">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-medium text-destructive">Some rows could not be imported</p>

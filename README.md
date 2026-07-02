@@ -136,6 +136,8 @@ Keep secrets in Netlify and Supabase. Do not commit live secret values to GitHub
 ```bash
 pnpm dev              # Start local Vite app
 pnpm build            # Typecheck and build production assets
+pnpm check            # Run the release gate: secret scan, lint, tests, and production build
+pnpm check:secrets    # Scan tracked files for high-risk committed secrets
 pnpm lint             # Typecheck without building
 pnpm test             # Run all Node test files
 pnpm test:e2e         # Run app contract tests
@@ -200,9 +202,7 @@ The live coach should not invent local fallback questions. If AI is unavailable,
 Run this before deploying meaningful app changes:
 
 ```bash
-pnpm lint
-pnpm test
-pnpm build
+pnpm check
 ```
 
 For UX-sensitive changes, also verify in the browser:
@@ -225,7 +225,7 @@ SalesFrame should feel like a calm sales coach.
 - One clear primary action.
 - No decorative pill labels.
 - Human-voiced empty states.
-- Loading copy that says what is being prepared.
+- Loading copy that explains what is happening now.
 - Error states that offer a recovery path.
 - Toggles only for persistent settings.
 - Buttons for one-time actions.
@@ -242,7 +242,7 @@ More detail lives in:
 For ordinary releases:
 
 1. Make the change.
-2. Run checks.
+2. Run `pnpm check`.
 3. Commit to `main`.
 4. Push to GitHub.
 5. Confirm Netlify deploys the exact commit.

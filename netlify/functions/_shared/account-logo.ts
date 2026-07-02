@@ -35,9 +35,25 @@ export function buildAccountLogoUrl(domain: string | null | undefined) {
   return `https://img.logo.dev/${encodeURIComponent(logoDomain)}?${params.toString()}`
 }
 
+export function buildAccountLogoFallbackUrl(domain: string | null | undefined) {
+  const logoDomain = normalizeAccountLogoDomain(domain)
+  const token = getEnv("VITE_LOGO_DEV_PUBLISHABLE_KEY").trim()
+
+  if (!logoDomain || !token) return ""
+
+  const params = new URLSearchParams({
+    fallback: "404",
+    retina: "true",
+    size: "64",
+    token,
+  })
+
+  return `https://img.logo.dev/${encodeURIComponent(logoDomain)}?${params.toString()}`
+}
+
 export function buildAccountLogoMetadata(website: string | null | undefined) {
   const logoDomain = normalizeAccountLogoDomain(website)
-  const logoUrl = buildAccountLogoUrl(logoDomain)
+  const logoUrl = buildAccountLogoUrl(logoDomain) || buildAccountLogoFallbackUrl(logoDomain)
 
   return {
     logo_checked_at: logoDomain ? new Date().toISOString() : null,

@@ -62,6 +62,7 @@ import {
   normalizeCurrencyCode,
   type CurrencyCode,
 } from "@/lib/salesframe-core"
+import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
 
 export type WorkspaceNavItem = {
   id: string
@@ -75,11 +76,11 @@ export type WorkspaceNavItem = {
 function WorkspaceLogo({ workspace }: { workspace: WorkspaceNavItem }) {
   const Icon = workspace.name.toLowerCase() === "salesframe" ? AudioLinesIcon : Building2Icon
 
-  return <Icon className="size-4" />
+  return <Icon aria-hidden="true" className="size-4" />
 }
 
 function SalesFrameLogo() {
-  return <AudioLinesIcon className="size-4" />
+  return <AudioLinesIcon aria-hidden="true" className="size-4" />
 }
 
 export function WorkspaceSwitcher({
@@ -141,7 +142,7 @@ export function WorkspaceSwitcher({
 
       setEditingWorkspaceId(null)
     } catch (error: unknown) {
-      setStatusMessage(error instanceof Error ? error.message : "Workspace could not be saved.")
+      setStatusMessage(getUserFacingErrorMessage(error, "Workspace could not be saved."))
     } finally {
       setIsSaving(false)
     }
@@ -154,7 +155,7 @@ export function WorkspaceSwitcher({
       const duplicatedWorkspace = await onDuplicateWorkspace(workspace)
       onWorkspaceChange?.(duplicatedWorkspace)
     } catch (error: unknown) {
-      setStatusMessage(error instanceof Error ? error.message : "Workspace could not be duplicated.")
+      setStatusMessage(getUserFacingErrorMessage(error, "Workspace could not be duplicated."))
     }
   }
 
@@ -174,7 +175,7 @@ export function WorkspaceSwitcher({
       }
       setDeletingWorkspaceId(null)
     } catch (error: unknown) {
-      setStatusMessage(error instanceof Error ? error.message : "Workspace could not be deleted.")
+      setStatusMessage(getUserFacingErrorMessage(error, "Workspace could not be deleted."))
     }
   }
 
@@ -190,6 +191,7 @@ export function WorkspaceSwitcher({
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton
                 size="lg"
+                aria-label={`Switch workspace, current workspace ${activeWorkspace.name}`}
                 className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
@@ -345,6 +347,7 @@ function WorkspaceFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="sm:max-w-md"
+        onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
@@ -398,7 +401,7 @@ function WorkspaceFormDialog({
             </Select>
           </div>
           {statusMessage ? (
-            <p className="text-sm text-destructive">{statusMessage}</p>
+            <p className="text-sm text-destructive" aria-live="polite">{statusMessage}</p>
           ) : null}
         </div>
         <DialogFooter>
@@ -430,7 +433,12 @@ function DeleteWorkspaceDialog({
 
   return (
     <Dialog open onOpenChange={(nextOpen) => (!nextOpen ? onCancel() : undefined)}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
             <CircleAlertIcon className="size-5" />

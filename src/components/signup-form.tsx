@@ -17,6 +17,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 
+const authTextButtonClass =
+  "rounded-sm underline underline-offset-4 outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
+
 export type SignupFormValues = {
   name: string
   email: string
@@ -46,6 +49,8 @@ export function SignupForm({
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (isSubmitting) return
+
     onSubmit?.({
       confirmPassword,
       email,
@@ -58,18 +63,20 @@ export function SignupForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">Create your account</CardTitle>
+          <CardTitle className="text-xl">Start selling with SalesFrame</CardTitle>
           <CardDescription>
-            Enter your email below to create your account
+            Set up your login, then we will help you shape the workspace.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit}>
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="signup-name">Full Name</FieldLabel>
+                <FieldLabel htmlFor="signup-name">Full name</FieldLabel>
                 <Input
                   id="signup-name"
+                  autoComplete="name"
+                  name="name"
                   type="text"
                   value={name}
                   placeholder="John Doe"
@@ -81,6 +88,12 @@ export function SignupForm({
                 <FieldLabel htmlFor="signup-email">Email</FieldLabel>
                 <Input
                   id="signup-email"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  inputMode="email"
+                  name="email"
+                  spellCheck={false}
                   type="email"
                   value={email}
                   placeholder="m@example.com"
@@ -89,11 +102,17 @@ export function SignupForm({
                 />
               </Field>
               <Field>
-                <Field className="grid grid-cols-2 gap-4">
+                <Field className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="signup-password">Password</FieldLabel>
                     <Input
                       id="signup-password"
+                      autoComplete="new-password"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      minLength={8}
+                      name="password"
+                      spellCheck={false}
                       type="password"
                       value={password}
                       required
@@ -106,6 +125,12 @@ export function SignupForm({
                     </FieldLabel>
                     <Input
                       id="signup-confirm-password"
+                      autoComplete="new-password"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      minLength={8}
+                      name="confirmPassword"
+                      spellCheck={false}
                       type="password"
                       value={confirmPassword}
                       required
@@ -119,10 +144,10 @@ export function SignupForm({
               </Field>
               <Field>
                 <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? "Creating account..." : "Create Account"}
+                  {isSubmitting ? "Creating your account..." : "Create account"}
                 </Button>
                 {statusMessage ? (
-                  <FieldDescription className="text-center" aria-live="polite">
+                  <FieldDescription className="text-center" aria-live="polite" role="status">
                     {statusMessage}
                   </FieldDescription>
                 ) : null}
@@ -130,7 +155,8 @@ export function SignupForm({
                   Already have an account?{" "}
                   <button
                     type="button"
-                    className="underline underline-offset-4 hover:text-primary"
+                    className={authTextButtonClass}
+                    disabled={isSubmitting}
                     onClick={onSwitchToLogin}
                   >
                     Sign in
@@ -142,10 +168,11 @@ export function SignupForm({
         </CardContent>
       </Card>
       <FieldDescription className="px-6 text-center">
-        By clicking continue, you agree to our{" "}
+        By creating an account, you agree to our{" "}
         <button
           type="button"
-          className="underline underline-offset-4 hover:text-primary"
+          className={authTextButtonClass}
+          disabled={isSubmitting}
           onClick={() => onLegalClick?.("terms")}
         >
           Terms of Service
@@ -153,7 +180,8 @@ export function SignupForm({
         and{" "}
         <button
           type="button"
-          className="underline underline-offset-4 hover:text-primary"
+          className={authTextButtonClass}
+          disabled={isSubmitting}
           onClick={() => onLegalClick?.("privacy")}
         >
           Privacy Policy

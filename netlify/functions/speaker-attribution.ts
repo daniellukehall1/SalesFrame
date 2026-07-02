@@ -4,6 +4,7 @@ import { getEnv } from "./_shared/env"
 import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeCall, requireUser } from "./_shared/supabase"
 
 type SpeakerLabel =
@@ -152,6 +153,12 @@ export default async (request: Request, _context: Context) => {
 
     const { supabase, user } = await requireUser(request)
     const call = await authorizeCall(user.id, payload.callId)
+    assertRateLimit({
+      key: `${user.id}:${call.id}`,
+      limit: 240,
+      name: "speaker attribution",
+      windowMs: 60 * 1000,
+    })
     const apiKey = await getDecryptedOpenAiKey(supabase, user.id, call.workspace_id)
 
     const attribution = assertSpeakerAttributionResult(

@@ -4,6 +4,7 @@ import { getEnv } from "./_shared/env"
 import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeCall, requireUser } from "./_shared/supabase"
 
 type PostCallPayload = {
@@ -377,6 +378,12 @@ export default async (request: Request, _context: Context) => {
 
     const { supabase, user } = await requireUser(request)
     const authorizedCall = await authorizeCall(user.id, payload.callId)
+    assertRateLimit({
+      key: `${user.id}:${authorizedCall.id}`,
+      limit: 10,
+      name: "post-call generation",
+      windowMs: 10 * 60 * 1000,
+    })
 
     const apiKey = await getDecryptedOpenAiKey(supabase, user.id, authorizedCall.workspace_id)
 

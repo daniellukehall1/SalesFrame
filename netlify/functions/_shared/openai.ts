@@ -79,7 +79,15 @@ export async function callOpenAiJson<T>({
               type: "json_object",
             },
       },
-      tools: useWebSearch ? [{ type: "web_search_preview" }] : undefined,
+      tool_choice: useWebSearch ? "required" : undefined,
+      tools: useWebSearch
+        ? [
+            {
+              type: "web_search",
+              search_context_size: "medium",
+            },
+          ]
+        : undefined,
     }),
   })
 

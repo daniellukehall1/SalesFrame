@@ -17,6 +17,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 
+const authTextButtonClass =
+  "rounded-sm underline underline-offset-4 outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
+
 export type LoginFormValues = {
   email: string
   password: string
@@ -42,6 +45,8 @@ export function LoginForm({
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (isSubmitting) return
+
     onSubmit?.({
       email,
       password,
@@ -52,9 +57,9 @@ export function LoginForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle>Login to your account</CardTitle>
+          <CardTitle>Welcome back</CardTitle>
           <CardDescription>
-            Enter your email below to login to your account
+            Pick up where the last conversation left off.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -64,6 +69,12 @@ export function LoginForm({
                 <FieldLabel htmlFor="login-email">Email</FieldLabel>
                 <Input
                   id="login-email"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  inputMode="email"
+                  name="email"
+                  spellCheck={false}
                   type="email"
                   value={email}
                   placeholder="m@example.com"
@@ -76,7 +87,8 @@ export function LoginForm({
                   <FieldLabel htmlFor="login-password">Password</FieldLabel>
                   <button
                     type="button"
-                    className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
+                    className={cn(authTextButtonClass, "ml-auto inline-block text-sm")}
+                    disabled={isSubmitting}
                     onClick={() => onForgotPassword?.(email)}
                   >
                     Forgot your password?
@@ -84,6 +96,12 @@ export function LoginForm({
                 </div>
                 <Input
                   id="login-password"
+                  autoComplete="current-password"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  minLength={8}
+                  name="password"
+                  spellCheck={false}
                   type="password"
                   value={password}
                   required
@@ -92,10 +110,10 @@ export function LoginForm({
               </Field>
               <Field>
                 <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? "Logging in..." : "Login"}
+                  {isSubmitting ? "Opening SalesFrame..." : "Log in"}
                 </Button>
                 {statusMessage ? (
-                  <FieldDescription className="text-center" aria-live="polite">
+                  <FieldDescription className="text-center" aria-live="polite" role="status">
                     {statusMessage}
                   </FieldDescription>
                 ) : null}
@@ -103,7 +121,8 @@ export function LoginForm({
                   Don&apos;t have an account?{" "}
                   <button
                     type="button"
-                    className="underline underline-offset-4 hover:text-primary"
+                    className={authTextButtonClass}
+                    disabled={isSubmitting}
                     onClick={onSwitchToSignup}
                   >
                     Sign up

@@ -29,7 +29,9 @@ export class AppErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error("SalesFrame render error", error, info)
+    if (import.meta.env.DEV) {
+      console.error("SalesFrame render error", error, info)
+    }
   }
 
   handleReload = () => {
@@ -46,7 +48,7 @@ export class AppErrorBoundary extends React.Component<
             <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
               <CircleAlertIcon className="size-5" />
             </div>
-            <CardDescription>Recovery state</CardDescription>
+            <CardDescription>Let&apos;s get you back in</CardDescription>
             <CardTitle>SalesFrame needs to reload this workspace</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4">

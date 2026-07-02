@@ -45,9 +45,34 @@ export function buildAccountLogoUrl(
   return `https://img.logo.dev/${encodeURIComponent(normalizedDomain)}?${params.toString()}`
 }
 
+export function buildAccountLogoFallbackUrl(
+  domain: string | null | undefined,
+  {
+    size = 64,
+    token = getLogoDevPublishableKey(),
+  }: {
+    size?: number
+    token?: string
+  } = {}
+) {
+  const normalizedDomain = normalizeAccountLogoDomain(domain)
+  const normalizedToken = token.trim()
+
+  if (!normalizedDomain || !normalizedToken) return ""
+
+  const params = new URLSearchParams({
+    fallback: "404",
+    retina: "true",
+    size: String(size),
+    token: normalizedToken,
+  })
+
+  return `https://img.logo.dev/${encodeURIComponent(normalizedDomain)}?${params.toString()}`
+}
+
 export function buildAccountLogoMetadata(website: string | null | undefined) {
   const logoDomain = normalizeAccountLogoDomain(website)
-  const logoUrl = buildAccountLogoUrl(logoDomain)
+  const logoUrl = buildAccountLogoUrl(logoDomain) || buildAccountLogoFallbackUrl(logoDomain)
 
   return {
     logo_checked_at: logoDomain ? new Date().toISOString() : null,

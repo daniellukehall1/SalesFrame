@@ -6,6 +6,7 @@ import { getEnv } from "./_shared/env"
 import { badRequest, dataResponse, errorResponse, forbidden, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeAccount, authorizeCall, authorizeOpportunity, requireUser } from "./_shared/supabase"
 
 type TranscriptLine = {
@@ -1375,6 +1376,13 @@ export default async (request: Request, _context: Context) => {
     if (authorizedOpportunity.account_id !== authorizedAccount.id) {
       throw forbidden("Opportunity does not belong to this account.")
     }
+
+    assertRateLimit({
+      key: `${user.id}:${authorizedCall.id}`,
+      limit: 90,
+      name: "live guidance",
+      windowMs: 60 * 1000,
+    })
 
     const apiKey = await getDecryptedOpenAiKey(supabase, user.id, authorizedCall.workspace_id)
     const selectedPlaybooks = Array.isArray(payload.playbooks)

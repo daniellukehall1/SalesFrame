@@ -158,7 +158,9 @@ export function NavProjects({
           {expandableAccountIds.length ? (
             <button
               type="button"
-              className="rounded px-1.5 py-0.5 text-[11px] font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+              aria-expanded={allAccountsExpanded}
+              aria-label={allAccountsExpanded ? "Collapse all account opportunities" : "Expand all account opportunities"}
+              className="inline-flex h-7 items-center rounded-md px-2 text-[11px] font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
               onClick={handleToggleAllAccounts}
             >
               {allAccountsExpanded ? "Collapse all" : "Expand all"}
@@ -166,7 +168,7 @@ export function NavProjects({
           ) : null}
           <button
             type="button"
-            className="flex size-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+            className="flex size-7 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
             title="Create account"
             onClick={onCreateAccount}
           >
@@ -175,7 +177,7 @@ export function NavProjects({
           </button>
         </span>
       </SidebarGroupLabel>
-      <SidebarMenu>
+      <SidebarMenu className="pb-4">
         {sortedAccounts.map((account) => (
           <Collapsible
             key={account.id}

@@ -4,6 +4,7 @@ import { getEnv } from "./_shared/env"
 import { badRequest, dataResponse, errorResponse, forbidden, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeAccount, authorizeCall, authorizeOpportunity, requireUser } from "./_shared/supabase"
 
 type CustomerResearchPayload = {
@@ -160,6 +161,13 @@ export default async (request: Request, _context: Context) => {
     if (authorizedCall && payload.opportunityId && authorizedCall.opportunity_id !== payload.opportunityId) {
       throw forbidden("Call does not belong to this opportunity.")
     }
+
+    assertRateLimit({
+      key: `${user.id}:${authorizedAccount.workspace_id}`,
+      limit: 12,
+      name: "customer research",
+      windowMs: 10 * 60 * 1000,
+    })
 
     const apiKey = await getDecryptedOpenAiKey(supabase, user.id, authorizedAccount.workspace_id)
     const { data: account, error: accountError } = await supabase

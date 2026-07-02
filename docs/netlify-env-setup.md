@@ -8,6 +8,7 @@ SalesFrame uses browser-safe Supabase variables in the Vite app and server-only 
 | --- | --- | --- | --- |
 | `VITE_SUPABASE_URL` | Browser + Functions | Supabase project settings | Safe to expose to the browser. |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Browser + Functions | Supabase project API settings | Safe to expose to the browser. |
+| `VITE_LOGO_DEV_PUBLISHABLE_KEY` | Browser + Functions | Logo.dev publishable key | Safe to expose. Set for both Builds and Functions so account enrichment can save logo metadata and the browser can render it. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Functions only | Supabase project API settings | Secret. Never add a `VITE_` prefix. |
 | `OPENAI_KEY_ENCRYPTION_SECRET` | Functions only | Generated app secret | Secret used to encrypt each seller's OpenAI key before storing it. |
 
@@ -24,7 +25,10 @@ If the site does not exist yet, create it in Netlify first, then link the local 
 ```bash
 netlify env:set VITE_SUPABASE_URL "https://iuwjjxjicnorxlxzepup.supabase.co"
 netlify env:set VITE_SUPABASE_PUBLISHABLE_KEY "sb_publishable_miosbt6oQM8gT-IPp32u3Q_2_9yEzaP"
+netlify env:set VITE_LOGO_DEV_PUBLISHABLE_KEY "<logo-dev-publishable-key>"
 ```
+
+When configuring this in the Netlify UI, include both `Builds` and `Functions` scopes. Vite compiles it into the browser bundle at build time, and Netlify Functions use it when account enrichment refreshes account logo metadata. Logo images are requested without a referrer in V1 because some publishable Logo.dev keys return `404` when the browser sends a local or production origin that has not been explicitly allowlisted.
 
 ## Server Secrets
 
@@ -65,6 +69,7 @@ netlify env:set OPENAI_RESEARCH_WEB_SEARCH "true"
 ```bash
 VITE_SUPABASE_URL=https://iuwjjxjicnorxlxzepup.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_miosbt6oQM8gT-IPp32u3Q_2_9yEzaP
+VITE_LOGO_DEV_PUBLISHABLE_KEY=<logo-dev-publishable-key>
 SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-key>
 OPENAI_KEY_ENCRYPTION_SECRET=<generated-secret>
 ```

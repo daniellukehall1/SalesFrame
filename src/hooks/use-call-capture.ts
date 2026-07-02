@@ -28,6 +28,7 @@ import {
   uploadCallRecording,
 } from "@/lib/supabase/salesframe-data"
 import type { CallAudioCaptureMode, TranscriptSpeaker } from "@/lib/salesframe-core"
+import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
 import {
   appendTranscriptDelta,
   canContinueTranscriptTurn,
@@ -390,9 +391,7 @@ export function useCallCapture() {
               source,
             }).catch((caughtError) => {
               config.onNote?.(
-                `Speaker attribution needs review: ${
-                  caughtError instanceof Error ? caughtError.message : "model refinement failed"
-                }`
+                `Speaker attribution needs review: ${getUserFacingErrorMessage(caughtError, "SalesFrame could not refine this speaker label yet.")}`
               )
             })
           }
@@ -416,11 +415,7 @@ export function useCallCapture() {
                 if (isRecoverableTranscriptDuplicateError(caughtError)) return
 
                 setStatus("error")
-                setError(
-                  caughtError instanceof Error
-                    ? caughtError.message
-                    : "Transcript could not be saved."
-                )
+                setError(getUserFacingErrorMessage(caughtError, "Transcript could not be saved."))
               },
               onTranscriptEvent: (event) => persistTranscriptEvent(event, source),
               sourceKind: source.kind,
@@ -431,7 +426,7 @@ export function useCallCapture() {
             if (connections.length === 0 && sources.length === 1) throw caughtError
             config.onNote?.(
               `${getAudioSourceLabel(source.kind)} transcription could not connect. ${
-                caughtError instanceof Error ? caughtError.message : "Continuing with available audio."
+                getUserFacingErrorMessage(caughtError, "Continuing with available audio.")
               }`
             )
           }
@@ -447,7 +442,7 @@ export function useCallCapture() {
         setStatus("recording")
       } catch (caughtError: unknown) {
         cleanup()
-        const message = caughtError instanceof Error ? caughtError.message : "Call capture could not start."
+        const message = getUserFacingErrorMessage(caughtError, "Call capture could not start.")
 
         if (isCaptureUnavailableError(caughtError)) {
           setPermissionState("capture-unavailable")
@@ -515,9 +510,7 @@ export function useCallCapture() {
         } catch (caughtError: unknown) {
           uploadFailed = true
           setStatus("upload-failed")
-          setError(
-            caughtError instanceof Error ? caughtError.message : "Recording upload failed."
-          )
+          setError(getUserFacingErrorMessage(caughtError, "Recording upload failed."))
         }
       }
 
@@ -536,7 +529,7 @@ export function useCallCapture() {
     } catch (caughtError: unknown) {
       cleanup()
       setStatus("error")
-      setError(caughtError instanceof Error ? caughtError.message : "Call capture could not stop.")
+      setError(getUserFacingErrorMessage(caughtError, "Call capture could not stop."))
       throw caughtError
     }
   }, [cleanup])
@@ -682,9 +675,7 @@ async function sendRollingDiarizationChunk({
   } catch (caughtError: unknown) {
     if (force) {
       config.onNote?.(
-        `Speaker diarization needs attention: ${
-          caughtError instanceof Error ? caughtError.message : "OpenAI could not process the rolling audio window."
-        }`
+        `Speaker diarization needs attention: ${getUserFacingErrorMessage(caughtError, "OpenAI could not process the rolling audio window.")}`
       )
     }
   } finally {

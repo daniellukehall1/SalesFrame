@@ -3,6 +3,7 @@ import type { Config, Context } from "@netlify/functions"
 import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson } from "./_shared/http"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { createRealtimeTranscriptionSession } from "./_shared/openai"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeCall, requireUser } from "./_shared/supabase"
 
 type RealtimePayload = {
@@ -22,6 +23,12 @@ export default async (request: Request, _context: Context) => {
 
     const { supabase, user } = await requireUser(request)
     const call = await authorizeCall(user.id, payload.callId)
+    assertRateLimit({
+      key: `${user.id}:${call.id}`,
+      limit: 20,
+      name: "realtime transcription setup",
+      windowMs: 10 * 60 * 1000,
+    })
 
     const apiKey = await getDecryptedOpenAiKey(supabase, user.id, call.workspace_id)
     const session = await createRealtimeTranscriptionSession(apiKey, {

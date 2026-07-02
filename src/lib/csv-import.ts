@@ -351,8 +351,14 @@ export function resolveImportCurrency(value: string | null | undefined, fallback
   const raw = normalizeImportText(value)
   if (!raw) return fallback
 
-  const normalized = normalizeCurrencyCode(raw)
-  return currencyOptions.includes(raw.toUpperCase() as CurrencyCode) ? normalized : fallback
+  return isSupportedImportCurrency(raw) ? normalizeCurrencyCode(raw) : fallback
+}
+
+export function isSupportedImportCurrency(value: string | null | undefined) {
+  const raw = normalizeImportText(value)
+  if (!raw) return false
+
+  return currencyOptions.includes(raw.toUpperCase() as CurrencyCode)
 }
 
 export function buildCsvImportPreview({
@@ -468,8 +474,7 @@ export function buildCsvImportPreview({
     }
 
     if (values.currency) {
-      const normalizedCurrency = normalizeCurrencyCode(values.currency)
-      if (normalizedCurrency !== values.currency.toUpperCase()) {
+      if (!isSupportedImportCurrency(values.currency)) {
         issues.push({
           field: "currency",
           message: `Currency "${values.currency}" is not supported; ${defaultCurrency} will be used.`,
@@ -543,8 +548,14 @@ export function makeFailedRowsCsv(summary: CsvImportSummary) {
 }
 
 function escapeCsvCell(value: string) {
-  if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`
-  return value
+  const safeValue = neutralizeSpreadsheetFormula(value)
+
+  if (/[",\n\r]/.test(safeValue)) return `"${safeValue.replace(/"/g, '""')}"`
+  return safeValue
+}
+
+function neutralizeSpreadsheetFormula(value: string) {
+  return /^[\s]*[=+\-@]/.test(value) ? `'${value}` : value
 }
 
 function findAccountMatch(

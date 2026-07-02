@@ -92,7 +92,7 @@ Add the deal you are working on, then SalesFrame can track the playbook gaps as 
 
 ### Loading States
 
-Loading states should explain what is being prepared. Avoid generic spinners where the user is waiting on meaningful setup.
+Loading states should explain what is happening now. Avoid generic spinners where the user is waiting on meaningful setup.
 
 Structure:
 

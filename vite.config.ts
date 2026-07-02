@@ -70,9 +70,17 @@ export default defineConfig(({ mode }) => {
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined
-          if (id.includes("react")) return "react"
+          if (
+            id.includes("lucide-react") ||
+            id.includes("radix-ui") ||
+            id.includes("react-day-picker")
+          ) return "ui"
           if (id.includes("@supabase")) return "supabase"
-          if (id.includes("lucide-react") || id.includes("radix-ui")) return "ui"
+          if (
+            id.includes("/node_modules/react/") ||
+            id.includes("/node_modules/react-dom/") ||
+            id.includes("/node_modules/scheduler/")
+          ) return "react"
 
           return "vendor"
         },

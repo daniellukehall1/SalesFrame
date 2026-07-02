@@ -14,6 +14,7 @@ import {
   type SellerResearchProfileRow,
   type WorkspaceRow,
 } from "@/lib/supabase/salesframe-data"
+import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
 
 type QueryState<T> = {
   data: T | null
@@ -53,7 +54,7 @@ function useSupabaseQuery<T>(
       .catch((caughtError: unknown) => {
         if (cancelled) return
 
-        setError(caughtError instanceof Error ? caughtError.message : "Something went wrong.")
+        setError(getUserFacingErrorMessage(caughtError, "SalesFrame could not load this data. Try again in a moment."))
       })
       .finally(() => {
         if (cancelled) return

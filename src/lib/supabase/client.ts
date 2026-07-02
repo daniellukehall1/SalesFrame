@@ -11,7 +11,7 @@ export function createClient() {
   const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 
   if (!supabaseUrl || !supabasePublishableKey) {
-    throw new Error("Missing Supabase environment variables.")
+    throw new Error("SalesFrame could not connect to the workspace service. Contact support if this keeps happening.")
   }
 
   client = createBrowserClient<Database>(supabaseUrl, supabasePublishableKey)

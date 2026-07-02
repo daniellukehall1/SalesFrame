@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 
 import { createClient } from "@/lib/supabase/client"
 import type { Database, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types"
+import { buildAccountLogoMetadata } from "@/lib/account-logo"
 
 export type SalesFrameClient = SupabaseClient<Database>
 
@@ -43,6 +44,21 @@ function requireData<T>({ data, error }: SupabaseResponse<T>, missingMessage: st
   return data
 }
 
+function applyAccountLogoMetadata<T extends TablesInsert<"accounts"> | TablesUpdate<"accounts">>(values: T): T {
+  if (!("website" in values)) return values
+
+  const logoMetadata = buildAccountLogoMetadata(values.website)
+
+  return {
+    ...values,
+    logo_checked_at: values.logo_checked_at ?? logoMetadata.logo_checked_at,
+    logo_domain: values.logo_domain ?? logoMetadata.logo_domain,
+    logo_source: values.logo_source ?? logoMetadata.logo_source,
+    logo_status: values.logo_status ?? logoMetadata.logo_status,
+    logo_url: values.logo_url ?? logoMetadata.logo_url,
+  }
+}
+
 function isMissingRelationError(error: SupabaseResponse<unknown>["error"]) {
   if (!error) return false
 
@@ -52,7 +68,7 @@ function isMissingRelationError(error: SupabaseResponse<unknown>["error"]) {
 }
 
 function missingAccountEnrichmentStorageMessage() {
-  return "Account enrichment is being prepared for this workspace. You can keep using the account record and try enrichment again shortly."
+  return "Customer research is still getting ready for this workspace. Your account is saved, and you can try research again in a moment."
 }
 
 export async function getCurrentUserProfile(client?: SalesFrameClient) {
@@ -185,9 +201,10 @@ export async function listWorkspaceAccounts(workspaceId: string, client?: SalesF
 }
 
 export async function createAccount(values: TablesInsert<"accounts">, client?: SalesFrameClient) {
+  const accountValues = applyAccountLogoMetadata(values)
   const response = await getSupabase(client)
     .from("accounts")
-    .insert(values)
+    .insert(accountValues)
     .select("*")
     .single()
 
@@ -199,9 +216,10 @@ export async function updateAccount(
   values: TablesUpdate<"accounts">,
   client?: SalesFrameClient
 ) {
+  const accountValues = applyAccountLogoMetadata(values)
   const response = await getSupabase(client)
     .from("accounts")
-    .update(values)
+    .update(accountValues)
     .eq("id", accountId)
     .select("*")
     .single()

@@ -48,11 +48,9 @@ import {
 
 import { AppSidebar } from "@/components/app-sidebar"
 import { AccountLogoAvatar } from "@/components/account-logo-avatar"
-import { AuthPage, type AuthMode } from "@/components/auth-page"
+import type { AuthMode } from "@/components/auth-page"
 import { CsvImportDialog } from "@/components/csv-import-dialog"
-import { LegalDocumentPage } from "@/components/legal-document-page"
 import type { LoginFormValues } from "@/components/login-form"
-import { MarketingLandingPage } from "@/components/marketing-landing-page"
 import { type AccountNavItem } from "@/components/nav-projects"
 import type { SignupFormValues } from "@/components/signup-form"
 import type { WorkspaceNavItem } from "@/components/workspace-switcher"
@@ -126,7 +124,7 @@ import {
   playbooks,
   prepChecklist,
   riskSignals,
-} from "@/data/mock-data"
+} from "@/data/playbook-reference-data"
 import type { LegalPageId } from "@/data/legal-documents"
 import {
   useCallCapture,
@@ -139,6 +137,7 @@ import { sectionCards, viewLabels } from "@/data/navigation-content"
 import { formatCurrencyAmount } from "@/lib/currency-utils"
 import type { CsvImportType } from "@/lib/csv-import"
 import { normalizeCloseDateForPersistence } from "@/lib/date-utils"
+import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
 import { createClient } from "@/lib/supabase/client"
 import {
   deleteOpenAiKey,
@@ -277,6 +276,16 @@ import {
   type WorkspaceDataState,
 } from "@/lib/salesframe-core"
 import { cn } from "@/lib/utils"
+
+const AuthPage = React.lazy(() =>
+  import("@/components/auth-page").then((module) => ({ default: module.AuthPage }))
+)
+const LegalDocumentPage = React.lazy(() =>
+  import("@/components/legal-document-page").then((module) => ({ default: module.LegalDocumentPage }))
+)
+const MarketingLandingPage = React.lazy(() =>
+  import("@/components/marketing-landing-page").then((module) => ({ default: module.MarketingLandingPage }))
+)
 
 type PersonalAccountProfile = {
   avatarUrl: string
@@ -430,6 +439,42 @@ function getAuthRedirectUrl(path: "/login" | "/signup" = "/login") {
   if (typeof window === "undefined") return path
 
   return new URL(path, window.location.origin).toString()
+}
+
+function PublicRouteFallback({
+  darkMode,
+  surface = "app",
+}: {
+  darkMode: boolean
+  surface?: "app" | "landing"
+}) {
+  const isLanding = surface === "landing"
+
+  return (
+    <main
+      className={cn(
+        "grid min-h-svh place-items-center px-6 text-center",
+        isLanding
+          ? "bg-black text-white"
+          : "bg-background text-foreground"
+      )}
+    >
+      <div className="grid justify-items-center gap-3">
+        <span
+          className={cn(
+            "flex size-11 items-center justify-center rounded-xl",
+            isLanding || darkMode ? "bg-white text-black" : "bg-black text-white"
+          )}
+          aria-hidden="true"
+        >
+          <AudioLinesIcon aria-hidden="true" className="size-5" />
+        </span>
+        <p className={cn("text-sm", isLanding ? "text-white/70" : "text-muted-foreground")}>
+          SalesFrame is getting things ready.
+        </p>
+      </div>
+    </main>
+  )
 }
 
 type HeaderBreadcrumbItem = {
@@ -1559,11 +1604,11 @@ function getCallDisplayDuration(call: CallSummary, liveCallId: string) {
   return "Interrupted"
 }
 
-function getCallStatusBadgeVariant(status: string) {
-  if (status === "Interrupted" || status === "Needs Attention") return "destructive"
-  if (status === "Recording" || status === "Processing") return "secondary"
+function getCallStatusTextClassName(status: string) {
+  if (status === "Interrupted" || status === "Needs Attention") return "text-destructive"
+  if (status === "Recording" || status === "Processing") return "text-muted-foreground"
 
-  return "outline"
+  return "text-muted-foreground"
 }
 
 function getCallDurationSeconds(call: CallSummary) {
@@ -1811,10 +1856,14 @@ function downloadTranscriptFile(call: CallSummary, transcript: Opportunity["tran
 
   link.href = url
   link.download = `salesframe-transcript-${sanitizeTranscriptDownloadFileName(call.title)}.txt`
+  link.style.display = "none"
   document.body.appendChild(link)
-  link.click()
-  link.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  try {
+    link.click()
+  } finally {
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
 }
 
 function getLatestReplayableCallForOpportunity({
@@ -2024,7 +2073,7 @@ function App() {
       if (!mounted) return
 
       if (error) {
-        setAuthStatusMessage(error.message)
+        setAuthStatusMessage(getUserFacingErrorMessage(error, "Session could not be restored. Sign in again to continue."))
       }
 
       setAuthSession(data.session?.user ? createAuthSessionFromUser(data.session.user) : null)
@@ -2105,7 +2154,7 @@ function App() {
 
         setSavedOpenAiKeyState(null)
         setOpenAiKeyStatusMessage(
-          caughtError instanceof Error ? caughtError.message : "OpenAI key status could not be loaded."
+          getUserFacingErrorMessage(caughtError, "OpenAI key status could not be loaded.")
         )
       })
 
@@ -2232,7 +2281,7 @@ function App() {
       } catch (caughtError: unknown) {
         if (cancelled) return
 
-        setWorkspaceErrorMessage(caughtError instanceof Error ? caughtError.message : "Workspaces could not be loaded.")
+        setWorkspaceErrorMessage(getUserFacingErrorMessage(caughtError, "Workspaces could not be loaded."))
         setWorkspaceDataState("error")
       }
     }
@@ -2318,6 +2367,7 @@ function App() {
       setAccountDrafts(mapAccountRowsToDrafts(accountRows, personalAccountProfile.fullName))
       setOpportunityDrafts(
         mapOpportunityRowsToDrafts({
+          accounts: accountRows,
           opportunities: opportunityRows,
           playbooks: playbookRows,
           playbookAssignments,
@@ -2348,7 +2398,7 @@ function App() {
       workspaceDataStateRef.current = nextDataState
       setWorkspaceDataState(nextDataState)
     } catch (caughtError: unknown) {
-      const message = caughtError instanceof Error ? caughtError.message : "Workspace data could not be loaded."
+      const message = getUserFacingErrorMessage(caughtError, "Workspace data could not be loaded.")
 
       setWorkspaceErrorMessage(message)
       if (canPreserveCurrentWorkspace) {
@@ -2377,7 +2427,7 @@ function App() {
       seller_domain: sellerResearchProfile.sellerDomain,
       product_context: sellerResearchProfile.productContext,
     }).catch((error: unknown) => {
-      setWorkspaceErrorMessage(error instanceof Error ? error.message : "Seller research settings could not be saved.")
+      setWorkspaceErrorMessage(getUserFacingErrorMessage(error, "Seller research settings could not be saved."))
     })
   }, [activeWorkspaceId, authSession, sellerResearchProfile])
 
@@ -2498,9 +2548,7 @@ function App() {
       target: signal.target,
     }).catch((caughtError: unknown) => {
       setNotes((items) => [
-        `Coach feedback could not be saved: ${
-          caughtError instanceof Error ? caughtError.message : "unknown error"
-        }`,
+        `Coach feedback could not be saved: ${getUserFacingErrorMessage(caughtError, "SalesFrame could not save that coach signal yet.")}`,
         ...items,
       ].slice(0, 6))
     })
@@ -2732,7 +2780,7 @@ function App() {
       }
     } catch (caughtError: unknown) {
       return {
-        message: caughtError instanceof Error ? caughtError.message : "Record could not be deleted.",
+        message: getUserFacingErrorMessage(caughtError, "Record could not be deleted."),
         ok: false,
       }
     }
@@ -2785,8 +2833,8 @@ function App() {
       }))
       setWorkspaceRefreshToken((value) => value + 1)
     } catch (caughtError: unknown) {
-      setPostCallError(caughtError instanceof Error ? caughtError.message : "Post-call outputs could not be created.")
-      setWorkspaceErrorMessage(caughtError instanceof Error ? caughtError.message : "Call could not be stopped.")
+      setPostCallError(getUserFacingErrorMessage(caughtError, "Post-call outputs could not be created."))
+      setWorkspaceErrorMessage(getUserFacingErrorMessage(caughtError, "Call could not be stopped."))
     } finally {
       setPostCallGenerating(false)
     }
@@ -2859,7 +2907,7 @@ function App() {
       })
     } catch (caughtError: unknown) {
       setWorkspaceErrorMessage(
-        caughtError instanceof Error ? caughtError.message : "Speaker label could not be saved."
+        getUserFacingErrorMessage(caughtError, "Speaker label could not be saved.")
       )
     }
   }
@@ -2975,7 +3023,7 @@ function App() {
         persistence: "saved",
       }
     } catch (caughtError: unknown) {
-      const message = caughtError instanceof Error ? caughtError.message : "Speaker identity could not be saved."
+      const message = getUserFacingErrorMessage(caughtError, "Speaker identity could not be saved.")
       setNotes((items) => [`Speaker name was applied locally, but could not be saved yet: ${message}`, ...items].slice(0, 6))
 
       return {
@@ -3076,6 +3124,9 @@ function App() {
     const accountName = isNewAccount
       ? payload.accountName.trim() || "New account"
       : workspaceAccounts.find((account) => account.id === accountId)?.name ?? "Selected account"
+    const accountWebsite = isNewAccount
+      ? normalizeSellerDomain(payload.accountWebsite)
+      : workspaceAccounts.find((account) => account.id === accountId)?.website ?? ""
     const accountIndustry = isNewAccount
       ? payload.accountIndustry.trim() || "New account"
       : workspaceAccounts.find((account) => account.id === accountId)?.description ?? "Existing account"
@@ -3091,16 +3142,15 @@ function App() {
       }
 
       if (isNewAccount) {
-        const normalizedWebsite = ""
         const account = await createSupabaseAccount({
           workspace_id: activeWorkspaceId,
           name: accountName,
-          website: normalizedWebsite || null,
+          website: accountWebsite || null,
           industry: accountIndustry,
           region: "Australia",
           currency: normalizeCurrencyCode(payload.accountCurrency),
           notes: "Created from the start call flow.",
-          ...buildAccountLogoMetadata(normalizedWebsite),
+          ...buildAccountLogoMetadata(accountWebsite),
         })
 
         accountId = account.id
@@ -3188,7 +3238,7 @@ function App() {
       })
       const initialGuidance = mapAiLiveGuidanceResponse(initialGuidanceResponse)
       if (!initialGuidance) {
-        throw new Error("AI guidance returned an incomplete first recommendation. Check OpenAI settings before starting the call.")
+        throw new Error("SalesFrame could not prepare the first question. Check your OpenAI key, then try again.")
       }
       await updateSupabaseCall(call.id, {
         guidance_readiness: {
@@ -3285,6 +3335,7 @@ function App() {
         setOpportunityDrafts((drafts) => ({
           ...drafts,
           [opportunityRow.id]: mapOpportunityRowToDraft({
+            accountCurrency: normalizeCurrencyCode(payload.accountCurrency),
             opportunity: opportunityRow,
             playbooks: workspacePlaybooks,
             playbookAssignments,
@@ -3343,13 +3394,13 @@ function App() {
           .then((response) => {
             const research = mapCustomerResearchResponse(response)
             if (!research) {
-              throw new Error("Customer research returned incomplete OpenAI output.")
+              throw new Error("Customer research could not be prepared. Try again, or continue without research.")
             }
 
             setNotes((items) => [`Customer research: ${research.researchSummary}`, ...items].slice(0, 6))
           })
           .catch((caughtError: unknown) => {
-            const message = caughtError instanceof Error ? caughtError.message : "Customer research could not be completed."
+            const message = getUserFacingErrorMessage(caughtError, "Customer research could not be completed.")
             setWorkspaceErrorMessage(message)
             setNotes((items) => [`Customer research needs attention: ${message}`, ...items].slice(0, 6))
           })
@@ -3390,7 +3441,7 @@ function App() {
         ok: true as const,
       }
     } catch (caughtError: unknown) {
-      const message = caughtError instanceof Error ? caughtError.message : "Call could not be started."
+      const message = getUserFacingErrorMessage(caughtError, "Call could not be started.")
 
       if (createdCallId) {
         try {
@@ -3493,7 +3544,7 @@ function App() {
         )
 
         if (!research) {
-          throw new Error("Customer research returned incomplete OpenAI output. The account was created, but research was not saved.")
+          throw new Error("The account was created, but customer research could not be saved. Try research again from the account page.")
         }
 
         setSellerResearchProfile((currentProfile) => {
@@ -3515,11 +3566,6 @@ function App() {
       setWorkspaceErrorMessage("")
 
       if (payload.aiEnrichmentEnabled) {
-        setNotes((items) => [
-          "Account enrichment is running in the background.",
-          ...items,
-        ].slice(0, 6))
-
         void (async () => {
           try {
             const enrichment = await requestAccountEnrichment(account.id)
@@ -3544,14 +3590,8 @@ function App() {
               [enrichment.profile.account_id]: enrichment.profile,
             }))
             setWorkspaceRefreshToken((value) => value + 1)
-            setNotes((items) => [
-              Object.keys(enrichment.appliedCoreUpdates).length
-                ? "Account enrichment completed: blank fields and sales signals are ready."
-                : "Account enrichment completed: existing fields were preserved and sales signals are ready.",
-              ...items,
-            ].slice(0, 6))
           } catch (caughtError: unknown) {
-            const message = caughtError instanceof Error ? caughtError.message : "Account enrichment could not be completed."
+            const message = getUserFacingErrorMessage(caughtError, "Account enrichment could not be completed.")
 
             setNotes((items) => [`Account enrichment needs attention: ${message}`, ...items].slice(0, 6))
           }
@@ -3562,7 +3602,7 @@ function App() {
         ok: true as const,
       }
     } catch (caughtError: unknown) {
-      const message = caughtError instanceof Error ? caughtError.message : "Account could not be created."
+      const message = getUserFacingErrorMessage(caughtError, "Account could not be created.")
 
       return {
         message,
@@ -3615,7 +3655,7 @@ function App() {
         ok: true as const,
       }
     } catch (caughtError: unknown) {
-      const message = caughtError instanceof Error ? caughtError.message : "Opportunity could not be created."
+      const message = getUserFacingErrorMessage(caughtError, "Opportunity could not be created.")
 
       return {
         message,
@@ -3660,7 +3700,7 @@ function App() {
       }
     } catch (caughtError: unknown) {
       return {
-        message: caughtError instanceof Error ? caughtError.message : "Account could not be updated.",
+        message: getUserFacingErrorMessage(caughtError, "Account could not be updated."),
         ok: false,
       }
     }
@@ -3715,7 +3755,7 @@ function App() {
       }
     } catch (caughtError: unknown) {
       return {
-        message: caughtError instanceof Error ? caughtError.message : "Opportunity could not be updated.",
+        message: getUserFacingErrorMessage(caughtError, "Opportunity could not be updated."),
         ok: false,
       }
     }
@@ -3796,7 +3836,7 @@ function App() {
       setAccountRecordSaveMessage("Account saved.")
       return true
     } catch (caughtError: unknown) {
-      const message = caughtError instanceof Error ? caughtError.message : "Account fields could not be saved."
+      const message = getUserFacingErrorMessage(caughtError, "Account fields could not be saved.")
 
       setAccountRecordSaveStatus("error")
       setAccountRecordSaveMessage(message)
@@ -3859,7 +3899,7 @@ function App() {
       setAccountEnrichmentRunStatus("saved")
       setAccountEnrichmentRunMessage("")
     } catch (caughtError: unknown) {
-      const message = caughtError instanceof Error ? caughtError.message : "Account enrichment could not be completed."
+      const message = getUserFacingErrorMessage(caughtError, "Account enrichment could not be completed.")
 
       setAccountEnrichmentRunStatus("error")
       setAccountEnrichmentRunMessage(message)
@@ -3910,7 +3950,7 @@ function App() {
         ok: true,
       }
     } catch (caughtError: unknown) {
-      const message = caughtError instanceof Error ? caughtError.message : "Account intelligence could not be saved."
+      const message = getUserFacingErrorMessage(caughtError, "Account intelligence could not be saved.")
 
       setAccountEnrichmentSaveStatus("error")
       setAccountEnrichmentSaveMessage(message)
@@ -3991,6 +4031,7 @@ function App() {
         ...drafts,
         [updatedOpportunity.id]: {
           ...mapOpportunityRowToDraft({
+            accountCurrency: activeAccount.currency,
             opportunity: updatedOpportunity,
             ownerName: personalAccountProfile.fullName,
             playbookAssignments: selectedPlaybookIds.map((playbookId) => ({
@@ -4001,7 +4042,7 @@ function App() {
             })),
             playbooks: workspacePlaybooks,
           }),
-          amount: updatedOpportunity.amount ?? formattedAmount,
+          amount: formattedAmount,
         },
       }))
       setCallPlaybooks(selectedPlaybooks)
@@ -4009,7 +4050,7 @@ function App() {
       setOpportunityRecordSaveStatus("saved")
       setOpportunityRecordSaveMessage("Opportunity saved. AI methodology scoring refreshes from the next AI-processed call.")
     } catch (caughtError: unknown) {
-      const message = caughtError instanceof Error ? caughtError.message : "Opportunity fields could not be saved."
+      const message = getUserFacingErrorMessage(caughtError, "Opportunity fields could not be saved.")
 
       setOpportunityRecordSaveStatus("error")
       setOpportunityRecordSaveMessage(message)
@@ -4070,25 +4111,28 @@ function App() {
     setAuthSubmitting(true)
     setAuthStatusMessage("")
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: values.email.trim(),
-      password: values.password,
-    })
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: values.email.trim(),
+        password: values.password,
+      })
 
-    if (error) {
-      setAuthStatusMessage(error.message)
-      setAuthSubmitting(false)
-      return
-    }
-
-    if (data.user) {
-      setAuthSession(createAuthSessionFromUser(data.user))
-      if (window.location.pathname !== "/") {
-        window.history.pushState(null, "", "/")
+      if (error) {
+        setAuthStatusMessage(getUserFacingErrorMessage(error, "Sign-in could not be completed."))
+        return
       }
-    }
 
-    setAuthSubmitting(false)
+      if (data.user) {
+        setAuthSession(createAuthSessionFromUser(data.user))
+        if (window.location.pathname !== "/") {
+          window.history.pushState(null, "", "/")
+        }
+      }
+    } catch (caughtError: unknown) {
+      setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Sign-in could not be completed."))
+    } finally {
+      setAuthSubmitting(false)
+    }
   }
 
   const handleAuthSignup = async (values: SignupFormValues) => {
@@ -4110,38 +4154,41 @@ function App() {
     setAuthSubmitting(true)
     setAuthStatusMessage("")
 
-    const { data, error } = await supabase.auth.signUp({
-      email: values.email.trim(),
-      password: values.password,
-      options: {
-        data: {
-          full_name: values.name.trim(),
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: values.email.trim(),
+        password: values.password,
+        options: {
+          data: {
+            full_name: values.name.trim(),
+          },
+          emailRedirectTo: getAuthRedirectUrl("/login"),
         },
-        emailRedirectTo: getAuthRedirectUrl("/login"),
-      },
-    })
+      })
 
-    if (error) {
-      setAuthStatusMessage(error.message)
+      if (error) {
+        setAuthStatusMessage(getUserFacingErrorMessage(error, "Account could not be created."))
+        return
+      }
+
+      if (data.session?.user) {
+        setAuthSession(createAuthSessionFromUser(data.session.user))
+        if (window.location.pathname !== "/") {
+          window.history.pushState(null, "", "/")
+        }
+      } else {
+        setAuthMode("login")
+        setPublicAuthRoute("login")
+        if (window.location.pathname !== "/login") {
+          window.history.pushState(null, "", "/login")
+        }
+        setAuthStatusMessage("Account created. Check your email to confirm your account before signing in.")
+      }
+    } catch (caughtError: unknown) {
+      setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Account could not be created."))
+    } finally {
       setAuthSubmitting(false)
-      return
     }
-
-    if (data.session?.user) {
-      setAuthSession(createAuthSessionFromUser(data.session.user))
-      if (window.location.pathname !== "/") {
-        window.history.pushState(null, "", "/")
-      }
-    } else {
-      setAuthMode("login")
-      setPublicAuthRoute("login")
-      if (window.location.pathname !== "/login") {
-        window.history.pushState(null, "", "/login")
-      }
-      setAuthStatusMessage("Account created. Check your email to confirm your account before signing in.")
-    }
-
-    setAuthSubmitting(false)
   }
 
   const handleForgotPassword = async (email: string) => {
@@ -4151,14 +4198,21 @@ function App() {
     }
 
     setAuthSubmitting(true)
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: getAuthRedirectUrl("/login"),
-    })
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: getAuthRedirectUrl("/login"),
+      })
 
-    setAuthStatusMessage(
-      error ? error.message : `Password reset email requested for ${email.trim()}.`
-    )
-    setAuthSubmitting(false)
+      setAuthStatusMessage(
+        error
+          ? getUserFacingErrorMessage(error, "Password reset email could not be sent.")
+          : `Password reset email requested for ${email.trim()}.`
+      )
+    } catch (caughtError: unknown) {
+      setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Password reset email could not be sent."))
+    } finally {
+      setAuthSubmitting(false)
+    }
   }
 
   const handleAuthLegalClick = (document: "terms" | "privacy") => {
@@ -4251,7 +4305,7 @@ function App() {
     if (window.location.pathname !== nextPath) {
       window.history.pushState(null, "", nextPath)
     }
-    setAuthStatusMessage(error ? error.message : "Signed out.")
+    setAuthStatusMessage(error ? getUserFacingErrorMessage(error, "Sign-out could not be completed.") : "Signed out.")
   }
 
   const handleAuthLogout = async () => {
@@ -4503,20 +4557,26 @@ function App() {
 
   if (legalPage) {
     return (
-      <LegalDocumentPage
-        darkMode={darkMode}
-        document={legalPage}
-        onBack={() => {
-          window.history.pushState(null, "", "/")
-          setLegalPage(null)
-        }}
-        onDarkModeChange={setDarkMode}
-      />
+      <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} />}>
+        <LegalDocumentPage
+          darkMode={darkMode}
+          document={legalPage}
+          onBack={() => {
+            window.history.pushState(null, "", "/")
+            setLegalPage(null)
+          }}
+          onDarkModeChange={setDarkMode}
+        />
+      </React.Suspense>
     )
   }
 
   if (authLoading && publicAuthRoute === "landing") {
-    return <MarketingLandingPage onLogin={handleLandingLogin} onSignup={handleLandingSignup} />
+    return (
+      <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} surface="landing" />}>
+        <MarketingLandingPage onLogin={handleLandingLogin} onSignup={handleLandingSignup} />
+      </React.Suspense>
+    )
   }
 
   if (authLoading) {
@@ -4525,12 +4585,17 @@ function App() {
 
   if (!authSession) {
     if (publicAuthRoute === "landing") {
-      return <MarketingLandingPage onLogin={handleLandingLogin} onSignup={handleLandingSignup} />
+      return (
+        <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} surface="landing" />}>
+          <MarketingLandingPage onLogin={handleLandingLogin} onSignup={handleLandingSignup} />
+        </React.Suspense>
+      )
     }
 
     const renderedAuthMode: AuthMode = publicAuthRoute === "signup" ? "signup" : authMode
 
     return (
+      <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} />}>
       <AuthPage
         darkMode={darkMode}
         isSubmitting={authSubmitting}
@@ -4544,6 +4609,7 @@ function App() {
         onModeChange={handleAuthModeChange}
         onSignup={handleAuthSignup}
       />
+      </React.Suspense>
     )
   }
 
@@ -4935,7 +5001,7 @@ function AuthLoadingView({
         <Card>
           <CardHeader>
             <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <AudioLinesIcon className="size-5" />
+              <AudioLinesIcon aria-hidden="true" className="size-5" />
             </div>
             <CardTitle>Getting SalesFrame ready</CardTitle>
             <CardDescription>Checking your session so we can drop you back into the right workspace.</CardDescription>
@@ -4947,6 +5013,7 @@ function AuthLoadingView({
               <Button
                 variant="ghost"
                 size="icon-sm"
+                className="size-10 md:size-7"
                 aria-label="Toggle theme"
                 onClick={() => onDarkModeChange(!darkMode)}
               >
@@ -5023,6 +5090,7 @@ function WorkspaceOnboardingDialog({
     { id: 3, label: "OpenAI" },
     { id: 4, label: "Import" },
   ] as const
+  const currentStepItem = stepItems.find((item) => item.id === step) ?? stepItems[0]
 
   React.useEffect(() => {
     if (!open) {
@@ -5080,9 +5148,7 @@ function WorkspaceOnboardingDialog({
       }
     } catch (caughtError: unknown) {
       setStatusMessage(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Workspace setup could not be saved."
+        getUserFacingErrorMessage(caughtError, "Workspace setup could not be saved.")
       )
     } finally {
       setIsSaving(false)
@@ -5099,7 +5165,7 @@ function WorkspaceOnboardingDialog({
       >
         <DialogHeader>
           <div className="mb-1 flex size-10 items-center justify-center rounded-lg bg-[#0f0f10] text-white">
-            <AudioLinesIcon className="size-5" />
+            <AudioLinesIcon aria-hidden="true" className="size-5" />
           </div>
           <DialogTitle>Set up {workspaceName.trim() || workspace.name}</DialogTitle>
           <DialogDescription>
@@ -5108,7 +5174,10 @@ function WorkspaceOnboardingDialog({
         </DialogHeader>
 
         <div className="grid gap-4">
-          <div className="grid grid-cols-4 gap-2">
+          <p className="sr-only" aria-live="polite">
+            Step {step} of {stepItems.length}: {currentStepItem.label}
+          </p>
+          <div className="grid grid-cols-4 gap-2" aria-hidden="true">
             {stepItems.map((item) => (
               <div
                 key={item.id}
@@ -5116,7 +5185,6 @@ function WorkspaceOnboardingDialog({
                   "h-1.5 rounded-full",
                   step >= item.id ? "bg-primary" : "bg-muted"
                 )}
-                aria-label={`${item.label} step`}
               />
             ))}
           </div>
@@ -5213,26 +5281,18 @@ function WorkspaceOnboardingDialog({
           ) : null}
 
           {step === 3 ? (
-          <div
-            className={cn(
-              "grid gap-3",
-              hasSavedOpenAiKey ? "border-emerald-500/30 bg-emerald-500/10" : "border-destructive/40"
-            )}
-          >
+          <div className="grid gap-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-medium">OpenAI API key</p>
-                  <Badge variant={hasSavedOpenAiKey ? "default" : "destructive"}>
-                    {hasSavedOpenAiKey ? "Connected" : "Required"}
-                  </Badge>
-                </div>
+                <p className="text-sm font-medium">OpenAI API key</p>
                 <p className="text-sm text-muted-foreground">
-                  SalesFrame uses your OpenAI key for AI notes, realtime question guidance, transcription, research, and post-call outputs.
+                  {hasSavedOpenAiKey
+                    ? "Your workspace key is connected. SalesFrame uses it for notes, realtime guidance, transcription, research, and post-call outputs."
+                    : "Add a workspace key so SalesFrame can create notes, realtime guidance, transcription, research, and post-call outputs."}
                 </p>
               </div>
               <Button variant="outline" size="sm" asChild>
-                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">
+                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">
                   <ExternalLinkIcon />
                   OpenAI keys
                 </a>
@@ -5253,6 +5313,9 @@ function WorkspaceOnboardingDialog({
                 id="onboarding-openai-key"
                 type="password"
                 autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 value={apiKey}
                 placeholder="sk-proj-..."
                 aria-invalid={!hasSavedOpenAiKey && apiKey.trim().length === 0}
@@ -5264,7 +5327,7 @@ function WorkspaceOnboardingDialog({
               <p className="text-sm text-muted-foreground">
                 {hasSavedOpenAiKey
                   ? "Leave blank to keep the encrypted key already connected, or paste a new key to replace it."
-                  : "The raw key is sent only to the secure server endpoint and stored encrypted."}
+                  : "Your key is sent securely to SalesFrame and stored encrypted."}
               </p>
             </div>
           </div>
@@ -5275,7 +5338,7 @@ function WorkspaceOnboardingDialog({
             <div>
               <p className="text-sm font-medium">Import data</p>
               <p className="text-sm text-muted-foreground">
-                Optionally add customer accounts or opportunities to this workspace now. You can also import later from your Account page.
+                Add customer accounts or opportunities now, or import from your Account page whenever the workspace needs more data.
               </p>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
@@ -5454,6 +5517,7 @@ function AppHeader({
         <Button
           variant="ghost"
           size="icon"
+          className="size-10 md:size-8"
           aria-label="Toggle theme"
           onClick={() => onDarkModeChange(!darkMode)}
         >
@@ -5645,6 +5709,7 @@ function GlobalSearch({
     <div className="relative hidden w-72 lg:block">
       <SearchIcon className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
+        aria-label="Search workspace"
         value={query}
         className="h-8 pl-9"
         placeholder="Search workspace"
@@ -5673,7 +5738,7 @@ function GlobalSearch({
                   <span className="block truncate text-sm font-medium">{result.label}</span>
                   <span className="block truncate text-xs text-muted-foreground">{result.meta}</span>
                 </span>
-                <Badge variant="outline">{result.type}</Badge>
+                <span className="text-xs text-muted-foreground">{result.type}</span>
               </button>
             ))
           ) : (
@@ -5722,7 +5787,7 @@ function CommandBar({
 
       <div className="grid gap-2 sm:grid-cols-2 lg:min-w-[580px] lg:grid-cols-4">
         <Select value={callType} onValueChange={onCallTypeChange}>
-          <SelectTrigger className="h-9 w-full">
+          <SelectTrigger className="h-9 w-full" aria-label="Call type">
             <SelectValue placeholder="Call type" />
           </SelectTrigger>
           <SelectContent>
@@ -5766,7 +5831,12 @@ function CallPrepDialog({
           Prep brief
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl">
+      <DialogContent
+        className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl"
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>Call prep brief</DialogTitle>
           <DialogDescription>
@@ -5950,6 +6020,7 @@ function StartRecordingDialog({
       : opportunities.find((opportunity) => opportunity.accountId === initialAccountId)?.id ?? ""
   const [accountId, setAccountId] = React.useState(initialAccountId)
   const [accountName, setAccountName] = React.useState("")
+  const [accountWebsite, setAccountWebsite] = React.useState("")
   const [accountIndustry, setAccountIndustry] = React.useState("")
   const [accountCurrency, setAccountCurrency] = React.useState<CurrencyCode>(
     accounts.find((account) => account.id === initialAccountId)?.currency ?? defaultCurrency
@@ -6008,6 +6079,7 @@ function StartRecordingDialog({
     { label: "Call", icon: PhoneCallIcon },
     { label: "Research", icon: SearchIcon },
   ]
+  const currentRecordingStepLabel = recordingSteps[step - 1]?.label ?? recordingSteps[0].label
   const startPreparationSteps: StartCallPreparationStep[] = [
     {
       label: "Checking the AI coach",
@@ -6127,6 +6199,7 @@ function StartRecordingDialog({
 
       setAccountMode("existing")
       setAccountId(nextAccountId)
+      setAccountWebsite("")
       setAccountCurrency(accounts.find((account) => account.id === nextAccountId)?.currency ?? defaultCurrency)
       setOpportunityId(nextOpportunityId)
       setOpportunityMode(nextOpportunityId ? "existing" : "new")
@@ -6156,6 +6229,7 @@ function StartRecordingDialog({
     setAccountMode(mode)
     if (mode === "new") {
       setOpportunityMode("new")
+      setAccountWebsite("")
       setAccountCurrency(defaultCurrency)
       setCustomerResearchEnabled(false)
       setSellerCompany(sellerResearchProfile.sellerCompany)
@@ -6183,6 +6257,13 @@ function StartRecordingDialog({
     setOpportunityId(firstOpportunityId)
     setOpportunityMode(firstOpportunityId ? "existing" : "new")
     applyResearchDefaults(value)
+  }
+
+  const handleNewAccountWebsiteChange = (value: string) => {
+    setAccountWebsite(value)
+    if (!accountName.trim() && normalizeSellerDomain(value).includes(".")) {
+      setAccountName(inferCompanyNameFromDomain(value))
+    }
   }
 
   const handleNext = () => {
@@ -6253,9 +6334,7 @@ function StartRecordingDialog({
 
           setResearchProfileStatus("error")
           setResearchProfileMessage(
-            error instanceof Error
-              ? error.message
-              : "OpenAI could not research this domain. You can type what you sell manually."
+            getUserFacingErrorMessage(error, "OpenAI could not research this domain. You can type what you sell manually.")
           )
         })
     }, sellerDomainLookupDebounceMs)
@@ -6273,6 +6352,7 @@ function StartRecordingDialog({
         accountMode,
         accountId,
         accountName,
+        accountWebsite,
         accountIndustry,
         accountCurrency,
         audioCaptureMode,
@@ -6306,7 +6386,7 @@ function StartRecordingDialog({
       setStep(1)
     } catch (caughtError: unknown) {
       resetStartProgress()
-      setStartError(caughtError instanceof Error ? caughtError.message : "Call could not be started.")
+      setStartError(getUserFacingErrorMessage(caughtError, "Call could not be started."))
     } finally {
       setStartSubmitting(false)
     }
@@ -6315,13 +6395,14 @@ function StartRecordingDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button size="sm" variant={triggerVariant} className="gap-2">
+        <Button size="sm" variant={triggerVariant} className="h-10 gap-2 px-4 md:h-7 md:px-2.5">
           {triggerIcon}
           {triggerLabel}
         </Button>
       </DialogTrigger>
       <DialogContent
         className="grid max-h-[calc(100svh-2rem)] overflow-hidden sm:h-[760px] sm:max-w-2xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
@@ -6358,7 +6439,10 @@ function StartRecordingDialog({
           </>
         ) : (
           <>
-        <div className="grid grid-cols-4 gap-2">
+        <p className="sr-only" aria-live="polite">
+          Step {step} of {recordingSteps.length}: {currentRecordingStepLabel}
+        </p>
+        <div className="grid grid-cols-4 gap-2" role="list" aria-label="Start call steps">
           {recordingSteps.map(({ label, icon: Icon }, index) => {
             const itemStep = (index + 1) as 1 | 2 | 3 | 4
             const isActive = step === itemStep
@@ -6367,6 +6451,8 @@ function StartRecordingDialog({
             return (
               <div
                 key={label}
+                role="listitem"
+                aria-current={isActive ? "step" : undefined}
                 className={cn(
                   "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
                   isActive && "border-primary bg-primary/5",
@@ -6431,6 +6517,15 @@ function StartRecordingDialog({
                       value={accountName}
                       placeholder="e.g. Southern Cross Energy"
                       onChange={(event) => setAccountName(event.currentTarget.value)}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="recording-account-website">Website or domain</Label>
+                    <Input
+                      id="recording-account-website"
+                      value={accountWebsite}
+                      placeholder="e.g. usemultiplier.com"
+                      onChange={(event) => handleNewAccountWebsiteChange(event.currentTarget.value)}
                     />
                   </div>
                   <div className="grid gap-2">
@@ -6584,7 +6679,7 @@ function StartRecordingDialog({
         {step === 4 ? (
           <div className="grid gap-4 rounded-lg border p-4">
             {!hasSavedOpenAiKey ? (
-              <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 sm:flex-row sm:items-center sm:justify-between" role="alert">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <CircleAlertIcon className="size-4 text-destructive" />
@@ -6699,7 +6794,7 @@ function StartRecordingDialog({
                     aria-live="polite"
                   >
                     {researchProfileMessage ||
-                      "Auto-filled from the domain and saved for future recordings once this call starts."}
+                      "Auto-filled from the domain and saved for this workspace once the call starts."}
                   </p>
                 </div>
               </div>
@@ -6891,6 +6986,7 @@ function CreateAccountDialog({
     { label: "Research", icon: SearchIcon },
     { label: "Opportunity", icon: TargetIcon },
   ]
+  const currentAccountStepLabel = accountSteps[step - 1]?.label ?? accountSteps[0].label
 
   const reset = () => {
     if (sellerDomainLookupTimeoutRef.current) {
@@ -7018,9 +7114,7 @@ function CreateAccountDialog({
 
           setResearchProfileStatus("error")
           setResearchProfileMessage(
-            error instanceof Error
-              ? error.message
-              : "OpenAI could not research this domain. You can type what you sell manually."
+            getUserFacingErrorMessage(error, "OpenAI could not research this domain. You can type what you sell manually.")
           )
         })
     }, sellerDomainLookupDebounceMs)
@@ -7088,7 +7182,7 @@ function CreateAccountDialog({
       onOpenChange(false)
       setStep(1)
     } catch (caughtError: unknown) {
-      setCreateError(caughtError instanceof Error ? caughtError.message : "Account could not be created.")
+      setCreateError(getUserFacingErrorMessage(caughtError, "Account could not be created."))
     } finally {
       setCreateSubmitting(false)
       setCreateProgressMessage("")
@@ -7110,6 +7204,7 @@ function CreateAccountDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className="grid max-h-[calc(100svh-2rem)] overflow-hidden sm:h-[760px] sm:max-w-2xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
@@ -7120,7 +7215,10 @@ function CreateAccountDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-4 gap-2">
+        <p className="sr-only" aria-live="polite">
+          Step {step} of {accountSteps.length}: {currentAccountStepLabel}
+        </p>
+        <div className="grid grid-cols-4 gap-2" role="list" aria-label="Create account steps">
           {accountSteps.map(({ label, icon: Icon }, index) => {
             const itemStep = (index + 1) as 1 | 2 | 3 | 4
             const isActive = step === itemStep
@@ -7129,6 +7227,8 @@ function CreateAccountDialog({
             return (
               <div
                 key={label}
+                role="listitem"
+                aria-current={isActive ? "step" : undefined}
                 className={cn(
                   "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
                   isActive && "border-primary bg-primary/5",
@@ -7216,7 +7316,7 @@ function CreateAccountDialog({
                 </Button>
               </div>
             ) : null}
-            <p className="text-xs text-muted-foreground">Only account name is required. The rest can be filled now or later.</p>
+            <p className="text-xs text-muted-foreground">Only account name is required. Add what you know now; SalesFrame can help fill the rest from the account record.</p>
           </div>
         ) : null}
 
@@ -7293,9 +7393,6 @@ function CreateAccountDialog({
                 <div className="flex flex-wrap items-center gap-2">
                   <KeyRoundIcon className="size-4 text-muted-foreground" />
                   <p className="text-sm font-medium">OpenAI connection</p>
-                  <Badge variant={hasSavedOpenAiKey ? "default" : "destructive"}>
-                    {hasSavedOpenAiKey ? "Connected" : "Required"}
-                  </Badge>
                   {hasSavedOpenAiKey && savedOpenAiKeyState ? (
                     <span className="truncate text-xs text-muted-foreground">{savedOpenAiKeyState.maskedKey}</span>
                   ) : null}
@@ -7351,7 +7448,7 @@ function CreateAccountDialog({
                   <div>
                     <p className="text-sm font-medium">Seller Research</p>
                     <p className="text-xs text-muted-foreground">
-                      {customerResearchEnabled ? "Used for future calls on this account." : "Optional seller context for future calls."}
+                      {customerResearchEnabled ? "Used to shape live questions for this account." : "Optional seller context for call research."}
                     </p>
                   </div>
                 </div>
@@ -7416,19 +7513,14 @@ function CreateAccountDialog({
                 >
                   {researchProfileMessage ||
                     (customerResearchEnabled
-                      ? "Auto-filled from the domain and saved for future calls once this account is created."
+                      ? "Auto-filled from the domain and saved with this account."
                       : "Turn on seller research to save product context for this account.")}
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span className="font-medium">Sources:</span>
-                {trustedResearchSources.map((source) => (
-                  <Badge key={source} variant="outline" className="text-xs font-normal">
-                    {source}
-                  </Badge>
-                ))}
-              </div>
+              <p className="text-xs text-muted-foreground">
+                Uses the same trusted source set each time: {trustedResearchSources.join(", ")}.
+              </p>
             </div>
           </div>
         ) : null}
@@ -7550,7 +7642,7 @@ function CreateAccountDialog({
               </div>
             ) : (
               <div className="rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
-                The account will be created without an opportunity. You can add the first opportunity later from the account page or Start Call flow.
+                The account will be created without an opportunity. Add the first opportunity from the account page or Start Call flow when you are ready.
               </div>
             )}
           </div>
@@ -7687,6 +7779,7 @@ function EditAccountDialog({
     <Dialog open={open && Boolean(account)} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl"
+        onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
@@ -7918,7 +8011,7 @@ function CreateOpportunityDialog({
 
       onOpenChange(false)
     } catch (caughtError: unknown) {
-      setCreateError(caughtError instanceof Error ? caughtError.message : "Opportunity could not be created.")
+      setCreateError(getUserFacingErrorMessage(caughtError, "Opportunity could not be created."))
     } finally {
       setCreateSubmitting(false)
     }
@@ -7928,6 +8021,7 @@ function CreateOpportunityDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl"
+        onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
@@ -7996,7 +8090,7 @@ function CreateOpportunityDialog({
           </div>
           <div className="rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
             {selectedAccount
-              ? `This opportunity will appear under ${selectedAccount.name} and inherit these playbooks for future calls.`
+              ? `This opportunity will appear under ${selectedAccount.name} and use these playbooks for live guidance.`
               : "Select an account before creating the opportunity."}
           </div>
         </div>
@@ -8093,7 +8187,7 @@ function CreateOpportunityDialog({
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Only opportunity name is required. You can add commercial context now or edit it from the opportunity record later.
+              Only opportunity name is required. Add commercial context now, or complete it from the opportunity record.
             </p>
           )}
         </div>
@@ -8204,6 +8298,7 @@ function EditOpportunityDialog({
     <Dialog open={open && Boolean(opportunity)} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl"
+        onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
@@ -8424,7 +8519,12 @@ function DeleteRecordDialog({
 
   return (
     <Dialog open onOpenChange={(nextOpen) => (!nextOpen && !deleteSubmitting ? onCancel() : undefined)}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
             <CircleAlertIcon className="size-5" />
@@ -8631,7 +8731,7 @@ function HomeDashboard({
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
-        <DashboardMetric label="Open pipeline" value={formatCurrencyAmount(totalValue, defaultCurrency, { compact: true })} />
+        <DashboardMetric label="Pipeline value" value={formatCurrencyAmount(totalValue, defaultCurrency, { compact: true })} />
         <DashboardMetric label="Avg. coverage" value={`${averageCoverage}%`} />
         <DashboardMetric label="Open gaps" value={totalGaps.toString()} />
         <DashboardMetric label="Needs attention" value={attentionCount.toString()} />
@@ -8647,7 +8747,7 @@ function HomeDashboard({
             </CardDescription>
           </div>
           <CardAction>
-            <Button variant="outline" size="sm" className="gap-2" onClick={onOpenOpportunities}>
+            <Button variant="outline" size="sm" className="h-10 gap-2 md:h-7" onClick={onOpenOpportunities}>
               <ChartNoAxesColumnIncreasingIcon />
               View all
             </Button>
@@ -8687,7 +8787,7 @@ function HomeDashboard({
             </CardDescription>
           </div>
           <CardAction>
-            <Button variant="outline" size="sm" className="gap-2" onClick={onOpenOpportunities}>
+            <Button variant="outline" size="sm" className="h-10 gap-2 md:h-7" onClick={onOpenOpportunities}>
               <Table2Icon />
               View all
             </Button>
@@ -8698,8 +8798,9 @@ function HomeDashboard({
             <div className="relative">
               <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                aria-label="Search account, opportunity, stakeholder, or gap"
                 value={focusQuery}
-                className="pl-9"
+                className="h-10 pl-9 md:h-8"
                 placeholder="Search account, opportunity, stakeholder, or gap"
                 onChange={(event) => setFocusQuery(event.currentTarget.value)}
               />
@@ -8708,7 +8809,7 @@ function HomeDashboard({
               value={focusCoverageFilter}
               onValueChange={(value) => setFocusCoverageFilter(value as OpportunityCoverageFilter)}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="min-h-10 w-full md:min-h-8" aria-label="Filter opportunities by coverage">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -8720,7 +8821,7 @@ function HomeDashboard({
               </SelectContent>
             </Select>
             <Select value={focusSort} onValueChange={(value) => setFocusSort(value as OpportunitySort)}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="min-h-10 w-full md:min-h-8" aria-label="Sort opportunity focus">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -8733,7 +8834,7 @@ function HomeDashboard({
             </Select>
             <Button
               variant="outline"
-              className="gap-2"
+              className="h-10 gap-2 md:h-8"
               onClick={() => {
                 setFocusQuery("")
                 setFocusCoverageFilter("all")
@@ -8769,8 +8870,8 @@ function HomeDashboard({
                           {opportunity.nextQuestion}
                         </p>
                       </td>
-                      <td className="hidden py-3 pr-4 lg:table-cell">
-                        <Badge variant="outline">{opportunity.stage}</Badge>
+                      <td className="hidden py-3 pr-4 text-muted-foreground lg:table-cell">
+                        <span className="block truncate">{opportunity.stage}</span>
                       </td>
                       <td className="py-3 pr-4">
                         <div className="grid min-w-0 gap-1.5">
@@ -8823,7 +8924,7 @@ function DashboardMetric({ label, value }: { label: string; value: string }) {
 
 function OpenButton({ onClick, label = "Open" }: { onClick: () => void; label?: string }) {
   return (
-    <Button size="sm" variant="outline" className="min-w-[72px]" onClick={onClick}>
+    <Button size="sm" variant="outline" className="h-10 min-w-[72px] md:h-7" onClick={onClick}>
       {label}
     </Button>
   )
@@ -9040,8 +9141,6 @@ function AccountView({
   const averageCoverage = displayOpportunities.length
     ? Math.round(displayOpportunities.reduce((total, opportunity) => total + opportunity.coverage, 0) / displayOpportunities.length)
     : 0
-  const openGaps = displayOpportunities.reduce((total, opportunity) => total + opportunity.missing + opportunity.weak, 0)
-  const stakeholders = displayOpportunities.reduce((total, opportunity) => total + opportunity.stakeholders.length, 0)
   const visibleOpportunities = sortOpportunities(
     getFuzzyMatches(
       displayOpportunities.filter((item) => matchesCoverageFilter(item, opportunityCoverageFilter)),
@@ -9057,7 +9156,7 @@ function AccountView({
         <CardHeader>
           <div className="flex min-w-0 items-center gap-3">
             <AccountLogoAvatar
-              domain={account.logoDomain || accountDraft.website}
+              domain={accountDraft.website || account.logoDomain}
               logoUrl={account.logoUrl}
               name={accountDraft.accountName}
               retryKey={`${account.logoCheckedAt}-${accountDraft.website}`}
@@ -9068,8 +9167,6 @@ function AccountView({
               <CardTitle className="truncate text-2xl">{accountDraft.accountName}</CardTitle>
               <div className="mt-3 flex flex-wrap gap-2">
                 <CoverageBadge value={averageCoverage} />
-                <Badge variant="outline">{openGaps} open gaps</Badge>
-                <Badge variant="outline">{stakeholders} stakeholders</Badge>
               </div>
             </div>
           </div>
@@ -9102,7 +9199,7 @@ function AccountView({
             <CardHeader>
               <div>
                 <CardTitle>Main account fields</CardTitle>
-                <CardDescription>Seller-owned fields that can later sync to CRM</CardDescription>
+                <CardDescription>Account context SalesFrame uses for research and live guidance</CardDescription>
               </div>
               <CardAction className="flex flex-wrap items-center gap-2">
                 <Button
@@ -9119,6 +9216,7 @@ function AccountView({
             <CardContent className="grid gap-4">
               {saveMessage ? (
                 <div
+                  role={saveStatus === "error" ? "alert" : "status"}
                   className={cn(
                     "rounded-lg border p-3 text-sm",
                     saveStatus === "error"
@@ -9222,6 +9320,7 @@ function AccountView({
                   <div className="relative">
                     <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
+                      aria-label="Search this account's opportunities"
                       value={opportunityQuery}
                       className="pl-9"
                       placeholder="Search this account's opportunities"
@@ -9232,7 +9331,7 @@ function AccountView({
                     value={opportunityCoverageFilter}
                     onValueChange={(value) => setOpportunityCoverageFilter(value as OpportunityCoverageFilter)}
                   >
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="w-full" aria-label="Filter account opportunities by coverage">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -9244,7 +9343,7 @@ function AccountView({
                     </SelectContent>
                   </Select>
                   <Select value={opportunitySort} onValueChange={(value) => setOpportunitySort(value as OpportunitySort)}>
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="w-full" aria-label="Sort account opportunities">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -9276,36 +9375,35 @@ function AccountView({
                         <tr
                           key={opportunity.id}
                           className="cursor-pointer border-b transition-colors hover:bg-muted/30 last:border-b-0"
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => onOpportunitySelect(opportunity.id)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault()
-                              onOpportunitySelect(opportunity.id)
-                            }
-                          }}
                         >
-                          <td className="min-w-0 px-3 py-3 align-middle">
-                            <p className="truncate font-medium">{opportunity.name}</p>
+                          <td className="min-w-0 px-3 py-3 align-middle" onClick={() => onOpportunitySelect(opportunity.id)}>
+                            <button
+                              type="button"
+                              className="block max-w-full truncate text-left font-medium underline-offset-4 outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
+                              aria-label={`Open ${opportunity.name}`}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                onOpportunitySelect(opportunity.id)
+                              }}
+                            >
+                              {opportunity.name}
+                            </button>
                             <p className="mt-1 hidden truncate text-xs text-muted-foreground sm:block">
                               {opportunity.nextQuestion}
                             </p>
                           </td>
-                          <td className="hidden px-3 py-3 align-middle lg:table-cell">
-                            <Badge variant="outline" className="max-w-full justify-center truncate">
-                              {opportunity.stage}
-                            </Badge>
+                          <td className="hidden px-3 py-3 align-middle text-muted-foreground lg:table-cell" onClick={() => onOpportunitySelect(opportunity.id)}>
+                            <span className="block truncate">{opportunity.stage}</span>
                           </td>
-                          <td className="hidden px-3 py-3 align-middle text-muted-foreground md:table-cell">
+                          <td className="hidden px-3 py-3 align-middle text-muted-foreground md:table-cell" onClick={() => onOpportunitySelect(opportunity.id)}>
                             <span className="block truncate">
                               {formatCurrencyAmount(opportunity.amount, accountDraft.currency)}
                             </span>
                           </td>
-                          <td className="hidden px-3 py-3 align-middle text-muted-foreground 2xl:table-cell">
+                          <td className="hidden px-3 py-3 align-middle text-muted-foreground 2xl:table-cell" onClick={() => onOpportunitySelect(opportunity.id)}>
                             <span className="block truncate">{opportunity.closeDate}</span>
                           </td>
-                          <td className="px-3 py-3 align-middle">
+                          <td className="px-3 py-3 align-middle" onClick={() => onOpportunitySelect(opportunity.id)}>
                             <div className="grid min-w-0 gap-1.5">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="truncate text-xs text-muted-foreground">Methodology</span>
@@ -9318,15 +9416,16 @@ function AccountView({
                               />
                             </div>
                           </td>
-                          <td className="hidden px-3 py-3 text-center align-middle xl:table-cell">
-                            <Badge
-                              variant={opportunity.missing > 5 ? "destructive" : "secondary"}
-                              className="w-[84px] justify-center whitespace-nowrap"
-                            >
+                          <td className="hidden px-3 py-3 text-center align-middle text-muted-foreground xl:table-cell" onClick={() => onOpportunitySelect(opportunity.id)}>
+                            <span className={cn("text-sm", opportunity.missing > 5 && "font-medium text-destructive")}>
                               {opportunity.missing} missing
-                            </Badge>
+                            </span>
                           </td>
-                          <td className="px-2 py-3 text-right align-middle">
+                          <td
+                            className="px-2 py-3 text-right align-middle"
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
+                          >
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button
@@ -9334,6 +9433,7 @@ function AccountView({
                                   size="sm"
                                   variant="outline"
                                   className="min-w-[104px] justify-center gap-1.5"
+                                  aria-label={`Actions for ${opportunity.name}`}
                                   onClick={(event) => event.stopPropagation()}
                                 >
                                   Actions
@@ -9393,7 +9493,7 @@ function AccountView({
                 <div key={`${opportunity.id}-focus`} className="rounded-lg border bg-muted/30 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium">{opportunity.name}</p>
-                    <Badge variant="outline">{opportunity.coverage}%</Badge>
+                    <span className="text-sm font-medium">{opportunity.coverage}%</span>
                   </div>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                     {opportunity.nextQuestion}
@@ -9562,12 +9662,14 @@ function AccountEnrichmentEditor({
       <CardContent className="grid gap-4">
         {primaryStatusMessage ? (
           <div
+            aria-live={primaryStatusMessage.status === "error" ? "assertive" : "polite"}
             className={cn(
               "rounded-lg border p-3 text-sm",
               primaryStatusMessage.status === "error"
                 ? "border-destructive/30 bg-destructive/10 text-destructive"
                 : "bg-muted/30 text-muted-foreground"
             )}
+            role={primaryStatusMessage.status === "error" ? "alert" : "status"}
           >
             {primaryStatusMessage.message}
           </div>
@@ -9844,7 +9946,7 @@ function WorkspaceView({
             setAiLiveGuidance(null)
             liveCoachHasGuidanceRef.current = false
             setLiveCoachStatus("error")
-            setLiveCoachError(caughtError instanceof Error ? caughtError.message : "AI coach could not refresh.")
+            setLiveCoachError(getUserFacingErrorMessage(caughtError, "AI coach could not refresh."))
           })
       }
 
@@ -10250,7 +10352,7 @@ function NextQuestionCard({
           questionLifecycle?.stabilityRecommendation === "park" ||
           questionLifecycle?.currentQuestionState === "parked" ||
           questionLifecycle?.currentQuestionState === "stale"
-        ? `Parked for later: ${primaryParkedIntent?.intentLabel ?? primaryIntentLabel ?? "a high-value intent"}`
+        ? `Parked for a better moment: ${primaryParkedIntent?.intentLabel ?? primaryIntentLabel ?? "a high-value intent"}`
         : guidance?.conversationState && !guidance.conversationState.shouldAskNow
           ? `Best move right now: ${guidance.conversationState.naturalnessGuidance}`
           : ""
@@ -10263,22 +10365,13 @@ function NextQuestionCard({
         ? "Reading the conversation"
         : coachStatus === "checking"
           ? "Checking if this still fits"
-          : "Preparing opening recommendation"
+          : "Ready for your next call"
   const emptyGuidanceTitle = hasRecentManualAction
     ? "OpenAI is updating the next seller move"
-    : "OpenAI is preparing the first seller move"
+    : "Start a call when you are ready"
   const emptyGuidanceDescription = hasRecentManualAction
     ? "SalesFrame has captured your feedback and is asking OpenAI for the next natural question. The previous recommendation is hidden so it does not keep distracting the seller."
-    : "Start Call asks OpenAI for an opening recommendation before recording begins. If there is no transcript yet, the first move should use the account context, opportunity history, call type, and selected playbooks."
-  const coachBadge =
-    coachStatus === "checking"
-      ? "AI checking"
-      : coachStatus === "thinking"
-        ? "AI listening"
-        : coachStatus === "error"
-          ? "AI unavailable"
-          : null
-
+    : "SalesFrame will check audio, use the account context, opportunity history, call type, and selected playbooks, then bring back the first natural seller move before recording begins."
   return (
     <Card>
       <CardHeader>
@@ -10286,14 +10379,6 @@ function NextQuestionCard({
           <CardDescription>{displayedQuestion ? "Next best question" : "AI question guidance"}</CardDescription>
           <CardTitle className="mt-1 text-xl">{cardTitle}</CardTitle>
         </div>
-        {isManualOverride || coachBadge ? (
-          <CardAction>
-            <Badge variant={isManualOverride ? "default" : "secondary"} className="gap-1.5">
-              {isManualOverride ? <UserRoundCheckIcon /> : <SparklesIcon />}
-              {isManualOverride ? "Seller selected" : coachBadge}
-            </Badge>
-          </CardAction>
-        ) : null}
       </CardHeader>
       <CardContent className="grid gap-5">
         {displayedQuestion ? (
@@ -10310,27 +10395,20 @@ function NextQuestionCard({
               {emptyGuidanceDescription}
             </p>
             {coachError ? (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
                 {coachError}
               </div>
             ) : null}
           </div>
         )}
-        <div className="flex min-w-0 flex-wrap gap-2">
+        <div className="grid max-w-5xl gap-1 text-sm text-muted-foreground">
           {displayedQuestion ? (
-            <span className="min-w-0 rounded-full border px-2 py-0.5 text-xs font-medium break-words text-muted-foreground">
-              {displayedQuestion.reason}
-            </span>
-          ) : null}
-          {displayedQuestion ? (
-            <>
-              {primaryIntentLabel ? <Badge variant="outline">Intent: {primaryIntentLabel}</Badge> : null}
-            </>
+            <p>{displayedQuestion.reason}</p>
           ) : null}
           {typeof confidence === "number" ? (
-            <Badge variant="outline">{Math.round(confidence * 100)}% confidence</Badge>
+            <p>{Math.round(confidence * 100)}% confidence</p>
           ) : null}
-          {isAsked ? <Badge variant="secondary">Asked</Badge> : null}
+          {isAsked ? <p>Marked asked</p> : null}
         </div>
         {visibleAlsoCovers.length ? (
           <div className="rounded-lg bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
@@ -10345,18 +10423,15 @@ function NextQuestionCard({
           </div>
         ) : null}
         {coachStatus === "error" && coachError && displayedQuestion ? (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
             {coachError}
           </div>
         ) : null}
         {isManualOverride && displayedQuestion ? (
-          <div className="grid gap-2 rounded-lg border bg-primary/5 p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" className="gap-1.5">
-                <UserRoundCheckIcon className="size-3" />
-                Manual override
-              </Badge>
-              <Badge variant="outline">{displayedQuestion.source}</Badge>
+          <div className="grid gap-2 rounded-lg bg-primary/5 p-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <UserRoundCheckIcon className="size-4" />
+              Seller-selected question
             </div>
             <p className="text-sm text-muted-foreground">
               This question stays in focus until the seller marks it asked or selects a different next question.
@@ -10476,11 +10551,20 @@ function PriorityGapsCard({
       <CardContent className="grid gap-3">
         {gaps.map((gap, index) => (
           <div key={`${gap.label}-${index}`} className="flex items-start gap-3 rounded-lg border bg-muted/30 p-3">
-            <Badge variant={gap.status === "missing" ? "destructive" : "secondary"}>{index + 1}</Badge>
+            <span
+              className={cn(
+                "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium",
+                gap.status === "missing"
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-muted text-muted-foreground"
+              )}
+            >
+              {index + 1}
+            </span>
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 <p className="text-sm font-medium">{gap.label}</p>
-                <Badge variant="outline">{gap.status}</Badge>
+                <span className="text-xs text-muted-foreground">{gap.status}</span>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">{gap.detail}</p>
             </div>
@@ -10489,8 +10573,8 @@ function PriorityGapsCard({
         {!guidance ? (
           <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
             {coachStatus === "error"
-              ? "AI methodology ranking is unavailable. Resolve the AI readiness issue before relying on the cockpit."
-              : "Waiting for the AI coach to rank the selected playbook intent clusters."}
+              ? "SalesFrame needs the AI connection back before it can rank the next seller move."
+              : "SalesFrame is reading the selected playbooks and opportunity context."}
           </div>
         ) : gaps.length === 0 ? (
           <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
@@ -10520,16 +10604,18 @@ function ParkedIntentsCard({
       <CardContent className="grid gap-3">
         {parkedIntents.map((intent) => (
           <div key={`${intent.intentClusterId}-${intent.latestRevisitMoment}`} className="grid gap-2 rounded-lg bg-muted/30 p-3 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <p className="font-medium">{intent.intentLabel}</p>
-              <Badge variant={intent.priority === "high" ? "destructive" : "outline"}>{intent.priority}</Badge>
-              <Badge variant="secondary">
+              <span className={cn("text-xs", intent.priority === "high" ? "font-medium text-destructive" : "text-muted-foreground")}>
+                {intent.priority} priority
+              </span>
+              <span className="text-xs text-muted-foreground">
                 {intent.latestRevisitMoment === "before_wrap"
                   ? "Before wrap"
                   : intent.latestRevisitMoment === "next_call"
                     ? "Next call"
                     : "Mid-call"}
-              </Badge>
+              </span>
             </div>
             <p className="text-muted-foreground">{intent.reasonParked}</p>
             <p className="text-muted-foreground">
@@ -10545,8 +10631,8 @@ function ParkedIntentsCard({
         {!guidance ? (
           <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
             {coachStatus === "error"
-              ? "Parked intent memory is unavailable until AI guidance is healthy."
-              : "Waiting for AI to identify whether any important intent should be saved for later."}
+              ? "SalesFrame needs the AI connection back before it can keep parking questions."
+              : "SalesFrame will save important questions here when the conversation moves on."}
           </div>
         ) : parkedIntents.length === 0 ? (
           <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
@@ -10581,7 +10667,7 @@ function ConversationMapCard({
               <div key={`${candidate.target}-${index}`} className="grid gap-1 rounded-lg bg-muted/30 p-3 text-sm">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium">{index === 0 ? "Chosen" : `Option ${index + 1}`}</span>
-                  <Badge variant="outline">{Math.round(candidate.overallScore * 100)}%</Badge>
+                  <span className="text-xs font-medium text-muted-foreground">{Math.round(candidate.overallScore * 100)}%</span>
                 </div>
                 <p className="text-muted-foreground">{candidate.reason}</p>
                 <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
@@ -10607,8 +10693,8 @@ function ConversationMapCard({
         {!guidance ? (
           <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
             {coachStatus === "error"
-              ? "Conversation-flow coaching is unavailable until the AI guidance service is healthy."
-              : "Waiting for AI to read the account, opportunity, selected playbooks, and call context."}
+              ? "SalesFrame needs the AI connection back before it can read the conversation flow."
+              : "SalesFrame is getting ready to read the account, opportunity, playbooks, and call context."}
           </div>
         ) : null}
       </CardContent>
@@ -10645,7 +10731,7 @@ function getMethodologyChecklistItems({
   const fallbackPlaybook = playbooks.find((playbook) => normalizePlaybooks([playbook.name])[0] === selectedName)
   const configuredFields = configuredRows.length
     ? configuredRows.map((field) => ({
-        detail: field.evidence_standard || field.description || "No evidence standard configured yet.",
+        detail: field.evidence_standard || field.description || "Use buyer evidence that clearly supports this field.",
         label: field.label,
       }))
     : (fallbackPlaybook?.fields ?? []).map(([label, detail]) => ({ detail, label }))
@@ -10748,7 +10834,7 @@ function getMethodologyChecklistIconClassName(status: MethodologyChecklistStatus
   return "bg-muted text-muted-foreground"
 }
 
-function getMethodologyChecklistBadgeClassName(status: MethodologyChecklistStatus) {
+function getMethodologyChecklistTextClassName(status: MethodologyChecklistStatus) {
   if (status === "confirmed") return "border-emerald-500/25 text-emerald-700 dark:text-emerald-300"
   if (status === "weak") return "border-amber-400/40 text-amber-700 dark:text-amber-300"
 
@@ -10814,11 +10900,11 @@ function MethodologyGrid({
           <div>
             <CardTitle>Opportunity methodology</CardTitle>
             <CardDescription>
-              Select the playbooks this opportunity should enforce on future calls.
+              Select the playbooks this opportunity should enforce during calls.
             </CardDescription>
           </div>
           <CardAction className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{formatPlaybooks(selectedPlaybooks)}</Badge>
+            <span className="max-w-[260px] truncate text-sm text-muted-foreground">{formatPlaybooks(selectedPlaybooks)}</span>
             <Button
               size="sm"
               className="gap-2"
@@ -10833,6 +10919,7 @@ function MethodologyGrid({
         <CardContent className="grid gap-4">
           {saveMessage ? (
             <div
+              role={saveStatus === "error" ? "alert" : "status"}
               className={cn(
                 "rounded-lg border p-3 text-sm",
                 saveStatus === "error"
@@ -10898,9 +10985,9 @@ function MethodologyGrid({
                   <CardDescription>{callPlaybookDescriptions[framework]}</CardDescription>
                 </div>
                 <CardAction>
-                  <Badge variant="secondary">
+                  <span className="text-sm text-muted-foreground">
                     {coveredCount}/{requiredFields.length} covered
-                  </Badge>
+                  </span>
                 </CardAction>
               </CardHeader>
               <CardContent className="grid gap-2">
@@ -10924,9 +11011,9 @@ function MethodologyGrid({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-medium text-foreground">{field.label}</p>
-                        <Badge variant="outline" className={cn("h-5 px-1.5 text-[11px]", getMethodologyChecklistBadgeClassName(field.status))}>
+                        <span className={cn("text-xs font-medium", getMethodologyChecklistTextClassName(field.status))}>
                           {getMethodologyChecklistStatusLabel(field.status)}
-                        </Badge>
+                        </span>
                       </div>
                       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{field.detail}</p>
                     </div>
@@ -11104,9 +11191,7 @@ function SpeakerIdentityPanel({
       } catch (caughtError: unknown) {
         touchedSpeakerLabelsRef.current.add(normalizedLabel)
         setSpeakerSaveMessage(
-          caughtError instanceof Error
-            ? `Speaker name stayed local because syncing failed: ${caughtError.message}`
-            : "Speaker name stayed local because syncing failed."
+          getUserFacingErrorMessage(caughtError, "Speaker name was applied locally and will sync when the connection recovers.")
         )
       } finally {
         setPendingSpeakerLabel(null)
@@ -11139,12 +11224,8 @@ function SpeakerIdentityPanel({
   return (
     <details className="rounded-lg bg-muted/20 px-3 py-2">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
-        <span className="min-w-0">
-          <span className="block text-xs font-medium text-muted-foreground">Speaker map</span>
-          <span className="block truncate text-xs text-muted-foreground">Names are used for this call only.</span>
-        </span>
+        <span className="text-xs font-medium text-muted-foreground">Speaker map</span>
         <span className="flex shrink-0 items-center gap-2">
-          <Badge variant="outline">{speakerRows.length} speakers</Badge>
           {nextSpeakerLabel ? (
             <Button
               type="button"
@@ -11170,11 +11251,11 @@ function SpeakerIdentityPanel({
           const isPending = pendingSpeakerLabel === speaker.label
 
           return (
-            <div key={speaker.label} className="grid gap-2 rounded-md bg-background p-2 sm:grid-cols-[96px_1fr_auto_auto] sm:items-center">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={speaker.isMe ? "default" : "secondary"} className="w-fit">
+            <div key={speaker.label} className="grid gap-2 rounded-md bg-background p-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className={cn("text-sm font-medium", speaker.isMe && "text-primary")}>
                   {speaker.label}
-                </Badge>
+                </span>
                 {speaker.lineCount > 0 ? (
                   <span className="text-xs text-muted-foreground">
                     {speaker.lineCount} {speaker.lineCount === 1 ? "turn" : "turns"}
@@ -11182,6 +11263,7 @@ function SpeakerIdentityPanel({
                 ) : null}
               </div>
               <Input
+                aria-label={`Name ${speaker.label}`}
                 value={draftValue}
                 className="h-8"
                 placeholder={speaker.label.startsWith("Speaker") ? "Name this speaker" : `${speaker.label} name`}
@@ -11204,44 +11286,46 @@ function SpeakerIdentityPanel({
                   }
                 }}
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5"
-                disabled={isPending || draftValue.trim() === savedName.trim()}
-                onClick={() =>
-                  void saveSpeakerIdentity({
-                    displayName: draftValue,
-                    label: speaker.label,
-                  })
-                }
-              >
-                <CheckIcon />
-                Save
-              </Button>
-              <Button
-                type="button"
-                variant={speaker.isMe ? "default" : "outline"}
-                size="sm"
-                className="h-8 gap-1.5"
-                disabled={isPending || speaker.isMe}
-                onClick={() =>
-                  void saveSpeakerIdentity({
-                    displayName: sellerName || "Me",
-                    isMe: true,
-                    label: speaker.label,
-                  })
-                }
-              >
-                <UserRoundCheckIcon />
-                Me
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 flex-1 gap-1.5 sm:flex-none"
+                  disabled={isPending || draftValue.trim() === savedName.trim()}
+                  onClick={() =>
+                    void saveSpeakerIdentity({
+                      displayName: draftValue,
+                      label: speaker.label,
+                    })
+                  }
+                >
+                  <CheckIcon />
+                  Save
+                </Button>
+                <Button
+                  type="button"
+                  variant={speaker.isMe ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 flex-1 gap-1.5 sm:flex-none"
+                  disabled={isPending || speaker.isMe}
+                  onClick={() =>
+                    void saveSpeakerIdentity({
+                      displayName: sellerName || "Me",
+                      isMe: true,
+                      label: speaker.label,
+                    })
+                  }
+                >
+                  <UserRoundCheckIcon />
+                  Me
+                </Button>
+              </div>
             </div>
           )
         })}
         {speakerSaveMessage ? (
-          <p className="px-1 text-xs text-muted-foreground">{speakerSaveMessage}</p>
+          <p className="px-1 text-xs text-muted-foreground" role="status">{speakerSaveMessage}</p>
         ) : null}
       </div>
     </details>
@@ -11375,12 +11459,13 @@ function LiveRail({
             </div>
           )}
           {captureError ? (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
               {captureError}
             </div>
           ) : null}
           {audioPreflight?.statusMessage ? (
             <div
+              role={audioPreflight.ok ? "status" : "alert"}
               className={cn(
                 "rounded-lg border p-3 text-sm",
                 audioPreflight.ok
@@ -11439,29 +11524,16 @@ function LiveRail({
             <TabsContent value="evidence" className="m-0 grid gap-2">
               {visibleEvidence.slice(0, 6).map((item) => (
                 <div key={item.label} className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <Badge
-                      variant={
-                        item.status === "confirmed" || item.status === "answered"
-                          ? "secondary"
-                          : item.status === "asked" || item.status === "weak"
-                            ? "outline"
-                            : "destructive"
-                      }
-                    >
-                      {item.status}
-                    </Badge>
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
                     <p className="font-medium">{item.label}</p>
-                    <Badge variant="outline">{item.framework}</Badge>
+                    <span className="text-xs text-muted-foreground">{item.framework} · {item.status}</span>
                   </div>
                   <p className="text-muted-foreground">{item.detail}</p>
                 </div>
               ))}
               {visibleEvidence.length === 0 ? (
                 <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
-                  <Badge variant="outline">
-                    <FileTextIcon className="size-3" />
-                  </Badge>
+                  <FileTextIcon className="size-4 text-muted-foreground" />
                   {hasSearch ? "No evidence matches this search" : "Evidence will appear as the conversation answers playbook fields."}
                 </div>
               ) : null}
@@ -11629,7 +11701,7 @@ function CallReplayContent({
         setRecordingUrl("")
         setRecordingLinkStatus("idle")
         setRecordingLinkError("")
-        setLastReplayAction("Recording link is not ready yet")
+        setLastReplayAction("No recording is available for this call.")
         return ""
       }
 
@@ -11643,7 +11715,7 @@ function CallReplayContent({
           : call.recordingUrl ?? ""
 
         if (requestId !== recordingLinkRequestRef.current) return ""
-        if (!nextUrl) throw new Error("Recording link is not ready yet.")
+        if (!nextUrl) throw new Error("No recording is available for this call.")
 
         setRecordingUrl(nextUrl)
         setRecordingLinkStatus("ready")
@@ -11653,10 +11725,7 @@ function CallReplayContent({
       } catch (caughtError: unknown) {
         if (requestId !== recordingLinkRequestRef.current) return ""
 
-        const message =
-          caughtError instanceof Error
-            ? caughtError.message
-            : "Recording link could not be prepared."
+        const message = getUserFacingErrorMessage(caughtError, "Recording link could not be prepared.")
         setRecordingUrl("")
         setRecordingLinkStatus("error")
         setRecordingLinkError(message)
@@ -11674,7 +11743,7 @@ function CallReplayContent({
     setRecordingLinkError("")
     setReplaySeconds(0)
     setIsReplayPlaying(false)
-    setLastReplayAction(call.recordingStoragePath || call.recordingUrl ? "Preparing recording link" : "Recording link is not ready yet")
+    setLastReplayAction(call.recordingStoragePath || call.recordingUrl ? "Preparing recording link" : "No recording is available for this call.")
     if (call.recordingStoragePath || call.recordingUrl) {
       void loadRecordingUrl()
     }
@@ -11713,7 +11782,7 @@ function CallReplayContent({
     }
 
     if (!hasPlayableRecording) {
-      setLastReplayAction("Recording URL is not ready yet")
+      setLastReplayAction("No recording is available for this call.")
       return
     }
 
@@ -11737,21 +11806,20 @@ function CallReplayContent({
       } catch (caughtError: unknown) {
         setIsReplayPlaying(false)
         setLastReplayAction(
-          caughtError instanceof Error
-            ? caughtError.message
-            : "Replay could not start. Refresh the recording link and try again."
+          getUserFacingErrorMessage(caughtError, "Replay could not start. Refresh the recording link and try again.")
         )
       }
       return
     }
 
-    setLastReplayAction("Recording player is not ready yet")
+    setLastReplayAction("Audio player is still loading.")
   }
 
   return (
     <div className="grid gap-4">
         {hasPlayableRecording ? (
           <audio
+            aria-hidden="true"
             ref={audioRef}
             src={recordingUrl || undefined}
             preload="metadata"
@@ -11869,20 +11937,20 @@ function CallReplayContent({
               onChange={(event) => setReplayVolume(Number(event.currentTarget.value))}
             />
           </div>
-          <Badge variant="secondary">90 day retention</Badge>
+          <p className="text-xs text-muted-foreground">90 day retention</p>
         </div>
         <div className="rounded-lg border bg-background p-3 text-sm text-muted-foreground">
           {lastReplayAction} / {displayedReplayTime}
         </div>
         {recordingLinkError ? (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
             {recordingLinkError}
           </div>
         ) : null}
         <div className="grid gap-2">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-medium">Call notes</p>
-            <Badge variant="outline">{replayNoteItems.length}</Badge>
+            <p className="text-xs text-muted-foreground">{replayNoteItems.length}</p>
           </div>
           {replayNoteItems.length ? (
             <div className="max-h-72 overflow-auto rounded-lg border bg-background">
@@ -11972,7 +12040,7 @@ function getCaptureStatusDescription(
   if (status === "upload-failed") return "Transcript is saved, but the audio recording upload failed."
   if (status === "stopping") return "Saving the recording and preparing post-call outputs."
   if (status === "stopped") return "The call record, transcript, and recording are saved."
-  if (permissionState === "capture-unavailable") return "This browser cannot provide audio capture."
+  if (permissionState === "capture-unavailable") return "This browser cannot share audio with SalesFrame."
 
   return "Start a call to capture meeting audio, microphone audio, or an in-person room conversation."
 }
@@ -12016,6 +12084,7 @@ function OpportunityProfile({
       <CardContent className="grid gap-4">
         {saveMessage ? (
           <div
+            role={saveStatus === "error" ? "alert" : "status"}
             className={cn(
               "rounded-lg border p-3 text-sm",
               saveStatus === "error"
@@ -12171,9 +12240,9 @@ function OpportunityIntelligence({
           <div className="rounded-lg border bg-muted/30 p-3">
             <p className="text-sm font-medium">Next best question</p>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{opportunity.nextQuestion}</p>
-            <Badge variant="outline" className="mt-3">
+            <p className="mt-3 text-xs text-muted-foreground">
               {opportunity.questionReason}
-            </Badge>
+            </p>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             {fieldGroups.map(([label, value]) => (
@@ -12198,10 +12267,10 @@ function NextCallBriefCard({ brief }: { brief: NextCallBrief }) {
           <CardTitle>What to do on the next customer call</CardTitle>
         </div>
         <CardAction>
-          <Badge variant="outline" className="gap-1.5">
-            <FileTextIcon />
+          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+            <FileTextIcon className="size-4" />
             {brief.previousCall}
-          </Badge>
+          </span>
         </CardAction>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -12305,7 +12374,7 @@ function OpportunityRecordingHistory({
     setOpenError("")
     setOpeningCallId(call.id)
 
-    const targetWindow = window.open("about:blank", "_blank")
+    const targetWindow = window.open("about:blank", "_blank", "noopener,noreferrer")
     if (targetWindow) targetWindow.opener = null
 
     try {
@@ -12314,7 +12383,7 @@ function OpportunityRecordingHistory({
         (call.recordingStoragePath ? await createCallRecordingSignedUrl(call.recordingStoragePath) : "")
 
       if (!recordingUrl) {
-        throw new Error("Recording link is not ready yet.")
+        throw new Error("No recording is available for this call.")
       }
 
       if (targetWindow) {
@@ -12324,7 +12393,7 @@ function OpportunityRecordingHistory({
       }
     } catch (caughtError: unknown) {
       targetWindow?.close()
-      setOpenError(caughtError instanceof Error ? caughtError.message : "Recording could not be opened.")
+      setOpenError(getUserFacingErrorMessage(caughtError, "Recording could not be opened."))
     } finally {
       setOpeningCallId("")
     }
@@ -12338,7 +12407,7 @@ function OpportunityRecordingHistory({
       </CardHeader>
       <CardContent className="grid gap-3">
         {openError ? (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
             {openError}
           </div>
         ) : null}
@@ -12362,9 +12431,9 @@ function OpportunityRecordingHistory({
                   </p>
                 </div>
               </div>
-              <Badge className="w-fit" variant={getCallStatusBadgeVariant(displayStatus)}>
+              <span className={cn("text-sm font-medium", getCallStatusTextClassName(displayStatus))}>
                 {displayStatus}
-              </Badge>
+              </span>
               <div className="flex gap-2 md:justify-end">
                 <Button
                   size="sm"
@@ -12520,7 +12589,7 @@ function QuestionQueuePage({
         <CardContent className="grid gap-3">
           {sortedQueue.length === 0 ? (
             <div className="rounded-lg bg-muted/30 p-4 text-sm text-muted-foreground">
-              Question queue requires live AI guidance. Start a call or wait for the cockpit to receive an OpenAI-generated question.
+              Start a call and SalesFrame will keep a short list of helpful next moves here.
             </div>
           ) : null}
           {sortedQueue.map((question) => {
@@ -12538,14 +12607,11 @@ function QuestionQueuePage({
                 isAsked && "opacity-70"
               )}
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={priority === "Now" ? "default" : "secondary"}>{priority}</Badge>
-                <Badge variant="outline">{question.framework}</Badge>
-                <Badge variant="outline">{question.target}</Badge>
-                {isActive ? <Badge variant="secondary">Selected</Badge> : null}
-                {isDeferred ? <Badge variant="outline">Moved later</Badge> : null}
-                {isAsked ? <Badge variant="secondary">Asked</Badge> : null}
-              </div>
+              <p className="text-xs font-medium text-muted-foreground">
+                {[priority, question.framework, question.target, isActive ? "Selected" : "", isDeferred ? "Moved later" : "", isAsked ? "Asked" : ""]
+                  .filter(Boolean)
+                  .join(" / ")}
+              </p>
               <p className="mt-3 text-lg font-medium leading-snug">“{question.question}”</p>
               <p className="mt-2 text-sm text-muted-foreground">{question.reason}</p>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -12574,19 +12640,19 @@ function QuestionQueuePage({
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Queue logic</CardTitle>
-          <CardDescription>Why the app shows these questions now</CardDescription>
+          <CardTitle>Why this fits</CardTitle>
+          <CardDescription>How SalesFrame keeps the next move natural</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           <ContextRow label="Opportunity" value={opportunity.name} />
           <ContextRow
-            label="Selected question"
-            value={manualCoach.activeQuestion?.question ?? "No manual override. The cockpit is using the live suggested question."}
+            label="Current choice"
+            value={manualCoach.activeQuestion?.question ?? "The cockpit is using the live recommendation."}
           />
-          <ContextRow label="Manual actions" value={manualCoach.lastAction} />
-          <ContextRow label="Methodology rule" value="Selected playbook gaps are sequenced by conversational permission, not asked as a flat checklist." />
-          <ContextRow label="Conversation rule" value="Only suggest questions that fit the customer’s last topic." />
-          <ContextRow label="UX rule" value="Use this next promotes a question to the cockpit. Move later keeps it in the queue but deprioritizes it." />
+          <ContextRow label="Recent action" value={manualCoach.lastAction} />
+          <ContextRow label="How SalesFrame chooses" value="Playbook gaps are sequenced by timing, buyer mood, and what the customer just said." />
+          <ContextRow label="Conversation fit" value="The best question is the one that moves the opportunity forward without breaking the thread." />
+          <ContextRow label="What changes it" value="Use this next brings a question into focus. Move later keeps it available without distracting the seller." />
         </CardContent>
       </Card>
     </div>
@@ -12672,6 +12738,7 @@ function OpportunitiesView({
             <div className="relative flex-1">
               <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                aria-label="Search opportunities, accounts, stakeholders, or gaps"
                 value={query}
                 className="pl-9"
                 placeholder="Search opportunities, accounts, stakeholders, or gaps"
@@ -12679,7 +12746,7 @@ function OpportunitiesView({
               />
             </div>
             <Select value={stageFilter} onValueChange={setStageFilter}>
-              <SelectTrigger className="w-full md:w-44">
+              <SelectTrigger className="w-full md:w-44" aria-label="Filter opportunities by stage">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -12692,7 +12759,7 @@ function OpportunitiesView({
               </SelectContent>
             </Select>
             <Select value={coverageFilter} onValueChange={(value) => setCoverageFilter(value as OpportunityCoverageFilter)}>
-              <SelectTrigger className="w-full md:w-44">
+              <SelectTrigger className="w-full md:w-44" aria-label="Filter opportunities by coverage">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -12704,7 +12771,7 @@ function OpportunitiesView({
               </SelectContent>
             </Select>
             <Select value={sort} onValueChange={(value) => setSort(value as OpportunitySort)}>
-              <SelectTrigger className="w-full md:w-40">
+              <SelectTrigger className="w-full md:w-40" aria-label="Sort opportunities">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -12766,7 +12833,13 @@ function OpportunitiesView({
                   <div className="flex md:justify-end">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button type="button" size="sm" variant="outline" className="min-w-[104px] justify-center gap-1.5">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="min-w-[104px] justify-center gap-1.5"
+                          aria-label={`Actions for ${opportunity.name}`}
+                        >
                           Actions
                           <ChevronDownIcon className="size-3.5" />
                         </Button>
@@ -12853,7 +12926,7 @@ function OpportunitiesView({
                 <div key={`${opportunity.id}-${stakeholder.name}-${stakeholder.role}`} className="rounded-lg border p-3">
                   <p className="text-sm font-medium">{stakeholder.name}</p>
                   <p className="text-sm text-muted-foreground">{stakeholder.role}</p>
-                  <Badge variant="outline" className="mt-2">{stakeholder.status}</Badge>
+                  <p className="mt-2 text-xs text-muted-foreground">{stakeholder.status}</p>
                 </div>
               ))
             )}
@@ -12976,6 +13049,7 @@ function CallsView({
             <div className="relative">
               <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                aria-label="Search calls, opportunities, accounts, or status"
                 value={query}
                 className="pl-9"
                 placeholder="Search calls, opportunities, accounts, or status"
@@ -12983,7 +13057,7 @@ function CallsView({
               />
             </div>
             <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full" aria-label="Filter calls by type">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -12996,7 +13070,7 @@ function CallsView({
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full" aria-label="Filter calls by status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -13040,7 +13114,7 @@ function CallsView({
                   <p className="text-sm text-muted-foreground">{call.date} · {call.type} · {displayDuration}</p>
                 </div>
               </div>
-              <Badge variant={getCallStatusBadgeVariant(displayStatus)}>{displayStatus}</Badge>
+              <span className={cn("text-sm font-medium", getCallStatusTextClassName(displayStatus))}>{displayStatus}</span>
               <div className="flex gap-2 md:justify-end">
                 <Button
                   size="sm"
@@ -13453,7 +13527,7 @@ function PlaybooksView({
       setCustomDraft(persisted)
       setCustomSaveMessage("Custom framework saved.")
     } catch (caughtError: unknown) {
-      setCustomSaveMessage(caughtError instanceof Error ? caughtError.message : "Custom framework could not be saved.")
+      setCustomSaveMessage(getUserFacingErrorMessage(caughtError, "Custom framework could not be saved."))
     } finally {
       setCustomSaving(false)
     }
@@ -13482,6 +13556,7 @@ function PlaybooksView({
             <div className="relative">
               <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                aria-label="Search playbooks, required fields, or evidence standards"
                 value={query}
                 className="pl-9"
                 placeholder="Search playbooks, required fields, or evidence standards"
@@ -13489,7 +13564,7 @@ function PlaybooksView({
               />
             </div>
             <Select value={focusFilter} onValueChange={(value) => setFocusFilter(value as PlaybookFocusFilter)}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full" aria-label="Filter playbooks by use case">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -13527,7 +13602,9 @@ function PlaybooksView({
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-medium">{playbook.name}</p>
-                  {playbook.id === "custom" ? <Badge variant="secondary">Custom framework</Badge> : null}
+                  {playbook.id === "custom" ? (
+                    <span className="text-xs text-muted-foreground">Custom framework</span>
+                  ) : null}
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{playbook.description}</p>
               </div>
@@ -13674,7 +13751,7 @@ function CustomFrameworkEditor({
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <p className="text-sm text-muted-foreground">Playbook</p>
-            <Badge variant="secondary">Custom framework</Badge>
+            <span className="text-sm text-muted-foreground">Custom framework</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">{draft.frameworkName}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{draft.description}</p>
@@ -13691,7 +13768,9 @@ function CustomFrameworkEditor({
             <CardDescription>Name the framework and define how the coach should use it.</CardDescription>
           </div>
           <CardAction className="flex flex-wrap items-center gap-2">
-            {saveMessage ? <Badge variant="outline">{saveMessage}</Badge> : null}
+            {saveMessage ? (
+              <p className="text-sm text-muted-foreground" aria-live="polite">{saveMessage}</p>
+            ) : null}
             <Button variant="outline" size="sm" disabled={!hasChanges || isSaving} onClick={onReset}>
               Reset
             </Button>
@@ -13757,7 +13836,7 @@ function CustomFrameworkEditor({
             {draft.fields.map((field, index) => (
               <div key={field.id} className="grid gap-3 rounded-lg border bg-muted/20 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <Badge variant="outline">Field {index + 1}</Badge>
+                  <p className="text-xs font-medium text-muted-foreground">Field {index + 1}</p>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -13811,7 +13890,7 @@ function CustomFrameworkEditor({
               {draft.exitCriteria.map((criterion, index) => (
                 <div key={criterion.id} className="grid gap-2 rounded-lg border bg-muted/20 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Badge variant="outline">Criteria {index + 1}</Badge>
+                    <p className="text-xs font-medium text-muted-foreground">Criteria {index + 1}</p>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -13876,6 +13955,7 @@ function PersonalAccountView({
   const [avatarUploadPending, setAvatarUploadPending] = React.useState(false)
   const [deletePhrase, setDeletePhrase] = React.useState("")
   const [deletionRequested, setDeletionRequested] = React.useState(false)
+  const avatarInputRef = React.useRef<HTMLInputElement | null>(null)
   const initials = draft.fullName
     .split(/\s+/)
     .filter(Boolean)
@@ -13927,7 +14007,7 @@ function PersonalAccountView({
       updateDraft("avatarUrl", avatarUrl)
       setStatusMessage("Photo ready. Save profile to use it.")
     } catch (caughtError: unknown) {
-      setStatusMessage(caughtError instanceof Error ? caughtError.message : "Photo could not be uploaded.")
+      setStatusMessage(getUserFacingErrorMessage(caughtError, "Photo could not be uploaded."))
     } finally {
       setAvatarUploadPending(false)
     }
@@ -13975,7 +14055,7 @@ function PersonalAccountView({
       })
       setStatusMessage("Profile saved.")
     } catch (caughtError: unknown) {
-      setStatusMessage(caughtError instanceof Error ? caughtError.message : "Profile could not be saved.")
+      setStatusMessage(getUserFacingErrorMessage(caughtError, "Profile could not be saved."))
     } finally {
       setProfileSavePending(false)
     }
@@ -14013,9 +14093,6 @@ function PersonalAccountView({
               </p>
             </div>
           </div>
-          <CardAction>
-            <Badge variant="secondary">{profile.role}</Badge>
-          </CardAction>
         </CardHeader>
       </Card>
 
@@ -14025,9 +14102,11 @@ function PersonalAccountView({
             <CardTitle>Profile details</CardTitle>
             <CardDescription>These details identify you in the product and connected outputs</CardDescription>
           </div>
-          <CardAction>
-            <Badge variant={hasChanges ? "default" : "outline"}>{hasChanges ? "Unsaved" : "Saved"}</Badge>
-          </CardAction>
+          {hasChanges ? (
+            <CardAction>
+              <p className="text-sm text-muted-foreground" aria-live="polite">Unsaved changes</p>
+            </CardAction>
+          ) : null}
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="flex flex-col gap-3 rounded-lg bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -14045,24 +14124,24 @@ function PersonalAccountView({
             </div>
             <div className="flex flex-wrap gap-2">
               <Input
+                ref={avatarInputRef}
                 id="personal-avatar-upload"
-                className="sr-only"
+                aria-hidden="true"
+                className="hidden"
+                tabIndex={-1}
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/gif"
                 disabled={avatarUploadPending || profileSavePending}
                 onChange={handleAvatarUpload}
               />
-              <Label
-                htmlFor="personal-avatar-upload"
-                aria-disabled={avatarUploadPending || profileSavePending}
-                className={cn(
-                  "inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground",
-                  (avatarUploadPending || profileSavePending) && "pointer-events-none opacity-50"
-                )}
+              <Button
+                variant="outline"
+                disabled={avatarUploadPending || profileSavePending}
+                onClick={() => avatarInputRef.current?.click()}
               >
                 <ImageIcon className="size-4" />
                 {avatarUploadPending ? "Preparing..." : "Upload photo"}
-              </Label>
+              </Button>
               <Button
                 variant="outline"
                 disabled={!draft.avatarUrl || avatarUploadPending || profileSavePending}
@@ -14351,9 +14430,7 @@ function SellerResearchProfileCard({
 
           setStatus("error")
           setMessage(
-            error instanceof Error
-              ? error.message
-              : "OpenAI could not research this domain. You can type what you sell manually."
+            getUserFacingErrorMessage(error, "OpenAI could not research this domain. You can type what you sell manually.")
           )
         })
     }, sellerDomainLookupDebounceMs)
@@ -14399,13 +14476,15 @@ function SellerResearchProfileCard({
           <CardTitle>Selling context</CardTitle>
           <CardDescription>Used to prefill customer research across account, opportunity, and call setup</CardDescription>
         </div>
-        <CardAction>
-          <Badge variant={hasChanges ? "default" : "outline"}>{hasChanges ? "Unsaved" : "Saved"}</Badge>
-        </CardAction>
+        {hasChanges ? (
+          <CardAction>
+            <p className="text-sm text-muted-foreground" aria-live="polite">Unsaved changes</p>
+          </CardAction>
+        ) : null}
       </CardHeader>
       <CardContent className="grid gap-4">
         {!hasSavedOpenAiKey ? (
-          <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 sm:flex-row sm:items-center sm:justify-between" role="alert">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <CircleAlertIcon className="size-4 text-destructive" />
@@ -14765,7 +14844,7 @@ function SettingsView({
       .catch((caughtError: unknown) => {
         if (cancelled) return
 
-        setSaveMessage(caughtError instanceof Error ? caughtError.message : "OpenAI key status could not be loaded.")
+        setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key status could not be loaded."))
       })
 
     return () => {
@@ -14795,7 +14874,7 @@ function SettingsView({
       setApiKey("")
       setSaveMessage("OpenAI key connection saved.")
     } catch (caughtError: unknown) {
-      setSaveMessage(caughtError instanceof Error ? caughtError.message : "OpenAI key could not be saved.")
+      setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key could not be saved."))
     } finally {
       setIsSavingKey(false)
     }
@@ -14813,7 +14892,7 @@ function SettingsView({
       setApiKey("")
       setSaveMessage("OpenAI key connection removed.")
     } catch (caughtError: unknown) {
-      setSaveMessage(caughtError instanceof Error ? caughtError.message : "OpenAI key could not be removed.")
+      setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key could not be removed."))
     } finally {
       setIsSavingKey(false)
     }
@@ -14837,6 +14916,9 @@ function SettingsView({
                   id="openai-api-key"
                   type="password"
                   autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={apiKey}
                   placeholder="sk-proj-..."
                   onChange={(event) => {
@@ -14942,13 +15024,12 @@ function SettingsView({
             ].map((item) => (
               <div key={item.id} className="flex items-center justify-between gap-4 rounded-lg border p-3">
                 <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Label className="text-sm font-medium">{item.title}</Label>
-                    <Badge variant="secondary">{captureSettings[item.id] ? "Active" : "Off"}</Badge>
-                  </div>
+                  <Label htmlFor={`capture-setting-${item.id}`} className="text-sm font-medium">{item.title}</Label>
                   <p className="mt-1 text-sm text-muted-foreground">{item.body}</p>
                 </div>
                 <Switch
+                  id={`capture-setting-${item.id}`}
+                  aria-label={`Toggle ${item.title}`}
                   checked={captureSettings[item.id]}
                   disabled={!item.configurable}
                   onCheckedChange={(checked) =>

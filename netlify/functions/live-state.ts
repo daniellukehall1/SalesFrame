@@ -4,6 +4,7 @@ import { getEnv } from "./_shared/env"
 import { badRequest, dataResponse, errorResponse, forbidden, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeAccount, authorizeCall, authorizeOpportunity, requireUser } from "./_shared/supabase"
 
 type LiveStatePayload = {
@@ -103,6 +104,13 @@ export default async (request: Request, _context: Context) => {
     if (call.account_id !== account.id) throw forbidden("Call does not belong to this account.")
     if (call.opportunity_id !== opportunity.id) throw forbidden("Call does not belong to this opportunity.")
     if (opportunity.account_id !== account.id) throw forbidden("Opportunity does not belong to this account.")
+
+    assertRateLimit({
+      key: `${user.id}:${call.id}`,
+      limit: 180,
+      name: "live state",
+      windowMs: 60 * 1000,
+    })
 
     const apiKey = await getDecryptedOpenAiKey(supabase, user.id, call.workspace_id)
     const result = requireRecord(

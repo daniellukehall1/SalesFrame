@@ -48,7 +48,7 @@ export const currencyLabels: Record<CurrencyCode, string> = {
 }
 
 export function normalizeCurrencyCode(value: string | null | undefined): CurrencyCode {
-  const normalized = (value ?? "").toUpperCase()
+  const normalized = (value ?? "").trim().toUpperCase()
 
   return currencyOptions.includes(normalized as CurrencyCode)
     ? (normalized as CurrencyCode)
@@ -317,6 +317,7 @@ export type StartRecordingPayload = {
   accountMode: "existing" | "new"
   accountId: string
   accountName: string
+  accountWebsite: string
   accountIndustry: string
   accountCurrency: CurrencyCode
   audioCaptureMode: CallAudioCaptureMode

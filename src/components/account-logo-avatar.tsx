@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import {
+  buildAccountLogoFallbackUrl,
   buildAccountLogoUrl,
   getAccountLogoInitials,
   normalizeAccountLogoDomain,
@@ -28,14 +29,23 @@ export function AccountLogoAvatar({
   retryKey?: string | null
   size?: keyof typeof accountLogoSizeClasses
 }) {
-  const [imageFailed, setImageFailed] = React.useState(false)
+  const [failedLogoUrls, setFailedLogoUrls] = React.useState<Set<string>>(() => new Set())
   const normalizedDomain = normalizeAccountLogoDomain(domain)
-  const resolvedLogoUrl = logoUrl || buildAccountLogoUrl(normalizedDomain, { size: size === "lg" ? 96 : 64 })
-  const shouldShowImage = Boolean(resolvedLogoUrl && !imageFailed)
+  const logoSize = size === "lg" ? 96 : 64
+  const candidateLogoUrls = React.useMemo(
+    () => [
+      logoUrl ?? "",
+      buildAccountLogoUrl(normalizedDomain, { size: logoSize }),
+      buildAccountLogoFallbackUrl(normalizedDomain, { size: logoSize }),
+    ].filter((url, index, urls) => Boolean(url) && urls.indexOf(url) === index),
+    [logoSize, logoUrl, normalizedDomain]
+  )
+  const resolvedLogoUrl = candidateLogoUrls.find((url) => !failedLogoUrls.has(url)) ?? ""
+  const shouldShowImage = Boolean(resolvedLogoUrl)
 
   React.useEffect(() => {
-    setImageFailed(false)
-  }, [resolvedLogoUrl, retryKey])
+    setFailedLogoUrls(new Set())
+  }, [candidateLogoUrls, retryKey])
 
   return (
     <span
@@ -55,7 +65,13 @@ export function AccountLogoAvatar({
           referrerPolicy="origin"
           src={resolvedLogoUrl}
           width={size === "lg" ? 48 : size === "md" ? 40 : 28}
-          onError={() => setImageFailed(true)}
+          onError={() => {
+            setFailedLogoUrls((urls) => {
+              const nextUrls = new Set(urls)
+              nextUrls.add(resolvedLogoUrl)
+              return nextUrls
+            })
+          }}
         />
       ) : (
         <span className="font-medium tracking-normal">{getAccountLogoInitials(name)}</span>
