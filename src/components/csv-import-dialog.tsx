@@ -439,13 +439,13 @@ export function CsvImportDialog({
           {step === "map" ? (
             <div className="grid gap-4">
               <div className="rounded-lg border">
-                <div className="grid grid-cols-[minmax(0,1fr)_260px] gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">
+                <div className="hidden grid-cols-[minmax(0,1fr)_minmax(13rem,16.25rem)] gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground md:grid">
                   <span>CSV column</span>
                   <span>SalesFrame field</span>
                 </div>
                 <div className="divide-y">
                   {headers.map((header) => (
-                    <div key={header} className="grid grid-cols-[minmax(0,1fr)_260px] items-center gap-3 px-3 py-2">
+                    <div key={header} className="grid min-w-0 gap-3 px-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(13rem,16.25rem)] md:items-center md:py-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{header}</p>
                         <p className="truncate text-xs text-muted-foreground">{rows[0]?.[header] || "No sample value"}</p>
