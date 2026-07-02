@@ -400,10 +400,12 @@ function WorkspaceFormDialog({
             </Select>
           </div>
           {statusMessage ? (
-            <p className="text-sm text-destructive" aria-live="polite">{statusMessage}</p>
+            <p className="text-sm text-destructive" aria-live="assertive" role="alert">
+              {statusMessage}
+            </p>
           ) : null}
         </div>
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
@@ -457,7 +459,7 @@ function DeleteWorkspaceDialog({
             Create another workspace before deleting this one. SalesFrame keeps one workspace so your account has somewhere to store accounts, calls, and settings.
           </p>
         ) : null}
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>

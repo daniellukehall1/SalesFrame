@@ -78,12 +78,20 @@ test("modal dismissal stays deliberate on prep and destructive dialogs", async (
   const workspaceSwitcher = await read("src/components/workspace-switcher.tsx")
   const callPrepDialog = app.slice(app.indexOf("function CallPrepDialog"), app.indexOf("type StartCallPreparationStep"))
   const deleteDialog = app.slice(app.indexOf("function DeleteRecordDialog"), app.indexOf("function PlaybookMultiSelect"))
+  const editWorkspaceDialog = workspaceSwitcher.slice(
+    workspaceSwitcher.indexOf("function WorkspaceFormDialog"),
+    workspaceSwitcher.indexOf("function DeleteWorkspaceDialog")
+  )
   const deleteWorkspaceDialog = workspaceSwitcher.slice(workspaceSwitcher.indexOf("function DeleteWorkspaceDialog"))
 
   for (const dialogSource of [callPrepDialog, deleteDialog, deleteWorkspaceDialog]) {
     assert.match(dialogSource, /onEscapeKeyDown=\{\(event\) => event\.preventDefault\(\)\}/)
     assert.match(dialogSource, /onInteractOutside=\{\(event\) => event\.preventDefault\(\)\}/)
     assert.match(dialogSource, /onPointerDownOutside=\{\(event\) => event\.preventDefault\(\)\}/)
+  }
+
+  for (const dialogSource of [deleteDialog, editWorkspaceDialog, deleteWorkspaceDialog]) {
+    assert.match(dialogSource, /<DialogFooter className="gap-3 max-sm:\[&_\[data-slot=button\]\]:w-full sm:justify-between">/)
   }
 })
 
@@ -618,6 +626,11 @@ test("CSV import lives only on the personal Account page and scopes to the selec
   assert.doesNotMatch(customerAccountView, /Import opportunities/)
 
   assert.match(dialog, /maximum 5MB and 5,000 rows/i)
+  assert.match(dialog, /function getCsvParseErrorMessage/)
+  assert.match(dialog, /One or more rows do not line up with the header columns/)
+  assert.match(dialog, /SalesFrame could not read the CSV format/)
+  assert.doesNotMatch(dialog, /setParseMessage\(error\.message/)
+  assert.doesNotMatch(dialog, /setParseMessage\(result\.errors\[0\]\?\.message/)
   assert.doesNotMatch(dialog, /Or paste CSV data/)
   assert.doesNotMatch(dialog, /Use pasted CSV/)
   assert.doesNotMatch(dialog, /Pasted CSV/)
@@ -645,7 +658,10 @@ test("CSV import lives only on the personal Account page and scopes to the selec
   assert.match(dialog, /CSV import progress: \$\{currentStep\.label\}/)
   assert.match(dialog, /role="list" aria-label="CSV import steps"/)
   assert.match(dialog, /role="listitem"[\s\S]*aria-current=\{isActive \? "step" : undefined\}/)
-  assert.match(dialog, /grid grid-cols-5 gap-2/)
+  assert.match(dialog, /grid grid-cols-5 gap-1\.5 sm:gap-2/)
+  assert.match(dialog, /justify-center[\s\S]*sm:justify-start/)
+  assert.match(dialog, /title=\{label\}/)
+  assert.match(dialog, /className="hidden truncate font-medium sm:inline"/)
   assert.doesNotMatch(uploadStepContent, /<ImportMeta/)
   assert.match(uploadStepContent, /ref=\{fileInputRef\}/)
   assert.match(uploadStepContent, /Choose file/)
@@ -1719,11 +1735,11 @@ test("media and transient status states stay calm for assistive technology", asy
   assert.ok((authPage.match(/<AudioLinesIcon aria-hidden="true" className="size-4" \/>/g) ?? []).length >= 2)
   assert.match(workspaceSwitcher, /<Icon aria-hidden="true" className="size-4" \/>/)
   assert.match(workspaceSwitcher, /<AudioLinesIcon aria-hidden="true" className="size-4" \/>/)
-  assert.match(workspaceSwitcher, /className="text-sm text-destructive" aria-live="polite">\{statusMessage\}/)
+  assert.match(workspaceSwitcher, /className="text-sm text-destructive" aria-live="assertive" role="alert"[\s\S]*\{statusMessage\}/)
   assert.match(app, /coachError \? \([\s\S]*role="alert"[\s\S]*\{coachError\}/)
   assert.match(app, /captureError \? \([\s\S]*role="alert"[\s\S]*\{captureError\}/)
   assert.match(app, /role=\{audioPreflight\.ok \? "status" : "alert"\}/)
-  assert.match(app, /speakerSaveMessage \? \([\s\S]*role="status"[\s\S]*\{speakerSaveMessage\}/)
+  assert.match(app, /speakerSaveMessage \? \([\s\S]*role=\{speakerSaveTone === "saved" \? "status" : "alert"\}[\s\S]*\{speakerSaveMessage\}/)
 })
 
 test("record mutation dialogs keep failures inline", async () => {
@@ -2231,6 +2247,9 @@ test("transcript speaker labels are confidence-aware and editable", async () => 
   assert.match(speakerMap, /void saveSpeakerIdentity/)
   assert.match(speakerMap, /pendingSpeakerLabel/)
   assert.match(speakerMap, /speakerSaveMessage/)
+  assert.match(speakerMap, /speakerSaveTone/)
+  assert.match(speakerMap, /result\.persistence === "saved" \? "saved" : "local"/)
+  assert.match(speakerMap, /text-amber-700 dark:text-amber-400/)
   assert.match(speakerMap, /touchedSpeakerLabelsRef/)
   assert.match(speakerMap, /event\.preventDefault\(\)/)
   assert.doesNotMatch(speakerMap, /"Speaker 1", "Speaker 2"/)
@@ -2344,6 +2363,11 @@ test("setup flows use saved OpenAI keys and route missing keys to settings", asy
   assert.doesNotMatch(settingsPage, /Available soon/)
   assert.doesNotMatch(settingsPage, /ready to test|test AI-powered/)
   assert.match(settingsPage, /Add your key to power transcription, notes, and question guidance for this workspace\./)
+  assert.match(settingsPage, /const \[saveMessageTone, setSaveMessageTone\]/)
+  assert.match(settingsPage, /const keyFeedbackMessage = saveMessage \|\| keyStatusMessage/)
+  assert.match(settingsPage, /const keyFeedbackIsError = saveMessage \? saveMessageTone === "error" : Boolean\(keyStatusMessage\)/)
+  assert.match(settingsPage, /aria-live=\{keyFeedbackIsError \? "assertive" : "polite"\}/)
+  assert.match(settingsPage, /role=\{keyFeedbackIsError \? "alert" : "status"\}/)
 })
 
 test("Start Call research step routes missing OpenAI keys to settings", async () => {

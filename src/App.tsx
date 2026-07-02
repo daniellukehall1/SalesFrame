@@ -8787,7 +8787,7 @@ function DeleteRecordDialog({
             {deleteError}
           </div>
         ) : null}
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           <Button variant="outline" disabled={deleteSubmitting} onClick={onCancel}>
             Cancel
           </Button>
@@ -11367,6 +11367,7 @@ function SpeakerIdentityPanel({
   const [addedSpeakerLabels, setAddedSpeakerLabels] = React.useState<TranscriptSpeaker[]>([])
   const [pendingSpeakerLabel, setPendingSpeakerLabel] = React.useState<TranscriptSpeaker | null>(null)
   const [speakerSaveMessage, setSpeakerSaveMessage] = React.useState("")
+  const [speakerSaveTone, setSpeakerSaveTone] = React.useState<"saved" | "local" | "error">("saved")
   const touchedSpeakerLabelsRef = React.useRef(new Set<TranscriptSpeaker>())
   const speakerRows = React.useMemo(() => {
     const labels = new Map<TranscriptSpeaker, { displayName: string; lineCount: number }>()
@@ -11432,6 +11433,7 @@ function SpeakerIdentityPanel({
 
       setPendingSpeakerLabel(normalizedLabel)
       setSpeakerSaveMessage("")
+      setSpeakerSaveTone("saved")
 
       try {
         const result = await onSpeakerIdentityChange({
@@ -11443,9 +11445,11 @@ function SpeakerIdentityPanel({
           ...items,
           [normalizedLabel]: (payload.isMe ? sellerName || "Me" : payload.displayName).trim(),
         }))
+        setSpeakerSaveTone(result.persistence === "saved" ? "saved" : "local")
         setSpeakerSaveMessage(result.message || (result.persistence === "saved" ? "Speaker name saved." : "Speaker name applied locally."))
       } catch (caughtError: unknown) {
         touchedSpeakerLabelsRef.current.add(normalizedLabel)
+        setSpeakerSaveTone("error")
         setSpeakerSaveMessage(
           getUserFacingErrorMessage(caughtError, "Speaker name was applied locally and will sync when the connection recovers.")
         )
@@ -11527,6 +11531,7 @@ function SpeakerIdentityPanel({
                 onChange={(event) => {
                   touchedSpeakerLabelsRef.current.add(speaker.label)
                   setSpeakerSaveMessage("")
+                  setSpeakerSaveTone("saved")
                   setDraftNames((items) => ({
                     ...items,
                     [speaker.label]: event.currentTarget.value,
@@ -11581,7 +11586,17 @@ function SpeakerIdentityPanel({
           )
         })}
         {speakerSaveMessage ? (
-          <p className="px-1 text-xs text-muted-foreground" role="status">{speakerSaveMessage}</p>
+          <p
+            className={cn(
+              "px-1 text-xs",
+              speakerSaveTone === "saved" && "text-muted-foreground",
+              speakerSaveTone === "local" && "text-amber-700 dark:text-amber-400",
+              speakerSaveTone === "error" && "text-destructive"
+            )}
+            role={speakerSaveTone === "saved" ? "status" : "alert"}
+          >
+            {speakerSaveMessage}
+          </p>
         ) : null}
       </div>
     </details>
@@ -15137,6 +15152,7 @@ function SettingsView({
   const [apiKey, setApiKey] = React.useState("")
   const [isSavingKey, setIsSavingKey] = React.useState(false)
   const [saveMessage, setSaveMessage] = React.useState("")
+  const [saveMessageTone, setSaveMessageTone] = React.useState<"success" | "error">("success")
   const [captureSettings, setCaptureSettings] = React.useState<CaptureSettings>(() => readCaptureSettings(workspaceId))
   const [captureSettingsMessage, setCaptureSettingsMessage] = React.useState("")
   const hasApiKey = apiKey.trim().length > 0
@@ -15164,6 +15180,7 @@ function SettingsView({
       .catch((caughtError: unknown) => {
         if (cancelled) return
 
+        setSaveMessageTone("error")
         setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key status could not be loaded."))
       })
 
@@ -15177,6 +15194,7 @@ function SettingsView({
 
     setIsSavingKey(true)
     setSaveMessage("")
+    setSaveMessageTone("success")
 
     try {
       if (!workspaceId) throw new Error("Select a workspace before saving an OpenAI key.")
@@ -15192,8 +15210,10 @@ function SettingsView({
 
       onSavedKeyStateChange(nextState)
       setApiKey("")
+      setSaveMessageTone("success")
       setSaveMessage("OpenAI key connection saved.")
     } catch (caughtError: unknown) {
+      setSaveMessageTone("error")
       setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key could not be saved."))
     } finally {
       setIsSavingKey(false)
@@ -15203,6 +15223,7 @@ function SettingsView({
   const handleRemoveKey = async () => {
     setIsSavingKey(true)
     setSaveMessage("")
+    setSaveMessageTone("success")
 
     try {
       if (!workspaceId) throw new Error("Select a workspace before removing an OpenAI key.")
@@ -15210,8 +15231,10 @@ function SettingsView({
       await deleteOpenAiKey(workspaceId)
       onSavedKeyStateChange(null)
       setApiKey("")
+      setSaveMessageTone("success")
       setSaveMessage("OpenAI key connection removed.")
     } catch (caughtError: unknown) {
+      setSaveMessageTone("error")
       setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key could not be removed."))
     } finally {
       setIsSavingKey(false)
@@ -15231,6 +15254,9 @@ function SettingsView({
         : "Capture preference changed for this session. Browser storage was not available."
     )
   }
+
+  const keyFeedbackMessage = saveMessage || keyStatusMessage
+  const keyFeedbackIsError = saveMessage ? saveMessageTone === "error" : Boolean(keyStatusMessage)
 
   return (
     <div className="grid gap-4">
@@ -15258,6 +15284,7 @@ function SettingsView({
                   onChange={(event) => {
                     setApiKey(event.currentTarget.value)
                     setSaveMessage("")
+                    setSaveMessageTone("success")
                   }}
                 />
                 <Button type="button" className="gap-2" disabled={!hasApiKey || isSavingKey} onClick={handleSaveKey}>
@@ -15310,9 +15337,13 @@ function SettingsView({
                 </div>
               ) : null}
 
-              {saveMessage || keyStatusMessage ? (
-                <p className="text-sm text-muted-foreground" aria-live="polite">
-                  {saveMessage || keyStatusMessage}
+              {keyFeedbackMessage ? (
+                <p
+                  className={cn("text-sm", keyFeedbackIsError ? "text-destructive" : "text-muted-foreground")}
+                  aria-live={keyFeedbackIsError ? "assertive" : "polite"}
+                  role={keyFeedbackIsError ? "alert" : "status"}
+                >
+                  {keyFeedbackMessage}
                 </p>
               ) : null}
             </div>

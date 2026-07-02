@@ -73,6 +73,21 @@ const importSteps: Array<{ icon: React.ElementType; label: string; value: CsvImp
   { value: "summary", label: "Summary", icon: CheckCircle2Icon },
 ]
 
+function getCsvParseErrorMessage(error: { code?: string; message?: string } | undefined) {
+  const code = error?.code ?? ""
+  const message = error?.message ?? ""
+
+  if (/FieldMismatch/i.test(code) || /Too few fields|Too many fields/i.test(message)) {
+    return "One or more rows do not line up with the header columns. Check commas, quotes, and blank columns, then upload the CSV again."
+  }
+
+  if (/UndetectableDelimiter/i.test(code) || /delimiter/i.test(message)) {
+    return "SalesFrame could not read the CSV format. Export the file as a standard comma-separated CSV, then upload it again."
+  }
+
+  return "CSV could not be parsed. Check the file format, then upload it again."
+}
+
 export function CsvImportDialog({
   accounts,
   defaultCurrency,
@@ -218,7 +233,7 @@ export function CsvImportDialog({
         handleParseComplete(result, sourceName)
       },
       error: (error) => {
-        setParseMessage(error.message || "CSV could not be parsed.")
+        setParseMessage(getCsvParseErrorMessage(error))
       },
     })
   }
@@ -230,7 +245,7 @@ export function CsvImportDialog({
     )
 
     if (result.errors.length) {
-      setParseMessage(result.errors[0]?.message ?? "CSV could not be parsed.")
+      setParseMessage(getCsvParseErrorMessage(result.errors[0]))
       return
     }
 
@@ -350,7 +365,7 @@ export function CsvImportDialog({
             Step {activeStepIndex + 1} of {importSteps.length}: {currentStep.label}
           </p>
           <Progress value={progress} aria-label={`CSV import progress: ${currentStep.label}`} />
-          <div className="grid grid-cols-5 gap-2" role="list" aria-label="CSV import steps">
+          <div className="grid grid-cols-5 gap-1.5 sm:gap-2" role="list" aria-label="CSV import steps">
             {importSteps.map(({ value, label, icon: Icon }) => {
               const itemIndex = importSteps.findIndex((item) => item.value === value)
               const isActive = step === value
@@ -362,10 +377,11 @@ export function CsvImportDialog({
                   role="listitem"
                   aria-current={isActive ? "step" : undefined}
                   className={cn(
-                    "flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-sm",
+                    "flex min-w-0 items-center justify-center rounded-lg border px-1.5 py-2 text-sm sm:justify-start sm:gap-2 sm:px-2",
                     isActive && "border-primary bg-primary/5",
                     isComplete && "bg-muted/50"
                   )}
+                  title={label}
                 >
                   <span
                     className={cn(
@@ -375,7 +391,7 @@ export function CsvImportDialog({
                   >
                     {isComplete ? <CheckCircle2Icon className="size-4" /> : <Icon className="size-4" />}
                   </span>
-                  <span className="truncate font-medium">{label}</span>
+                  <span className="hidden truncate font-medium sm:inline">{label}</span>
                 </div>
               )
             })}
