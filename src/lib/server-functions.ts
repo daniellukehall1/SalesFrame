@@ -6,6 +6,7 @@ import type {
   CsvImportSummary,
 } from "@/lib/csv-import"
 import type { AccountEnrichmentProfileRow, AccountEnrichmentRunRow, AccountRow } from "@/lib/supabase/salesframe-data"
+import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
 
 export type OpenAiKeyStatus = {
   connected: boolean
@@ -97,6 +98,8 @@ async function readFunctionPayload<T>(response: Response): Promise<FunctionEnvel
 }
 
 function getFunctionErrorMessage(payload: unknown) {
+  const fallback = "SalesFrame could not finish that request. Try again in a moment."
+
   if (
     payload &&
     typeof payload === "object" &&
@@ -111,10 +114,12 @@ function getFunctionErrorMessage(payload: unknown) {
 
     const message = (payload.error as { message?: unknown }).message
 
-    if (typeof message === "string" && message.trim()) return message
+    if (typeof message === "string" && message.trim()) {
+      return getUserFacingErrorMessage(message, fallback)
+    }
   }
 
-  return "SalesFrame could not finish that request. Try again in a moment."
+  return fallback
 }
 
 async function callFunction<T>(path: string, options: FunctionRequestOptions = {}): Promise<T> {
