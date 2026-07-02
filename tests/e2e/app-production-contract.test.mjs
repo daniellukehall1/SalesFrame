@@ -87,6 +87,15 @@ test("modal dismissal stays deliberate on prep and destructive dialogs", async (
   }
 })
 
+test("last workspace deletion explains the guard instead of hiding the action", async () => {
+  const workspaceSwitcher = await read("src/components/workspace-switcher.tsx")
+
+  assert.doesNotMatch(workspaceSwitcher, /disabled=\{workspaces\.length <= 1\}/)
+  assert.match(workspaceSwitcher, /const isLastWorkspace = workspaceCount <= 1/)
+  assert.match(workspaceSwitcher, /Create another workspace before deleting this one/)
+  assert.match(workspaceSwitcher, /disabled=\{isLastWorkspace\}/)
+})
+
 test("Start Call uses the real call capture hook and post-call function", async () => {
   const app = await read("src/App.tsx")
 
@@ -871,6 +880,9 @@ test("custom framework playbook has an editable builder", async () => {
   assert.match(app, /Add field/)
   assert.match(app, /Add criterion/)
   assert.match(app, /customFrameworkStorageKey/)
+  assert.match(app, /window\.localStorage\.getItem\(customFrameworkStorageKey\)/)
+  assert.match(app, /window\.localStorage\.setItem\(customFrameworkStorageKey, JSON\.stringify\(normalized\)\)/)
+  assert.match(app, /Storage can be unavailable in restricted browser modes\. The backend save still keeps the custom framework\./)
   assert.match(app, /onSaveCustomFramework/)
   assert.match(data, /upsertWorkspaceCustomPlaybook/)
   assert.match(data, /replacePlaybookFields/)
@@ -1201,12 +1213,18 @@ test("account opportunities render as aligned table rows", async () => {
   assert.match(app, /<th className="hidden w-\[96px\] px-3 py-2 text-center font-medium xl:table-cell">Gaps<\/th>/)
   assert.match(app, /<th className="w-\[128px\] px-2 py-2 text-right font-medium">Action<\/th>/)
   assert.match(app, /className="min-w-\[104px\] justify-center gap-1\.5"/)
-  assert.match(accountView, /className="cursor-pointer border-b transition-colors hover:bg-muted\/30 last:border-b-0"/)
+  assert.match(accountView, /tabIndex=\{0\}/)
+  assert.match(accountView, /role="button"/)
+  assert.match(accountView, /className="cursor-pointer border-b transition-colors hover:bg-muted\/30 focus-visible:bg-muted\/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 last:border-b-0"/)
   assert.match(accountView, /onClick=\{\(\) => onOpportunitySelect\(opportunity\.id\)\}/)
   assert.match(accountView, /aria-label=\{`Open \$\{opportunity\.name\}`\}/)
+  assert.match(accountView, /if \(event\.currentTarget !== event\.target\) return/)
+  assert.match(accountView, /if \(event\.key !== "Enter" && event\.key !== " "\) return/)
+  assert.match(accountView, /event\.preventDefault\(\)[\s\S]*onOpportunitySelect\(opportunity\.id\)/)
   assert.match(accountView, /onClick=\{\(event\) => \{[\s\S]*event\.stopPropagation\(\)[\s\S]*onOpportunitySelect\(opportunity\.id\)/)
   assert.match(accountView, /className="px-2 py-3 text-right align-middle"[\s\S]*onClick=\{\(event\) => event\.stopPropagation\(\)\}/)
-  assert.doesNotMatch(accountView, /<tr[\s\S]{0,240}role="button"[\s\S]{0,240}tabIndex=\{0\}/)
+  assert.doesNotMatch(accountView, /<td className="hidden px-3 py-3 align-middle text-muted-foreground lg:table-cell" onClick/)
+  assert.doesNotMatch(accountView, /<td className="px-3 py-3 align-middle" onClick/)
   assert.match(accountView, /<DropdownMenuTrigger asChild>/)
   assert.match(accountView, /aria-label=\{`Actions for \$\{opportunity\.name\}`\}/)
   assert.match(accountView, /Actions/)
@@ -1474,9 +1492,10 @@ test("mobile viewport uses safe areas, scrollable tabs, and reachable call actio
   assert.match(dialog, /max-sm:pb-\[calc\(1rem\+env\(safe-area-inset-bottom\)\)\]/)
 })
 
-test("color mode preference persists across browser reloads", async () => {
+test("browser preferences persist without UI-state cookies", async () => {
   const app = await read("src/App.tsx")
   const html = await read("index.html")
+  const sidebar = await read("src/components/ui/sidebar.tsx")
 
   assert.match(app, /const colorModeStorageKey = "salesframe\.color-mode"/)
   assert.match(app, /function getInitialDarkMode\(\)/)
@@ -1484,6 +1503,11 @@ test("color mode preference persists across browser reloads", async () => {
   assert.match(app, /window\.localStorage\.setItem\(colorModeStorageKey, darkMode \? "dark" : "light"\)/)
   assert.match(html, /window\.localStorage\.getItem\("salesframe\.color-mode"\) === "dark"/)
   assert.match(html, /document\.documentElement\.classList\.add\("dark"\)/)
+  assert.match(sidebar, /const SIDEBAR_STORAGE_KEY = "salesframe\.sidebar-state"/)
+  assert.match(sidebar, /window\.localStorage\.getItem\(SIDEBAR_STORAGE_KEY\)/)
+  assert.match(sidebar, /window\.localStorage\.setItem\(SIDEBAR_STORAGE_KEY, openState \? "expanded" : "collapsed"\)/)
+  assert.doesNotMatch(sidebar, /document\.cookie/)
+  assert.doesNotMatch(sidebar, /SIDEBAR_COOKIE_NAME/)
 })
 
 test("broad pages do not render an active-opportunity context header under breadcrumbs", async () => {
@@ -2440,6 +2464,7 @@ test("public homepage uses shadcn outline actions with larger mobile buttons", a
 })
 
 test("app shell catches render crashes", async () => {
+  const app = await read("src/App.tsx")
   const boundary = await read("src/components/app-error-boundary.tsx")
   const main = await read("src/main.tsx")
 
@@ -2448,12 +2473,17 @@ test("app shell catches render crashes", async () => {
   assert.match(boundary, /componentDidCatch/)
   assert.match(boundary, /import\.meta\.env\.DEV/)
   assert.doesNotMatch(boundary, /<CardDescription>Recovery state<\/CardDescription>/)
-  assert.match(boundary, /Let&apos;s get you back in/)
+  assert.match(boundary, /Let's get you back in/)
   assert.match(boundary, /We hit a snag opening this view\./)
+  assert.match(boundary, /SalesFrame could not connect to the workspace service/)
+  assert.match(boundary, /The app opened, but the workspace connection is not ready/)
+  assert.match(boundary, /Try again/)
   assert.doesNotMatch(boundary, /rendering the current view/)
   assert.match(boundary, /Reload SalesFrame/)
   assert.match(main, /<AppErrorBoundary>/)
   assert.match(main, /<App \/>/)
+  assert.doesNotMatch(app, /const supabase = createClient\(\)\nconst emptyAccount/)
+  assert.match(app, /function App\(\) \{\n\s+const supabase = React\.useMemo\(\(\) => createClient\(\), \[\]\)/)
 })
 
 test("customer-facing errors do not leak backend implementation details", async () => {

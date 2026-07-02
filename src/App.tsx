@@ -481,7 +481,6 @@ type HeaderBreadcrumbItem = {
   onSelect?: () => void
 }
 
-const supabase = createClient()
 const emptyAccount: AccountNavItem = {
   id: "",
   name: "No account selected",
@@ -1898,6 +1897,7 @@ function getLatestCallForOpportunity({
 }
 
 function App() {
+  const supabase = React.useMemo(() => createClient(), [])
   const [activeView, setActiveView] = React.useState("home")
   const [workspaceNavItems, setWorkspaceNavItems] = React.useState<WorkspaceNavItem[]>([])
   const [activeWorkspaceId, setActiveWorkspaceId] = React.useState("")
@@ -9393,9 +9393,20 @@ function AccountView({
                       {visibleOpportunities.map((opportunity) => (
                         <tr
                           key={opportunity.id}
-                          className="cursor-pointer border-b transition-colors hover:bg-muted/30 last:border-b-0"
+                          tabIndex={0}
+                          role="button"
+                          aria-label={`Open ${opportunity.name}`}
+                          className="cursor-pointer border-b transition-colors hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 last:border-b-0"
+                          onClick={() => onOpportunitySelect(opportunity.id)}
+                          onKeyDown={(event) => {
+                            if (event.currentTarget !== event.target) return
+                            if (event.key !== "Enter" && event.key !== " ") return
+
+                            event.preventDefault()
+                            onOpportunitySelect(opportunity.id)
+                          }}
                         >
-                          <td className="min-w-0 px-3 py-3 align-middle" onClick={() => onOpportunitySelect(opportunity.id)}>
+                          <td className="min-w-0 px-3 py-3 align-middle">
                             <button
                               type="button"
                               className="block max-w-full truncate text-left font-medium underline-offset-4 outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
@@ -9411,18 +9422,18 @@ function AccountView({
                               {opportunity.nextQuestion}
                             </p>
                           </td>
-                          <td className="hidden px-3 py-3 align-middle text-muted-foreground lg:table-cell" onClick={() => onOpportunitySelect(opportunity.id)}>
+                          <td className="hidden px-3 py-3 align-middle text-muted-foreground lg:table-cell">
                             <span className="block truncate">{opportunity.stage}</span>
                           </td>
-                          <td className="hidden px-3 py-3 align-middle text-muted-foreground md:table-cell" onClick={() => onOpportunitySelect(opportunity.id)}>
+                          <td className="hidden px-3 py-3 align-middle text-muted-foreground md:table-cell">
                             <span className="block truncate">
                               {formatCurrencyAmount(opportunity.amount, accountDraft.currency)}
                             </span>
                           </td>
-                          <td className="hidden px-3 py-3 align-middle text-muted-foreground 2xl:table-cell" onClick={() => onOpportunitySelect(opportunity.id)}>
+                          <td className="hidden px-3 py-3 align-middle text-muted-foreground 2xl:table-cell">
                             <span className="block truncate">{opportunity.closeDate}</span>
                           </td>
-                          <td className="px-3 py-3 align-middle" onClick={() => onOpportunitySelect(opportunity.id)}>
+                          <td className="px-3 py-3 align-middle">
                             <div className="grid min-w-0 gap-1.5">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="truncate text-xs text-muted-foreground">Methodology</span>
@@ -9435,7 +9446,7 @@ function AccountView({
                               />
                             </div>
                           </td>
-                          <td className="hidden px-3 py-3 text-center align-middle text-muted-foreground xl:table-cell" onClick={() => onOpportunitySelect(opportunity.id)}>
+                          <td className="hidden px-3 py-3 text-center align-middle text-muted-foreground xl:table-cell">
                             <span className={cn("text-sm", opportunity.missing > 5 && "font-medium text-destructive")}>
                               {opportunity.missing} missing
                             </span>
@@ -13416,7 +13427,11 @@ function saveCustomFramework(value: EditableCustomFramework) {
   const normalized = normalizeCustomFramework(value)
 
   if (typeof window !== "undefined") {
-    window.localStorage.setItem(customFrameworkStorageKey, JSON.stringify(normalized))
+    try {
+      window.localStorage.setItem(customFrameworkStorageKey, JSON.stringify(normalized))
+    } catch {
+      // Storage can be unavailable in restricted browser modes. The backend save still keeps the custom framework.
+    }
   }
 
   return normalized

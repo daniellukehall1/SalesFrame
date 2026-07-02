@@ -248,7 +248,6 @@ export function WorkspaceSwitcher({
                       <ContextMenuSeparator />
                       <ContextMenuItem
                         variant="destructive"
-                        disabled={workspaces.length <= 1}
                         onSelect={() => {
                           setWorkspaceMenuOpen(false)
                           setDeletingWorkspaceId(workspace.id)
@@ -430,6 +429,7 @@ function DeleteWorkspaceDialog({
   onConfirm: () => void
 }) {
   if (!workspace) return null
+  const isLastWorkspace = workspaceCount <= 1
 
   return (
     <Dialog open onOpenChange={(nextOpen) => (!nextOpen ? onCancel() : undefined)}>
@@ -445,18 +445,23 @@ function DeleteWorkspaceDialog({
           </div>
           <DialogTitle>Delete workspace</DialogTitle>
           <DialogDescription>
-            This removes the workspace from your account. Review ownership, billing, and data-retention requirements before continuing.
+            This removes the workspace from your account, including its accounts, opportunities, calls, and settings.
           </DialogDescription>
         </DialogHeader>
         <div className="rounded-lg border bg-muted/30 p-3">
           <p className="text-sm font-medium">{workspace.name}</p>
           <p className="mt-1 text-sm text-muted-foreground">{workspace.description}</p>
         </div>
+        {isLastWorkspace ? (
+          <p className="rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
+            Create another workspace before deleting this one. SalesFrame keeps one workspace so your account has somewhere to store accounts, calls, and settings.
+          </p>
+        ) : null}
         <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full">
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="destructive" disabled={workspaceCount <= 1} onClick={onConfirm}>
+          <Button variant="destructive" disabled={isLastWorkspace} onClick={onConfirm}>
             Delete workspace
           </Button>
         </DialogFooter>
