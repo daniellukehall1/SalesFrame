@@ -56,7 +56,8 @@ export function mapWorkspaceRowToNavItem(row: WorkspaceRow): WorkspaceNavItem {
 export function mapAccountRowsToNavItems(accounts: AccountRow[], opportunities: OpportunityRow[]) {
   return accounts.map<AccountNavItem>((account) => {
     const logoDomain = normalizeAccountLogoDomain(account.website) || account.logo_domain || ""
-    const logoUrl = account.logo_url || buildAccountLogoUrl(logoDomain) || buildAccountLogoFallbackUrl(logoDomain) || ""
+    const generatedLogoUrl = buildAccountLogoUrl(logoDomain) || buildAccountLogoFallbackUrl(logoDomain)
+    const logoUrl = generatedLogoUrl || account.logo_url || ""
     const logoStatus = ["resolved", "fallback", "missing"].includes(account.logo_status)
       ? account.logo_status as AccountLogoStatus
       : logoDomain

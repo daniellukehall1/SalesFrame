@@ -34,9 +34,9 @@ export function AccountLogoAvatar({
   const logoSize = size === "lg" ? 96 : 64
   const candidateLogoUrls = React.useMemo(
     () => [
-      logoUrl ?? "",
       buildAccountLogoUrl(normalizedDomain, { size: logoSize }),
       buildAccountLogoFallbackUrl(normalizedDomain, { size: logoSize }),
+      logoUrl ?? "",
     ].filter((url, index, urls) => Boolean(url) && urls.indexOf(url) === index),
     [logoSize, logoUrl, normalizedDomain]
   )

@@ -327,6 +327,14 @@ export type StartRecordingPayload = {
   playbooks: CallPlaybook[]
   customerResearch: CustomerResearchConfig
   openAiApiKey: string
+  onPreparationStep?: (update: StartCallPreparationUpdate) => void
+}
+
+export type StartCallPreparationStepId = "ai_access" | "records" | "context" | "coach" | "audio"
+
+export type StartCallPreparationUpdate = {
+  detail?: string
+  step: StartCallPreparationStepId
 }
 
 export type StartRecordingResult =

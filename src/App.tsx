@@ -273,6 +273,7 @@ import {
   type PlaybookFocusFilter,
   type SavedOpenAiKeyState,
   type SellerResearchProfile,
+  type StartCallPreparationStepId,
   type StartRecordingHandler,
   type StartRecordingPayload,
   type TranscriptSpeaker,
@@ -3327,6 +3328,9 @@ function App() {
       message: "Call start was cancelled.",
       ok: false as const,
     })
+    const updatePreparationStep = (step: StartCallPreparationStepId, detail?: string) => {
+      payload.onPreparationStep?.({ detail, step })
+    }
     const throwIfStartCancelled = () => {
       if (!payload.abortSignal?.aborted) return
 
@@ -3359,12 +3363,16 @@ function App() {
         throw new Error("Choose an account before starting the call.")
       }
 
+      updatePreparationStep("ai_access", "Checking that this workspace has the AI key it needs.")
+
       if (providedOpenAiKey) {
         await saveRequiredOpenAiKey(providedOpenAiKey)
         throwIfStartCancelled()
       } else if (!savedOpenAiKeyState) {
         throw new Error("OpenAI API key is required before starting a call.")
       }
+
+      updatePreparationStep("records", "Attaching the call to the account, opportunity, and selected playbooks.")
 
       if (isNewAccount) {
         const account = await createSupabaseAccount({
@@ -3439,6 +3447,8 @@ function App() {
       await replaceCallPlaybooks(call.id, playbookIds)
       throwIfStartCancelled()
 
+      updatePreparationStep("context", "Reading the account, opportunity, history, and playbook context.")
+
       const selectedAccountRecord = workspaceAccounts.find((account) => account.id === accountId)
       const selectedOpportunityRecord = workspaceOpportunities.find((opportunity) => opportunity.id === opportunityId)
       const initialAccountProfile = createdAccountRow
@@ -3449,6 +3459,10 @@ function App() {
             name: accountName,
             description: accountIndustry,
           })
+      updatePreparationStep(
+        "coach",
+        "This is usually the longest part. OpenAI is reading the context and writing the first question."
+      )
       const initialGuidanceResponse = await requestLiveGuidance({
         account: {
           id: accountId,
@@ -3644,6 +3658,7 @@ function App() {
           })
       }
 
+      updatePreparationStep("audio", "Ready for the microphone and meeting audio step.")
       await callCapture.startCall({
         abortSignal: payload.abortSignal,
         audioCaptureMode: payload.audioCaptureMode,
@@ -6284,20 +6299,24 @@ function CallPrepDialog({
 type StartCallPreparationStep = {
   description: string
   icon: React.ElementType
+  id: StartCallPreparationStepId
   label: string
   progress: number
 }
 
 function StartCallPreparingView({
   activeIndex,
+  detail,
   progress,
   steps,
 }: {
   activeIndex: number
+  detail?: string
   progress: number
   steps: StartCallPreparationStep[]
 }) {
   const activeStep = steps[Math.min(activeIndex, steps.length - 1)] ?? steps[0]
+  const currentDescription = detail || activeStep?.description || "Preparing the call workspace."
 
   return (
     <div className="grid h-full min-h-[420px] place-items-center">
@@ -6308,9 +6327,9 @@ function StartCallPreparingView({
           </div>
           <div className="min-w-0">
             <p className="text-sm font-medium text-muted-foreground">Preparing live call</p>
-            <h3 className="mt-1 text-xl font-semibold tracking-tight">Getting your live coach ready</h3>
+            <h3 className="mt-1 text-xl font-semibold tracking-tight">Almost there. Let's make the first question a good one.</h3>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              We are lining up the account context, first question, and audio capture before the cockpit opens.
+              SalesFrame is checking the essentials before the cockpit opens, so you are not dropped into a blank screen.
             </p>
           </div>
         </div>
@@ -6318,11 +6337,13 @@ function StartCallPreparingView({
         <div className="grid gap-2" aria-live="polite">
           <div className="flex items-center justify-between gap-3">
             <p className="truncate text-sm font-medium">{activeStep?.label ?? "Preparing call"}</p>
-            <p className="text-sm tabular-nums text-muted-foreground">{Math.round(progress)}%</p>
+            <p className="text-sm tabular-nums text-muted-foreground">
+              Step {Math.min(activeIndex + 1, steps.length)} of {steps.length}
+            </p>
           </div>
           <Progress className="h-2" value={progress} />
           <p className="text-sm leading-relaxed text-muted-foreground">
-            {activeStep?.description ?? "Preparing the call workspace."}
+            {currentDescription}
           </p>
         </div>
 
@@ -6334,7 +6355,7 @@ function StartCallPreparingView({
 
             return (
               <div
-                key={item.label}
+                key={item.id}
                 className={cn(
                   "flex items-center gap-3 rounded-lg bg-muted/30 px-3 py-2 text-sm",
                   isActive && "bg-primary/10 text-primary"
@@ -6434,6 +6455,7 @@ function StartRecordingDialog({
   const [startSubmitting, setStartSubmitting] = React.useState(false)
   const [startProgress, setStartProgress] = React.useState(0)
   const [startPhaseIndex, setStartPhaseIndex] = React.useState(0)
+  const [startPreparationDetail, setStartPreparationDetail] = React.useState("")
   const [researchProfileMessage, setResearchProfileMessage] = React.useState("")
   const [researchProfileStatus, setResearchProfileStatus] =
     React.useState<"idle" | "loading" | "success" | "error">("idle")
@@ -6442,6 +6464,7 @@ function StartRecordingDialog({
   const sellerDomainLookupSequenceRef = React.useRef(0)
   const sellerDomainLookupTimeoutRef = React.useRef<number | null>(null)
   const startProgressTimerRef = React.useRef<number | null>(null)
+  const startProgressTargetRef = React.useRef(0)
   const startAbortControllerRef = React.useRef<AbortController | null>(null)
 
   const selectedAccount = accounts.find((account) => account.id === accountId)
@@ -6476,41 +6499,46 @@ function StartRecordingDialog({
   const currentRecordingStepLabel = recordingSteps[step - 1]?.label ?? recordingSteps[0].label
   const startPreparationSteps: StartCallPreparationStep[] = [
     {
-      label: "Checking the AI coach",
-      description: "Making sure your OpenAI connection can return a real first question.",
+      id: "ai_access",
+      label: "Checking your AI key",
+      description: "SalesFrame is making sure the workspace can ask OpenAI for a real recommendation.",
       icon: KeyRoundIcon,
-      progress: 18,
+      progress: 16,
     },
     {
-      label: "Linking the right records",
-      description: "Connecting this call to the account, opportunity, and selected playbooks.",
+      id: "records",
+      label: "Putting this call in the right place",
+      description: "We are linking the account, opportunity, playbooks, and call record.",
       icon: DatabaseIcon,
-      progress: 36,
+      progress: 34,
     },
     {
-      label: customerResearchEnabled ? "Gathering customer context" : "Loading opportunity context",
+      id: "context",
+      label: customerResearchEnabled ? "Adding seller research context" : "Reading what SalesFrame already knows",
       description: customerResearchEnabled
-        ? "Pulling the customer research and seller context the coach should use."
-        : "Reading the opportunity history and evidence already saved here.",
+        ? "Your seller research and account context are being folded into the first question."
+        : "SalesFrame is checking the saved account, opportunity, and evidence so it does not ask twice.",
       icon: SearchIcon,
-      progress: 56,
+      progress: 52,
     },
     {
-      label: "Warming up AI coach",
-      description: "Writing the first recommendation so you are not staring at a blank cockpit.",
+      id: "coach",
+      label: "Writing your first live question",
+      description: "OpenAI is choosing a question that fits the call, not just the next empty field.",
       icon: SparklesIcon,
-      progress: 76,
+      progress: 78,
     },
     {
-      label: "Preparing audio",
+      id: "audio",
+      label: "Getting ready to listen",
       description:
         audioCaptureMode === "meeting_audio"
-          ? "Getting your microphone and customer-side app, tab, or system audio ready."
+          ? "Next up: microphone plus customer-side app, tab, or system audio."
           : audioCaptureMode === "in_person_microphone"
-            ? "Getting the room microphone ready for an in-person transcript."
-            : "Getting your microphone ready for the live transcript.",
+            ? "Next up: room microphone capture for an in-person conversation."
+            : "Next up: microphone capture for the live transcript.",
       icon: Mic2Icon,
-      progress: 92,
+      progress: 94,
     },
   ]
 
@@ -6561,28 +6589,39 @@ function StartRecordingDialog({
     clearStartProgressTimer()
     setStartProgress(0)
     setStartPhaseIndex(0)
+    setStartPreparationDetail("")
+    startProgressTargetRef.current = 0
+  }
+
+  const applyStartPreparationStep = (step: StartCallPreparationStepId, detail?: string) => {
+    const nextIndex = Math.max(
+      0,
+      startPreparationSteps.findIndex((item) => item.id === step)
+    )
+    const targetProgress = startPreparationSteps[nextIndex]?.progress ?? 94
+
+    startProgressTargetRef.current = targetProgress
+    setStartPhaseIndex(nextIndex)
+    setStartPreparationDetail(detail ?? "")
+    setStartProgress((currentProgress) =>
+      Math.max(currentProgress, Math.max(8, targetProgress - 12))
+    )
   }
 
   const runStartProgress = () => {
     clearStartProgressTimer()
     setStartProgress(8)
     setStartPhaseIndex(0)
-
-    const startedAt = Date.now()
+    setStartPreparationDetail("")
+    startProgressTargetRef.current = startPreparationSteps[0]?.progress ?? 16
 
     startProgressTimerRef.current = window.setInterval(() => {
-      const elapsedMs = Date.now() - startedAt
-      const nextPhaseIndex = Math.min(
-        startPreparationSteps.length - 1,
-        Math.floor(elapsedMs / 1700)
-      )
-      const targetProgress = startPreparationSteps[nextPhaseIndex]?.progress ?? 92
-
-      setStartPhaseIndex(nextPhaseIndex)
       setStartProgress((currentProgress) => {
-        const nextProgress = currentProgress + Math.max(0.7, (targetProgress - currentProgress) * 0.12)
+        const targetProgress = startProgressTargetRef.current || 94
+        const stepCeiling = Math.max(8, targetProgress - 1)
+        const nextProgress = currentProgress + Math.max(0.35, (stepCeiling - currentProgress) * 0.08)
 
-        return Math.min(94, Math.max(currentProgress, nextProgress))
+        return Math.min(stepCeiling, Math.max(currentProgress, nextProgress))
       })
     }, 250)
   }
@@ -6758,6 +6797,23 @@ function StartRecordingDialog({
     setStep(1)
   }
 
+  const getStartCallErrorMessage = (error: unknown) => {
+    const message =
+      typeof error === "string"
+        ? error
+        : getUserFacingErrorMessage(error, "Call could not be started.")
+
+    if (
+      /SalesFrame could not finish the AI step/i.test(message) ||
+      /could not prepare the first question/i.test(message) ||
+      /Live guidance did not return/i.test(message)
+    ) {
+      return "SalesFrame could not get the first live question ready. Your call has not started yet. Try again in a moment, or check the OpenAI key in Settings."
+    }
+
+    return message
+  }
+
   const handleStart = async () => {
     if (!canStart || startSubmitting) return
 
@@ -6791,18 +6847,20 @@ function StartRecordingDialog({
         },
         openAiApiKey: "",
         abortSignal: startAbortController.signal,
+        onPreparationStep: ({ detail, step }) => applyStartPreparationStep(step, detail),
       })
 
       if (startAbortController.signal.aborted) return
 
       if (!result.ok) {
         resetStartProgress()
-        setStartError(result.message)
+        setStartError(getStartCallErrorMessage(result.message))
         return
       }
 
       clearStartProgressTimer()
       setStartPhaseIndex(startPreparationSteps.length - 1)
+      startProgressTargetRef.current = 100
       setStartProgress(100)
       await new Promise((resolve) => window.setTimeout(resolve, 250))
       setOpen(false)
@@ -6811,7 +6869,7 @@ function StartRecordingDialog({
       if (startAbortController.signal.aborted) return
 
       resetStartProgress()
-      setStartError(getUserFacingErrorMessage(caughtError, "Call could not be started."))
+      setStartError(getStartCallErrorMessage(caughtError))
     } finally {
       if (startAbortControllerRef.current === startAbortController) {
         startAbortControllerRef.current = null
@@ -6853,6 +6911,7 @@ function StartRecordingDialog({
             <div className="min-h-0 overflow-y-auto pr-1">
               <StartCallPreparingView
                 activeIndex={startPhaseIndex}
+                detail={startPreparationDetail}
                 progress={startProgress}
                 steps={startPreparationSteps}
               />
@@ -7147,7 +7206,7 @@ function StartRecordingDialog({
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <SearchIcon className="size-4 text-muted-foreground" />
-                <p className="text-sm font-medium">Customer Research</p>
+                <p className="text-sm font-medium">Seller Research</p>
               </div>
               <div className="flex items-center gap-2">
                 <Label htmlFor="customer-research-toggle" className="text-sm text-muted-foreground">
