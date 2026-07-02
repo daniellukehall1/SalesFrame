@@ -6414,13 +6414,13 @@ function StartRecordingDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button size="sm" variant={triggerVariant} className="h-10 gap-2 px-4 md:h-7 md:px-2.5">
+        <Button size="sm" variant={triggerVariant} className="h-11 min-h-11 gap-2 px-4 md:h-7 md:min-h-7 md:px-2.5">
           {triggerIcon}
           {triggerLabel}
         </Button>
       </DialogTrigger>
       <DialogContent
-        className="grid max-h-[calc(100svh-2rem)] overflow-hidden sm:h-[760px] sm:max-w-2xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        className="grid max-h-[calc(100svh-2rem)] overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-2xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -6446,7 +6446,7 @@ function StartRecordingDialog({
                 steps={startPreparationSteps}
               />
             </div>
-            <DialogFooter className="gap-2 sm:justify-between">
+            <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
               <Button variant="outline" disabled>
                 Cancel
               </Button>
@@ -6712,7 +6712,7 @@ function StartRecordingDialog({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="w-fit gap-2"
+                  className="w-full gap-2 sm:w-fit"
                   onClick={() => {
                     setOpen(false)
                     onOpenSettings?.()
@@ -6828,8 +6828,8 @@ function StartRecordingDialog({
         ) : null}
         </div>
 
-        <DialogFooter className="gap-2 sm:justify-between">
-          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
+          <div className="grid gap-2 sm:flex sm:flex-row">
             <Button variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
