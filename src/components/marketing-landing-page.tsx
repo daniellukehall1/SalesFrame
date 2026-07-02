@@ -232,6 +232,9 @@ export function MarketingLandingPage({
         src={heroFallbackImageUrl}
         alt=""
         aria-hidden="true"
+        decoding="async"
+        draggable={false}
+        fetchPriority="high"
         className="fixed inset-0 z-0 h-full w-full object-cover object-[70%_center]"
       />
       <video
@@ -241,6 +244,8 @@ export function MarketingLandingPage({
           "fixed inset-0 z-0 h-full w-full object-cover object-[70%_center] transition-opacity duration-500",
           videoReady && !videoUnavailable ? "opacity-100" : "opacity-0",
         ].join(" ")}
+        disablePictureInPicture
+        draggable={false}
         muted
         playsInline
         poster={heroFallbackImageUrl}

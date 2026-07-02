@@ -1695,8 +1695,8 @@ test("media and transient status states stay calm for assistive technology", asy
   const landingPage = await read("src/components/marketing-landing-page.tsx")
   const workspaceSwitcher = await read("src/components/workspace-switcher.tsx")
 
-  assert.match(landingPage, /<img[\s\S]*alt=""[\s\S]*aria-hidden="true"/)
-  assert.match(landingPage, /<video[\s\S]*aria-hidden="true"[\s\S]*poster=\{heroFallbackImageUrl\}/)
+  assert.match(landingPage, /<img[\s\S]*alt=""[\s\S]*aria-hidden="true"[\s\S]*decoding="async"[\s\S]*draggable=\{false\}[\s\S]*fetchPriority="high"/)
+  assert.match(landingPage, /<video[\s\S]*aria-hidden="true"[\s\S]*disablePictureInPicture[\s\S]*draggable=\{false\}[\s\S]*poster=\{heroFallbackImageUrl\}/)
   assert.match(app, /<audio[\s\S]*aria-hidden="true"[\s\S]*ref=\{audioRef\}/)
   assert.ok((app.match(/<AudioLinesIcon aria-hidden="true" className="size-5" \/>/g) ?? []).length >= 3)
   assert.ok((authPage.match(/<AudioLinesIcon aria-hidden="true" className="size-4" \/>/g) ?? []).length >= 2)
