@@ -454,7 +454,7 @@ export async function listWorkspaceCalls(workspaceId: string, client?: SalesFram
 async function withSignedRecordingUrls(calls: CallRow[], supabase: SalesFrameClient) {
   return Promise.all(
     calls.map(async (call) => {
-      if (call.recording_url || !call.recording_storage_path) return call
+      if (!call.recording_storage_path) return call
 
       const signedUrlResponse = await supabase.storage
         .from("call-recordings")

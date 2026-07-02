@@ -11681,6 +11681,8 @@ function CallReplayContent({
   const [isReplayPlaying, setIsReplayPlaying] = React.useState(false)
   const [lastReplayAction, setLastReplayAction] = React.useState("Replay ready")
   const recordingLinkRequestRef = React.useRef(0)
+  const recordingAutoRefreshAttemptRef = React.useRef(0)
+  const replayPlayIntentRef = React.useRef(false)
   const displayedReplayProgress = Math.min(100, Math.max(0, (replaySeconds / replayDuration) * 100))
   const displayedReplayTime = formatTime(Math.round(replaySeconds))
   const hasPlayableRecording = Boolean(call.recordingStoragePath || call.recordingUrl)
@@ -11738,6 +11740,8 @@ function CallReplayContent({
     setRecordingLinkError("")
     setReplaySeconds(0)
     setIsReplayPlaying(false)
+    recordingAutoRefreshAttemptRef.current = 0
+    replayPlayIntentRef.current = false
     setLastReplayAction(call.recordingStoragePath || call.recordingUrl ? "Preparing recording link" : "No recording is available for this call.")
     if (call.recordingStoragePath || call.recordingUrl) {
       void loadRecordingUrl()
@@ -11770,6 +11774,7 @@ function CallReplayContent({
 
   const handlePlayPause = async () => {
     if (isReplayPlaying) {
+      replayPlayIntentRef.current = false
       audioRef.current?.pause()
       setIsReplayPlaying(false)
       setLastReplayAction("Replay paused")
@@ -11789,6 +11794,8 @@ function CallReplayContent({
 
     if (audioRef.current) {
       try {
+        recordingAutoRefreshAttemptRef.current = 0
+        replayPlayIntentRef.current = true
         if (audioRef.current.src !== playableUrl) {
           audioRef.current.src = playableUrl
           audioRef.current.load()
@@ -11799,6 +11806,7 @@ function CallReplayContent({
         setIsReplayPlaying(true)
         setLastReplayAction("Replay playing")
       } catch (caughtError: unknown) {
+        replayPlayIntentRef.current = false
         setIsReplayPlaying(false)
         setLastReplayAction(
           getUserFacingErrorMessage(caughtError, "Replay could not start. Refresh the recording link and try again.")
@@ -11819,6 +11827,7 @@ function CallReplayContent({
             src={recordingUrl || undefined}
             preload="metadata"
             onEnded={() => {
+              replayPlayIntentRef.current = false
               setIsReplayPlaying(false)
               setLastReplayAction("Replay ended")
             }}
@@ -11828,14 +11837,51 @@ function CallReplayContent({
                 setReplaySeconds(duration)
               }
             }}
-            onPause={() => setIsReplayPlaying(false)}
+            onPause={() => {
+              setIsReplayPlaying(false)
+            }}
             onPlay={() => setIsReplayPlaying(true)}
             onError={() => {
               setIsReplayPlaying(false)
+              const shouldRefresh = Boolean(call.recordingStoragePath) && recordingAutoRefreshAttemptRef.current < 1
+
+              if (shouldRefresh) {
+                const shouldResumePlayback = replayPlayIntentRef.current
+                recordingAutoRefreshAttemptRef.current += 1
+                setRecordingLinkStatus("loading")
+                setRecordingLinkError("")
+                setRecordingUrl("")
+                setLastReplayAction("Refreshing recording link")
+                void loadRecordingUrl({ announce: true }).then(async (nextUrl) => {
+                  if (!nextUrl || !audioRef.current) return
+
+                  setLastReplayAction(shouldResumePlayback ? "Recording link refreshed. Resuming replay" : "Recording link refreshed")
+                  if (!shouldResumePlayback) return
+
+                  try {
+                    audioRef.current.src = nextUrl
+                    audioRef.current.load()
+                    audioRef.current.volume = replayVolume
+                    await audioRef.current.play()
+                    setIsReplayPlaying(true)
+                    setLastReplayAction("Replay playing")
+                  } catch (caughtError: unknown) {
+                    replayPlayIntentRef.current = false
+                    setIsReplayPlaying(false)
+                    setRecordingLinkStatus("error")
+                    const message = getUserFacingErrorMessage(caughtError, "Replay could not start. Press Play to try again.")
+                    setRecordingLinkError(message)
+                    setLastReplayAction(message)
+                  }
+                })
+                return
+              }
+
+              replayPlayIntentRef.current = false
               setRecordingLinkStatus("error")
-              setRecordingLinkError("Recording link expired or could not be played.")
+              setRecordingLinkError("Recording could not be played. Press Play to refresh it.")
               setRecordingUrl("")
-              setLastReplayAction("Recording link expired or could not be played. Press Play to refresh it.")
+              setLastReplayAction("Recording could not be played. Press Play to refresh it.")
             }}
             onTimeUpdate={(event) => setReplaySeconds(event.currentTarget.currentTime)}
           />
