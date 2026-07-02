@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { readFile } from "node:fs/promises"
+import { readdir, readFile } from "node:fs/promises"
 import { test } from "node:test"
 
 const root = new URL("../../", import.meta.url)
@@ -8,12 +8,47 @@ async function read(path) {
   return readFile(new URL(path, root), "utf8")
 }
 
+async function listFiles(directory, predicate) {
+  const entries = await readdir(new URL(directory, root), { withFileTypes: true })
+  const files = []
+
+  for (const entry of entries) {
+    const entryPath = `${directory.replace(/\/$/, "")}/${entry.name}`
+
+    if (entry.isDirectory()) {
+      files.push(...await listFiles(entryPath, predicate))
+    } else if (predicate(entryPath)) {
+      files.push(entryPath)
+    }
+  }
+
+  return files
+}
+
 test("shared button defaults to non-submit for form safety", async () => {
   const button = await read("src/components/ui/button.tsx")
 
   assert.match(button, /type,\s*\n\s*\.\.\.props/)
   assert.match(button, /\{\.\.\.\(!asChild \? \{ type: type \?\? "button" \} : \{\}\)\}/)
   assert.match(button, /\{\.\.\.props\}/)
+})
+
+test("raw HTML buttons declare an explicit type", async () => {
+  const files = await listFiles("src", (filePath) => filePath.endsWith(".tsx"))
+  const missingTypes = []
+
+  for (const filePath of files) {
+    const source = await read(filePath)
+
+    for (const match of source.matchAll(/<button\b[\s\S]*?>/g)) {
+      if (/\btype=/.test(match[0])) continue
+
+      const line = source.slice(0, match.index ?? 0).split("\n").length
+      missingTypes.push(`${filePath}:${line}`)
+    }
+  }
+
+  assert.deepEqual(missingTypes, [])
 })
 
 test("GitHub release checks run the same production gate as local deploys", async () => {
