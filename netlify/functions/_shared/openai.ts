@@ -198,12 +198,23 @@ export async function callOpenAiWebSearchJson<T>({
 }
 
 const supportedRealtimeTranscriptionDelays = new Set(["minimal", "low", "medium", "high", "xhigh"])
+const supportedRealtimeTranscriptionModels = new Set(["gpt-realtime-whisper"])
+
+function getRealtimeTranscriptionModel() {
+  const explicitRealtimeModel = getEnv("OPENAI_REALTIME_TRANSCRIPTION_MODEL")
+  if (supportedRealtimeTranscriptionModels.has(explicitRealtimeModel)) return explicitRealtimeModel
+
+  const legacyTranscriptionModel = getEnv("OPENAI_TRANSCRIPTION_MODEL")
+  if (supportedRealtimeTranscriptionModels.has(legacyTranscriptionModel)) return legacyTranscriptionModel
+
+  return "gpt-realtime-whisper"
+}
 
 export async function createRealtimeTranscriptionSession(
   apiKey: string,
   options: { sourceKind?: string; transcriptionDelay?: string } = {}
 ) {
-  const transcriptionModel = getEnv("OPENAI_TRANSCRIPTION_MODEL", "gpt-realtime-whisper")
+  const transcriptionModel = getRealtimeTranscriptionModel()
   const isRealtimeWhisper = transcriptionModel === "gpt-realtime-whisper"
   const defaultDelay =
     options.sourceKind === "mixed_audio" || options.sourceKind === "in_person_microphone"

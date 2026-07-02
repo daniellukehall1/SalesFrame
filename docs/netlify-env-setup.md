@@ -58,7 +58,7 @@ Changing `OPENAI_KEY_ENCRYPTION_SECRET` after users save keys will make existing
 netlify env:set OPENAI_TEXT_MODEL "gpt-4.1-mini"
 netlify env:set OPENAI_LIVE_STATE_MODEL "gpt-5.4-nano"
 netlify env:set OPENAI_LIVE_COACH_MODEL "gpt-5.4-mini"
-netlify env:set OPENAI_TRANSCRIPTION_MODEL "gpt-4o-transcribe"
+netlify env:set OPENAI_REALTIME_TRANSCRIPTION_MODEL "gpt-realtime-whisper"
 netlify env:set OPENAI_RESEARCH_WEB_SEARCH "true"
 ```
 
