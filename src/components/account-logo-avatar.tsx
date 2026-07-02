@@ -60,6 +60,8 @@ export function AccountLogoAvatar({
         <img
           alt=""
           className="size-full rounded-[inherit] object-contain p-1"
+          decoding="async"
+          draggable={false}
           height={size === "lg" ? 48 : size === "md" ? 40 : 28}
           loading="lazy"
           referrerPolicy="origin"
