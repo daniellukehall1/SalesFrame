@@ -346,7 +346,7 @@ function WorkspaceFormDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-md"
+        className="max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:max-w-md"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -404,7 +404,7 @@ function WorkspaceFormDialog({
             <p className="text-sm text-destructive" aria-live="polite">{statusMessage}</p>
           ) : null}
         </div>
-        <DialogFooter>
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
@@ -434,7 +434,7 @@ function DeleteWorkspaceDialog({
   return (
     <Dialog open onOpenChange={(nextOpen) => (!nextOpen ? onCancel() : undefined)}>
       <DialogContent
-        className="sm:max-w-md"
+        className="max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 sm:max-w-md"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -452,7 +452,7 @@ function DeleteWorkspaceDialog({
           <p className="text-sm font-medium">{workspace.name}</p>
           <p className="mt-1 text-sm text-muted-foreground">{workspace.description}</p>
         </div>
-        <DialogFooter>
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full">
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>

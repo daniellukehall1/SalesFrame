@@ -11,7 +11,7 @@ Run this before every production deploy.
 - Netlify environment variables are configured: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_LOGO_DEV_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_KEY_ENCRYPTION_SECRET`.
 - `VITE_LOGO_DEV_PUBLISHABLE_KEY` is scoped to both Netlify Builds and Functions so account logos render in the browser and refresh during account enrichment.
 - Account logos render from Logo.dev on a real account domain such as `usemultiplier.com`; image requests should not send an app-origin referrer unless that origin is explicitly allowlisted in Logo.dev.
-- Supabase service-role key has not been shared in chat, committed, or stored in a browser-visible variable.
+- Supabase service-role key has been rotated after any suspected exposure, is not committed, and is not stored in a browser-visible variable.
 - Supabase RLS policies are enabled for workspace-owned tables.
 - `call-recordings` and `call-artifacts` buckets are private.
 

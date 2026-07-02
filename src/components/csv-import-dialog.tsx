@@ -328,7 +328,7 @@ export function CsvImportDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="grid max-h-[calc(100svh-2rem)] overflow-hidden sm:max-w-4xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        className="grid max-h-[calc(100svh-2rem)] overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:max-w-4xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -620,7 +620,7 @@ export function CsvImportDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="sm:justify-between">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           {step === "summary" ? (
             <span aria-hidden="true" />
           ) : (
@@ -628,7 +628,7 @@ export function CsvImportDialog({
               Cancel
             </Button>
           )}
-          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+          <div className="grid gap-2 sm:flex sm:flex-row">
             {step !== "upload" && step !== "summary" ? (
               <Button
                 variant="outline"

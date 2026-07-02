@@ -5178,7 +5178,7 @@ function WorkspaceOnboardingDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[min(92svh,760px)] overflow-hidden sm:max-w-xl"
+        className="max-h-[min(92svh,760px)] overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:max-w-xl"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -5408,12 +5408,12 @@ function WorkspaceOnboardingDialog({
           ) : null}
         </div>
 
-        <DialogFooter className="sm:justify-between">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           <Button variant="ghost" className="justify-start" disabled={isSaving} onClick={() => void onBackToLogin()}>
             <ArrowLeftIcon />
             {backActionLabel}
           </Button>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <div className="grid gap-2 sm:flex sm:flex-row sm:justify-end">
             {step > 1 ? (
               <Button
                 variant="outline"
@@ -5851,7 +5851,7 @@ function CallPrepDialog({
         </Button>
       </DialogTrigger>
       <DialogContent
-        className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl"
+        className="max-h-[calc(100svh-2rem)] overflow-y-auto max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 sm:max-w-2xl"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -5886,13 +5886,13 @@ function CallPrepDialog({
             </p>
           </div>
         </div>
-        <DialogFooter className="gap-2 sm:justify-between">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           <DialogClose asChild>
             <Button variant="outline">
               Cancel
             </Button>
           </DialogClose>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+          <div className="grid gap-2 sm:flex sm:flex-row">
             <DialogClose asChild>
               <Button variant="outline" onClick={() => onViewChange("methodology")}>
                 Open methodology
@@ -7222,7 +7222,7 @@ function CreateAccountDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="grid max-h-[calc(100svh-2rem)] overflow-hidden sm:h-[760px] sm:max-w-2xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        className="grid max-h-[calc(100svh-2rem)] overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-2xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -7329,7 +7329,7 @@ function CreateAccountDialog({
                     </p>
                   </div>
                 </div>
-                <Button size="sm" variant="outline" className="w-fit gap-2" onClick={handleOpenExisting}>
+                <Button size="sm" variant="outline" className="w-full gap-2 sm:w-fit" onClick={handleOpenExisting}>
                   <Building2Icon />
                   Open existing
                 </Button>
@@ -7423,7 +7423,7 @@ function CreateAccountDialog({
                 </p>
               </div>
               {!hasSavedOpenAiKey ? (
-                <Button type="button" size="sm" variant="outline" className="w-fit gap-2" onClick={handleOpenSettings}>
+                <Button type="button" size="sm" variant="outline" className="w-full gap-2 sm:w-fit" onClick={handleOpenSettings}>
                   <KeyRoundIcon />
                   Open settings
                 </Button>
@@ -7577,7 +7577,7 @@ function CreateAccountDialog({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="w-fit gap-2"
+                  className="w-full gap-2 sm:w-fit"
                   onClick={() => setShowOpportunityFields((value) => !value)}
                 >
                   <SquarePenIcon />
@@ -7691,7 +7691,7 @@ function CreateAccountDialog({
         ) : null}
         </div>
 
-        <DialogFooter className="gap-2 sm:justify-between">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           <Button
             variant="outline"
             className="gap-2"
@@ -7797,7 +7797,7 @@ function EditAccountDialog({
   return (
     <Dialog open={open && Boolean(account)} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl"
+        className="max-h-[calc(100svh-2rem)] overflow-y-auto max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:max-w-2xl"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -7932,7 +7932,7 @@ function EditAccountDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="gap-2 sm:justify-between">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           <Button variant="outline" disabled={editSubmitting} onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
@@ -8039,7 +8039,7 @@ function CreateOpportunityDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl"
+        className="max-h-[calc(100svh-2rem)] overflow-y-auto max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:max-w-2xl"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -8217,7 +8217,7 @@ function CreateOpportunityDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="gap-2 sm:justify-between">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           <Button variant="outline" disabled={createSubmitting} onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>
@@ -8316,7 +8316,7 @@ function EditOpportunityDialog({
   return (
     <Dialog open={open && Boolean(opportunity)} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl"
+        className="max-h-[calc(100svh-2rem)] overflow-y-auto max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:max-w-2xl"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -8487,7 +8487,7 @@ function EditOpportunityDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="gap-2 sm:justify-between">
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           <Button variant="outline" disabled={editSubmitting} onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
@@ -8539,7 +8539,7 @@ function DeleteRecordDialog({
   return (
     <Dialog open onOpenChange={(nextOpen) => (!nextOpen && !deleteSubmitting ? onCancel() : undefined)}>
       <DialogContent
-        className="sm:max-w-md"
+        className="max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 sm:max-w-md"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -8562,7 +8562,7 @@ function DeleteRecordDialog({
             {deleteError}
           </div>
         ) : null}
-        <DialogFooter>
+        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full">
           <Button variant="outline" disabled={deleteSubmitting} onClick={onCancel}>
             Cancel
           </Button>
@@ -12087,7 +12087,7 @@ function getCaptureStatusLabel(status: CallCaptureStatus) {
     recording: "Recording live",
     paused: "Capture paused",
     stopping: "Finalising call",
-    stopped: "Call stored",
+    stopped: "Call saved",
     "permission-denied": "Audio permission denied",
     "upload-failed": "Recording upload needs attention",
     error: "Capture needs attention",
@@ -12102,11 +12102,11 @@ function getCaptureStatusDescription(
 ) {
   if (status === "recording") return "Transcript, notes, and evidence are being saved to this call."
   if (status === "requesting-permission") return "Choose the selected audio source and allow microphone access when prompted."
-  if (status === "connecting") return "Opening the realtime transcription channel."
+  if (status === "connecting") return "Getting live transcription ready."
   if (status === "permission-denied") return "Allow audio capture to record and transcribe this call."
   if (status === "upload-failed") return "Transcript is saved, but the audio recording upload failed."
   if (status === "stopping") return "Saving the recording and preparing post-call outputs."
-  if (status === "stopped") return "The call record, transcript, and recording are saved."
+  if (status === "stopped") return "The call, transcript, and recording are saved."
   if (permissionState === "capture-unavailable") return "This browser cannot share audio with SalesFrame."
 
   return "Start a call to capture meeting audio, microphone audio, or an in-person room conversation."
@@ -12520,7 +12520,7 @@ function OpportunityRecordingHistory({
         {recordings.length === 0 ? (
           <div className="grid place-items-center gap-2 rounded-lg bg-muted/30 p-6 text-center text-sm text-muted-foreground">
             <FileAudioIcon className="size-5" />
-            <p>No call recordings are stored for this opportunity yet.</p>
+            <p>No recordings for this opportunity yet.</p>
           </div>
         ) : null}
       </CardContent>
@@ -14561,7 +14561,7 @@ function SellerResearchProfileCard({
                 You can edit these fields manually, but domain-based updates need the workspace OpenAI key.
               </p>
             </div>
-            <Button type="button" variant="outline" size="sm" className="w-fit gap-2" onClick={onOpenSettings}>
+            <Button type="button" variant="outline" size="sm" className="w-full gap-2 sm:w-fit" onClick={onOpenSettings}>
               <KeyRoundIcon />
               Open settings
             </Button>
