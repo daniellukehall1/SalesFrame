@@ -314,6 +314,7 @@ export type OpportunityDraft = {
 }
 
 export type StartRecordingPayload = {
+  abortSignal?: AbortSignal
   accountMode: "existing" | "new"
   accountId: string
   accountName: string

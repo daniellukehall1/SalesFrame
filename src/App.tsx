@@ -3327,8 +3327,19 @@ function App() {
       }
     }
 
+    const getStartCancelledResult = () => ({
+      message: "Call start was cancelled.",
+      ok: false as const,
+    })
+    const throwIfStartCancelled = () => {
+      if (!payload.abortSignal?.aborted) return
+
+      throw new Error(getStartCancelledResult().message)
+    }
     const selectedPlaybooks = normalizePlaybooks(payload.playbooks)
     const providedOpenAiKey = payload.openAiApiKey.trim()
+    const previousActiveAccountId = activeAccountIdRef.current
+    const previousActiveOpportunityId = activeOpportunityIdRef.current
     const isNewAccount = payload.accountMode === "new"
     let accountId = isNewAccount ? "" : payload.accountId
     const accountName = isNewAccount
@@ -3347,6 +3358,7 @@ function App() {
     try {
       if (providedOpenAiKey) {
         await saveRequiredOpenAiKey(providedOpenAiKey)
+        throwIfStartCancelled()
       } else if (!savedOpenAiKeyState) {
         throw new Error("OpenAI API key is required before starting a call.")
       }
@@ -3362,6 +3374,7 @@ function App() {
           notes: "Created from the start call flow.",
           ...buildAccountLogoMetadata(accountWebsite),
         })
+        throwIfStartCancelled()
 
         accountId = account.id
         createdAccountRow = account
@@ -3389,6 +3402,7 @@ function App() {
           manual_notes: "Created from the start call flow.",
           call_type: payload.callType,
         })
+        throwIfStartCancelled()
 
         opportunityId = opportunity.id
         createdOpportunityRow = opportunity
@@ -3396,6 +3410,7 @@ function App() {
 
       const playbookIds = getPlaybookIdsForSelection(workspacePlaybooks, selectedPlaybooks)
       const playbookAssignments = await replaceOpportunityPlaybooks(opportunityId, playbookIds)
+      throwIfStartCancelled()
 
       const startedAt = new Date().toISOString()
       const call = await createSupabaseCall({
@@ -3408,9 +3423,11 @@ function App() {
         started_at: startedAt,
         retention_expires_at: createRetentionExpiry(),
       })
-
       createdCallId = call.id
+      throwIfStartCancelled()
+
       await replaceCallPlaybooks(call.id, playbookIds)
+      throwIfStartCancelled()
 
       const selectedAccountRecord = workspaceAccounts.find((account) => account.id === accountId)
       const selectedOpportunityRecord = workspaceOpportunities.find((opportunity) => opportunity.id === opportunityId)
@@ -3446,6 +3463,7 @@ function App() {
         sellerFeedback: manualCoachState.feedbackSignals,
         transcript: [],
       })
+      throwIfStartCancelled()
       const initialGuidance = mapAiLiveGuidanceResponse(initialGuidanceResponse)
       if (!initialGuidance) {
         throw new Error("SalesFrame could not prepare the first question. Check your OpenAI key, then try again.")
@@ -3470,8 +3488,9 @@ function App() {
             initialGuidance.uiMode ??
             initialGuidance.displayRecommendation?.uiMode ??
             null,
-        },
+          },
       })
+      throwIfStartCancelled()
 
       startingRecordingRef.current = true
       if (pageLoadTimeoutRef.current !== null) {
@@ -3617,6 +3636,7 @@ function App() {
       }
 
       await callCapture.startCall({
+        abortSignal: payload.abortSignal,
         audioCaptureMode: payload.audioCaptureMode,
         callId: call.id,
         startedAt,
@@ -3644,6 +3664,7 @@ function App() {
             return nextItems
           }),
       })
+      throwIfStartCancelled()
       setIsRecording(true)
       setActiveView("workspace")
 
@@ -3651,6 +3672,85 @@ function App() {
         ok: true as const,
       }
     } catch (caughtError: unknown) {
+      if (payload.abortSignal?.aborted) {
+        await callCapture.cancelCallStart(createdCallId).catch(() => undefined)
+
+        if (createdAccountRow) {
+          await deleteSupabaseAccount(createdAccountRow.id).catch(() => undefined)
+        } else if (createdOpportunityRow) {
+          await deleteSupabaseOpportunity(createdOpportunityRow.id).catch(() => undefined)
+        }
+
+        if (createdCallId) {
+          try {
+            await updateSupabaseCall(createdCallId, {
+              ended_at: new Date().toISOString(),
+              status: "archived",
+            })
+          } catch {
+            // Cancellation should stay calm even if the status cleanup cannot finish.
+          }
+        }
+
+        setWorkspaceCalls((items) => items.filter((call) => call.id !== createdCallId))
+        setLiveGuidanceByCallId((items) => {
+          if (!createdCallId || !(createdCallId in items)) return items
+
+          const { [createdCallId]: _removedGuidance, ...remainingGuidance } = items
+          return remainingGuidance
+        })
+
+        if (createdAccountRow) {
+          const cancelledAccountId = createdAccountRow.id
+
+          setWorkspaceAccounts((items) => items.filter((account) => account.id !== cancelledAccountId))
+          setWorkspaceOpportunities((items) => items.filter((opportunity) => opportunity.accountId !== cancelledAccountId))
+          setAccountDrafts((drafts) => {
+            const { [cancelledAccountId]: _removedDraft, ...remainingDrafts } = drafts
+            return remainingDrafts
+          })
+          setAccountResearchById((items) => {
+            const { [cancelledAccountId]: _removedResearch, ...remainingResearch } = items
+            return remainingResearch
+          })
+        } else if (createdOpportunityRow) {
+          const cancelledOpportunityAccountId = createdOpportunityRow.account_id
+          const cancelledOpportunityId = createdOpportunityRow.id
+
+          setWorkspaceAccounts((items) =>
+            items.map((account) =>
+              account.id === cancelledOpportunityAccountId
+                ? {
+                    ...account,
+                    opportunities: account.opportunities.filter((opportunity) => opportunity.id !== cancelledOpportunityId),
+                  }
+                : account
+            )
+          )
+          setWorkspaceOpportunities((items) => items.filter((opportunity) => opportunity.id !== cancelledOpportunityId))
+        }
+
+        if (createdOpportunityRow) {
+          const cancelledOpportunityId = createdOpportunityRow.id
+
+          setOpportunityDrafts((drafts) => {
+            const { [cancelledOpportunityId]: _removedDraft, ...remainingDrafts } = drafts
+            return remainingDrafts
+          })
+        }
+
+        setIsRecording(false)
+        setActiveAccountId(previousActiveAccountId)
+        setActiveOpportunityId(previousActiveOpportunityId)
+        activeAccountIdRef.current = previousActiveAccountId
+        activeOpportunityIdRef.current = previousActiveOpportunityId
+        setActiveCallId("")
+        activeCallIdRef.current = ""
+        setActiveCallStartedAt("")
+
+        return getStartCancelledResult()
+      }
+
       const message = getUserFacingErrorMessage(caughtError, "Call could not be started.")
 
       if (createdCallId) {
@@ -3741,22 +3841,10 @@ function App() {
       }
 
       if (payload.customerResearch.enabled) {
-        const research = mapCustomerResearchResponse(
-          await requestCustomerResearch({
-            accountId: account.id,
-            customerContact: payload.customerResearch.customerContact,
-            customerRole: payload.customerResearch.customerRole,
-            opportunityId: opportunityId || null,
-            productContext: payload.customerResearch.productContext,
-            sellerCompany: payload.customerResearch.sellerCompany,
-            sellerDomain: payload.customerResearch.sellerDomain,
-          })
-        )
-
-        if (!research) {
-          throw new Error("The account was created, but customer research could not be saved. Try research again from the account page.")
-        }
-
+        setAccountResearchById((items) => ({
+          ...items,
+          [account.id]: payload.customerResearch,
+        }))
         setSellerResearchProfile((currentProfile) => {
           const nextProfile = {
             sellerCompany: payload.customerResearch.sellerCompany || currentProfile.sellerCompany,
@@ -3766,6 +3854,27 @@ function App() {
 
           return areSellerResearchProfilesEqual(currentProfile, nextProfile) ? currentProfile : nextProfile
         })
+
+        void requestCustomerResearch({
+          accountId: account.id,
+          customerContact: payload.customerResearch.customerContact,
+          customerRole: payload.customerResearch.customerRole,
+          opportunityId: opportunityId || null,
+          productContext: payload.customerResearch.productContext,
+          sellerCompany: payload.customerResearch.sellerCompany,
+          sellerDomain: payload.customerResearch.sellerDomain,
+        })
+          .then((response) => {
+            const research = mapCustomerResearchResponse(response)
+            if (!research) {
+              throw new Error("Customer research could not be prepared. Try again from the account page.")
+            }
+          })
+          .catch((caughtError: unknown) => {
+            const message = getUserFacingErrorMessage(caughtError, "Customer research could not be completed.")
+
+            setNotes((items) => [`Customer research needs attention: ${message}`, ...items].slice(0, 6))
+          })
       }
 
       setActiveAccountId(account.id)
@@ -6309,6 +6418,7 @@ function StartRecordingDialog({
   const sellerDomainLookupSequenceRef = React.useRef(0)
   const sellerDomainLookupTimeoutRef = React.useRef<number | null>(null)
   const startProgressTimerRef = React.useRef<number | null>(null)
+  const startAbortControllerRef = React.useRef<AbortController | null>(null)
 
   const selectedAccount = accounts.find((account) => account.id === accountId)
   const selectedOpportunity = opportunities.find((opportunity) => opportunity.id === opportunityId)
@@ -6412,6 +6522,7 @@ function StartRecordingDialog({
       if (startProgressTimerRef.current) {
         window.clearInterval(startProgressTimerRef.current)
       }
+      startAbortControllerRef.current?.abort()
     }
   }, [])
 
@@ -6613,9 +6724,21 @@ function StartRecordingDialog({
     }, sellerDomainLookupDebounceMs)
   }
 
+  const handleCancelStart = () => {
+    startAbortControllerRef.current?.abort()
+    startAbortControllerRef.current = null
+    resetStartProgress()
+    setStartSubmitting(false)
+    setStartError("")
+    setOpen(false)
+    setStep(1)
+  }
+
   const handleStart = async () => {
     if (!canStart || startSubmitting) return
 
+    const startAbortController = new AbortController()
+    startAbortControllerRef.current = startAbortController
     setStartError("")
     setStartSubmitting(true)
     runStartProgress()
@@ -6643,7 +6766,10 @@ function StartRecordingDialog({
           customerRole: customerRole.trim(),
         },
         openAiApiKey: "",
+        abortSignal: startAbortController.signal,
       })
+
+      if (startAbortController.signal.aborted) return
 
       if (!result.ok) {
         resetStartProgress()
@@ -6658,10 +6784,17 @@ function StartRecordingDialog({
       setOpen(false)
       setStep(1)
     } catch (caughtError: unknown) {
+      if (startAbortController.signal.aborted) return
+
       resetStartProgress()
       setStartError(getUserFacingErrorMessage(caughtError, "Call could not be started."))
     } finally {
-      setStartSubmitting(false)
+      if (startAbortControllerRef.current === startAbortController) {
+        startAbortControllerRef.current = null
+      }
+      if (!startAbortController.signal.aborted) {
+        setStartSubmitting(false)
+      }
     }
   }
 
@@ -6701,7 +6834,7 @@ function StartRecordingDialog({
               />
             </div>
             <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-              <Button variant="outline" disabled>
+              <Button variant="outline" onClick={handleCancelStart}>
                 Cancel
               </Button>
               <Button disabled className="gap-2">

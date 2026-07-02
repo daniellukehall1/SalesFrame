@@ -75,6 +75,7 @@ export type CallCaptureTranscriptLine = {
 export type CallCaptureDiarizationResult = CallDiarizationResponse
 
 type StartCallCaptureConfig = {
+  abortSignal?: AbortSignal
   audioCaptureMode: CallAudioCaptureMode
   callId: string
   onDiarization?: (result: CallCaptureDiarizationResult) => void
@@ -113,6 +114,14 @@ type TranscriptTurn = {
 
 const rollingDiarizationWindowMs = 30000
 const enableRollingDiarization = false
+const callStartCancelledMessage = "Call start was cancelled."
+
+function throwIfCallStartCancelled(signal?: AbortSignal) {
+  if (!signal?.aborted) return
+
+  throw new Error(callStartCancelledMessage)
+}
+
 export function useCallCapture() {
   const [error, setError] = React.useState<string | null>(null)
   const [permissionState, setPermissionState] =
@@ -182,9 +191,11 @@ export function useCallCapture() {
       chunksRef.current = []
 
       try {
+        throwIfCallStartCancelled(config.abortSignal)
         const { preflight, sources } = await runAudioPreflight(config.audioCaptureMode)
-        setAudioPreflight(preflight)
         sourceStreamsRef.current = sources.map((source) => source.stream)
+        throwIfCallStartCancelled(config.abortSignal)
+        setAudioPreflight(preflight)
         setPermissionState("granted")
         setStatus("connecting")
 
@@ -192,6 +203,7 @@ export function useCallCapture() {
           audio_preflight: preflight,
           audio_source_summary: sources.map(summarizeAudioSource),
         })
+        throwIfCallStartCancelled(config.abortSignal)
 
         sources.forEach((source) => {
           if (source.note) config.onNote?.(source.note)
@@ -400,6 +412,7 @@ export function useCallCapture() {
 
         const connections: RTCPeerConnection[] = []
         for (const source of sources) {
+          throwIfCallStartCancelled(config.abortSignal)
           try {
             const connection = await connectRealtimeTranscription({
               callId: config.callId,
@@ -423,6 +436,8 @@ export function useCallCapture() {
               stream: source.stream,
             })
             connections.push(connection)
+            peerConnectionsRef.current = connections
+            throwIfCallStartCancelled(config.abortSignal)
           } catch (caughtError: unknown) {
             if (connections.length === 0 && sources.length === 1) throw caughtError
             config.onNote?.(
@@ -439,10 +454,24 @@ export function useCallCapture() {
 
         peerConnectionsRef.current = connections
 
+        throwIfCallStartCancelled(config.abortSignal)
         recorder.start(1000)
         setStatus("recording")
       } catch (caughtError: unknown) {
         cleanup()
+        if (config.abortSignal?.aborted) {
+          setError(null)
+          setPermissionState("unknown")
+          setStatus("idle")
+          setActiveCallId("")
+          setAudioPreflight(null)
+          activeConfigRef.current = null
+          mediaRecorderRef.current = null
+          chunksRef.current = []
+          await updateCall(config.callId, { status: "archived" }).catch(() => undefined)
+          throw caughtError
+        }
+
         const message = getUserFacingErrorMessage(caughtError, "Call capture could not start.")
 
         if (isCaptureUnavailableError(caughtError)) {
@@ -553,6 +582,34 @@ export function useCallCapture() {
     }
   }, [cleanup])
 
+  const cancelCallStart = React.useCallback(async (callId?: string) => {
+    const config = activeConfigRef.current
+    const targetCallId = callId || config?.callId || activeCallId
+
+    try {
+      await stopRecorder(mediaRecorderRef.current, chunksRef.current)
+    } catch {
+      // A cancelled start should prioritise releasing capture resources over surfacing cleanup noise.
+    } finally {
+      cleanup()
+      activeConfigRef.current = null
+      mediaRecorderRef.current = null
+      chunksRef.current = []
+      setActiveCallId("")
+      setAudioPreflight(null)
+      setError(null)
+      setPermissionState("unknown")
+      setStatus("idle")
+    }
+
+    if (targetCallId) {
+      await updateCall(targetCallId, {
+        ended_at: new Date().toISOString(),
+        status: "archived",
+      }).catch(() => undefined)
+    }
+  }, [activeCallId, cleanup])
+
   const pauseCapture = React.useCallback(() => {
     const recorder = mediaRecorderRef.current
     if (recorder?.state === "recording") {
@@ -581,6 +638,7 @@ export function useCallCapture() {
     error,
     pauseCapture,
     permissionState,
+    cancelCallStart,
     resumeCapture,
     startCall,
     status,
