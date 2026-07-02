@@ -581,10 +581,30 @@ function createAuthSessionFromUser(user: User): AuthSession {
   }
 }
 
+const supportedAvatarImageTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
+const maxAvatarFileSizeBytes = 5 * 1024 * 1024
+const maxAvatarSourcePixels = 16_000_000
+
+function isSupportedAvatarImage(file: File) {
+  return supportedAvatarImageTypes.has(file.type)
+}
+
 function createAvatarDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
+    if (!isSupportedAvatarImage(file)) {
+      reject(new Error("Choose a PNG, JPEG, WebP, or GIF image."))
+      return
+    }
+
+    if (file.size > maxAvatarFileSizeBytes) {
+      reject(new Error("Choose an image smaller than 5MB."))
+      return
+    }
+
     const imageUrl = URL.createObjectURL(file)
     const image = new Image()
+
+    image.decoding = "async"
 
     image.onload = () => {
       const size = 256
@@ -592,6 +612,16 @@ function createAvatarDataUrl(file: File) {
       const context = canvas.getContext("2d")
 
       URL.revokeObjectURL(imageUrl)
+
+      if (!image.naturalWidth || !image.naturalHeight) {
+        reject(new Error("Choose a valid image file."))
+        return
+      }
+
+      if (image.naturalWidth * image.naturalHeight > maxAvatarSourcePixels) {
+        reject(new Error("Choose a smaller profile photo."))
+        return
+      }
 
       if (!context) {
         reject(new Error("Avatar could not be processed."))
@@ -14268,12 +14298,12 @@ function PersonalAccountView({
 
     if (!file) return
 
-    if (!file.type.startsWith("image/")) {
-      setStatusMessage("Choose an image file.")
+    if (!isSupportedAvatarImage(file)) {
+      setStatusMessage("Choose a PNG, JPEG, WebP, or GIF image.")
       return
     }
 
-    if (file.size > 5 * 1024 * 1024) {
+    if (file.size > maxAvatarFileSizeBytes) {
       setStatusMessage("Choose an image smaller than 5MB.")
       return
     }
