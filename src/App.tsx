@@ -4884,12 +4884,10 @@ function App() {
                   message={workspaceErrorMessage}
                   state={workspaceDataState}
                   onCreateAccount={() => {
-                    setWorkspaceDataState("ready")
                     setCreateAccountOpen(true)
                   }}
                   onNavigate={handleNavigate}
                   onRetry={handleRetryWorkspaceState}
-                  onStateChange={setWorkspaceDataState}
                 />
               )
             ) : shouldShowPageTransition ? (
@@ -14995,7 +14993,6 @@ function WorkspaceStateView({
   onCreateAccount,
   onNavigate,
   onRetry,
-  onStateChange,
 }: {
   activeView: string
   message?: string
@@ -15003,7 +15000,6 @@ function WorkspaceStateView({
   onCreateAccount: () => void
   onNavigate: (view: string) => void
   onRetry: () => void
-  onStateChange: (state: WorkspaceDataState) => void
 }) {
   const stateConfig: Record<Exclude<WorkspaceDataState, "ready">, {
     eyebrow: string
@@ -15020,8 +15016,8 @@ function WorkspaceStateView({
       title: "Getting this workspace ready",
       body: "We are loading the accounts, opportunities, calls, and playbooks that belong here.",
       icon: <Clock3Icon className="size-5" />,
-      primaryLabel: "Finish loading",
-      primaryAction: () => onStateChange("ready"),
+      primaryLabel: "Try again",
+      primaryAction: onRetry,
       secondaryLabel: "Open settings",
       secondaryAction: () => onNavigate("settings"),
     },
@@ -15032,8 +15028,8 @@ function WorkspaceStateView({
       icon: <Building2Icon className="size-5" />,
       primaryLabel: "Create account",
       primaryAction: onCreateAccount,
-      secondaryLabel: "Return to dashboard",
-      secondaryAction: () => onStateChange("ready"),
+      secondaryLabel: "Import data",
+      secondaryAction: () => onNavigate("profile-account"),
     },
     error: {
       eyebrow: "Something got stuck",
@@ -15052,8 +15048,8 @@ function WorkspaceStateView({
       icon: <ShieldCheckIcon className="size-5" />,
       primaryLabel: "Open settings",
       primaryAction: () => onNavigate("settings"),
-      secondaryLabel: "Return to dashboard",
-      secondaryAction: () => onStateChange("ready"),
+      secondaryLabel: "Open account",
+      secondaryAction: () => onNavigate("profile-account"),
     },
   }
   const config = stateConfig[state]
