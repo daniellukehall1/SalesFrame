@@ -56,8 +56,23 @@ The linked Netlify site should be:
 - Site ID: `72b2645c-ffec-4e47-8d0e-e0f180384bb4`
 
 If Netlify returns `Forbidden`, the active Netlify token/session does not have
-deploy permission for the site. Refresh Netlify auth or deploy from the
-dashboard after confirming the GitHub push landed.
+deploy permission for the site, or the Netlify project/account is currently
+blocked.
+
+Check the site state:
+
+```sh
+pnpm --package=netlify-cli dlx netlify api getSite --data '{"site_id":"72b2645c-ffec-4e47-8d0e-e0f180384bb4"}'
+```
+
+Look for:
+
+- `disabled`
+- `disabled_reason`
+
+If `disabled_reason` says account usage or credits were exceeded, GitHub can
+still be pushed, but Netlify will not deploy until the Netlify account issue is
+resolved in the dashboard.
 
 ## Required Environment Variables
 
