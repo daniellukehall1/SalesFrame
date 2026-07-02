@@ -465,6 +465,20 @@ function saveCaptureSettings(workspaceId: string, settings: CaptureSettings) {
   }
 }
 
+function getPreferredAudioCaptureMode(settings: CaptureSettings): CallAudioCaptureMode {
+  if (settings.browserTab) return "meeting_audio"
+  if (settings.inPersonMic) return "in_person_microphone"
+
+  return "microphone"
+}
+
+function isAudioCaptureModeEnabled(settings: CaptureSettings, mode: CallAudioCaptureMode) {
+  if (mode === "meeting_audio") return settings.browserTab
+  if (mode === "in_person_microphone") return settings.inPersonMic
+
+  return true
+}
+
 function getLegalPageFromPath(): LegalPageId | null {
   if (typeof window === "undefined") return null
   if (window.location.pathname === "/terms") return "terms"
@@ -6205,7 +6219,10 @@ function StartRecordingDialog({
   const [opportunityId, setOpportunityId] = React.useState(initialOpportunityId)
   const [opportunityName, setOpportunityName] = React.useState("")
   const [callType, setCallType] = React.useState("Discovery")
-  const [audioCaptureMode, setAudioCaptureMode] = React.useState<CallAudioCaptureMode>("microphone")
+  const [capturePreferences, setCapturePreferences] = React.useState<CaptureSettings>(() => readCaptureSettings(workspaceId))
+  const [audioCaptureMode, setAudioCaptureMode] = React.useState<CallAudioCaptureMode>(() =>
+    getPreferredAudioCaptureMode(readCaptureSettings(workspaceId))
+  )
   const [selectedPlaybooks, setSelectedPlaybooks] = React.useState<CallPlaybook[]>(() =>
     parsePlaybookSelection(opportunityDrafts[opportunityId]?.frameworks)
   )
@@ -6310,6 +6327,17 @@ function StartRecordingDialog({
   }
 
   React.useEffect(() => {
+    const nextPreferences = readCaptureSettings(workspaceId)
+
+    setCapturePreferences(nextPreferences)
+    setAudioCaptureMode((currentMode) =>
+      isAudioCaptureModeEnabled(nextPreferences, currentMode)
+        ? currentMode
+        : getPreferredAudioCaptureMode(nextPreferences)
+    )
+  }, [workspaceId])
+
+  React.useEffect(() => {
     return () => {
       if (sellerDomainLookupTimeoutRef.current) {
         window.clearTimeout(sellerDomainLookupTimeoutRef.current)
@@ -6379,7 +6407,9 @@ function StartRecordingDialog({
       setAccountCurrency(accounts.find((account) => account.id === nextAccountId)?.currency ?? defaultCurrency)
       setOpportunityId(nextOpportunityId)
       setOpportunityMode(nextOpportunityId ? "existing" : "new")
-      setAudioCaptureMode("microphone")
+      const nextCapturePreferences = readCaptureSettings(workspaceId)
+      setCapturePreferences(nextCapturePreferences)
+      setAudioCaptureMode(getPreferredAudioCaptureMode(nextCapturePreferences))
       setStartError("")
       setStartSubmitting(false)
       resetStartProgress()
@@ -6827,8 +6857,12 @@ function StartRecordingDialog({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="microphone">Microphone only</SelectItem>
-                      <SelectItem value="in_person_microphone">In-person meeting / phone mic</SelectItem>
-                      <SelectItem value="meeting_audio">Meeting app/tab audio + microphone</SelectItem>
+                      <SelectItem value="in_person_microphone" disabled={!capturePreferences.inPersonMic}>
+                        In-person meeting / phone mic
+                      </SelectItem>
+                      <SelectItem value="meeting_audio" disabled={!capturePreferences.browserTab}>
+                        Meeting app/tab audio + microphone
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
@@ -6838,6 +6872,11 @@ function StartRecordingDialog({
                         ? "Use this on iPhone or in-person meetings. Keep Safari open and the phone awake so the microphone can capture transcript and live questions."
                       : "Uses your microphone only. This will not ask you to share your screen."}
                   </p>
+                  {(!capturePreferences.browserTab || !capturePreferences.inPersonMic) ? (
+                    <p className="text-xs text-muted-foreground">
+                      Capture choices follow this workspace's Settings. Microphone only is always available.
+                    </p>
+                  ) : null}
                 </div>
                 <div className="grid min-w-0 gap-2">
                   <Label htmlFor="recording-playbooks">Playbooks</Label>
