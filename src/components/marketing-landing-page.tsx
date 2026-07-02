@@ -222,10 +222,6 @@ export function MarketingLandingPage({
     }
   }
 
-  const handleContactIntent = (subject: string) => {
-    window.location.href = `mailto:${contactEmail}?subject=${encodeURIComponent(subject)}`
-  }
-
   return (
     <main className="salesframe-landing relative min-h-svh overflow-hidden bg-white text-black">
       <img
@@ -261,24 +257,23 @@ export function MarketingLandingPage({
       <div className="fixed inset-0 z-[1] bg-white/15" aria-hidden="true" />
 
       <header className="fixed inset-x-0 top-0 z-10 flex items-center justify-between px-5 py-4 sm:px-8 sm:py-5">
-        <button
-          type="button"
+        <a
+          href="/"
+          aria-label="SalesFrame home"
           className={`${landingTextButtonClass} flex items-center gap-3 text-left`}
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         >
           <span className="text-[21px] tracking-tight text-black sm:text-[26px]" style={{ fontFamily: "var(--font-heading)" }}>
             SalesFrame®
           </span>
           {salesFrameWaveformMark()}
-        </button>
+        </a>
 
-        <button
-          type="button"
+        <a
+          href={`mailto:${contactEmail}?subject=${encodeURIComponent("SalesFrame enquiry")}`}
           className={`${landingTextButtonClass} text-[17px] text-black underline underline-offset-2 hover:opacity-60 sm:text-[21px] md:text-[23px]`}
-          onClick={() => handleContactIntent("SalesFrame enquiry")}
         >
           Get in touch
-        </button>
+        </a>
       </header>
 
       <section className="relative z-[2] flex h-svh flex-col justify-end overflow-hidden px-5 pb-12 sm:px-8 md:justify-center md:px-10 md:pb-0">

@@ -2477,6 +2477,8 @@ test("public homepage exposes SEO metadata, schema, and crawl controls", async (
   assert.match(landingPage, /real-time AI sales call coach/)
   assert.match(landingPage, /href="\/signup"/)
   assert.match(landingPage, /href="\/login"/)
+  assert.match(landingPage, /href="\/"[\s\S]*aria-label="SalesFrame home"/)
+  assert.match(landingPage, /href=\{`mailto:\$\{contactEmail\}\?subject=\$\{encodeURIComponent\("SalesFrame enquiry"\)\}`\}/)
   assert.match(favicon, /<rect width="64" height="64" rx="16" fill="#111111" \/>/)
   assert.match(favicon, /stroke="#ffffff"/)
   assert.match(favicon, /<path d="M2 10v3" \/>/)
