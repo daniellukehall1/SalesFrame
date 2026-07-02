@@ -51,7 +51,7 @@ export class AppErrorBoundary extends React.Component<
       ? "SalesFrame is having trouble reaching your workspace"
       : "SalesFrame needs another pass at this view"
     const body = isWorkspaceConnectionError
-      ? "Your browser opened SalesFrame, but the workspace connection is not ready yet. Try once more, or head back to the homepage while we get it back in shape."
+      ? "Your browser opened SalesFrame, but the workspace connection did not complete. Try once more, or head back to the homepage while we get it back in shape."
       : "We hit a snag opening this view. Try again and SalesFrame will reopen it from the latest saved workspace state."
 
     return (
