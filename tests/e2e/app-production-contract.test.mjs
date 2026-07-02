@@ -1854,6 +1854,10 @@ test("call cockpit hides Start call while capture is already starting", async ()
     app.indexOf("function LiveRail("),
     app.indexOf("function CallReplayCard(")
   )
+  const commandBar = app.slice(
+    app.indexOf("function CommandBar("),
+    app.indexOf("function CallPrepDialog(")
+  )
 
   assert.match(app, /const isCallLive =/)
   assert.match(app, /Boolean\(callCapture\.activeCallId\)/)
@@ -1862,6 +1866,8 @@ test("call cockpit hides Start call while capture is already starting", async ()
   assert.match(app, /isRecording=\{canStopActiveCall\}/)
   assert.doesNotMatch(app, /<WorkspaceView[\s\S]*isRecording=\{isCallLive\}/)
   assert.doesNotMatch(app, /<CommandBar[\s\S]*isRecording=\{isCallLive\}/)
+  assert.doesNotMatch(commandBar, /<Badge/)
+  assert.doesNotMatch(commandBar, /Listening live|Ready<\/Badge>/)
   assert.match(app, /const activeCallIdRef = React\.useRef\(activeCallId\)/)
   assert.match(app, /const isCallLiveRef = React\.useRef\(isCallLive\)/)
   assert.match(app, /const stoppingCallId = activeCallId \|\| callCapture\.activeCallId \|\| activeCallIdRef\.current/)
@@ -2349,6 +2355,8 @@ test("app shell catches render crashes", async () => {
   assert.match(boundary, /import\.meta\.env\.DEV/)
   assert.doesNotMatch(boundary, /<CardDescription>Recovery state<\/CardDescription>/)
   assert.match(boundary, /Let&apos;s get you back in/)
+  assert.match(boundary, /We hit a snag opening this view\./)
+  assert.doesNotMatch(boundary, /rendering the current view/)
   assert.match(boundary, /Reload SalesFrame/)
   assert.match(main, /<AppErrorBoundary>/)
   assert.match(main, /<App \/>/)

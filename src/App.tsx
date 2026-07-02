@@ -5775,10 +5775,6 @@ function CommandBar({
     <div className="grid gap-3 rounded-lg bg-muted/30 px-3 py-2 lg:grid-cols-[1fr_auto] lg:items-center">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={isRecording ? "destructive" : "secondary"} className="gap-1.5">
-            <span className={cn("size-1.5 rounded-full", isRecording ? "bg-destructive" : "bg-muted-foreground")} />
-            {isRecording ? "Listening live" : "Ready"}
-          </Badge>
           <span className="truncate text-sm text-muted-foreground">{account.name}</span>
           <span className="text-sm text-muted-foreground">/</span>
           <span className="truncate text-sm font-medium">{opportunity.name}</span>

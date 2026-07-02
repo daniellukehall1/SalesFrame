@@ -53,7 +53,7 @@ export class AppErrorBoundary extends React.Component<
           </CardHeader>
           <CardContent className="grid gap-4">
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Something unexpected happened while rendering the current view. Reloading will return you to the latest saved workspace state.
+              We hit a snag opening this view. Reloading will bring you back to the latest saved workspace state.
             </p>
             <Button className="w-fit gap-2" onClick={this.handleReload}>
               <RotateCcwIcon />
