@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CircleAlertIcon, RotateCcwIcon } from "lucide-react"
+import { CircleAlertIcon, HomeIcon, RotateCcwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -38,16 +38,20 @@ export class AppErrorBoundary extends React.Component<
     window.location.reload()
   }
 
+  handleHome = () => {
+    window.location.assign("/")
+  }
+
   render() {
     if (!this.state.error) return this.props.children
 
     const isWorkspaceConnectionError = this.state.error.message.includes("workspace service")
     const description = isWorkspaceConnectionError ? "Workspace connection" : "Let's get you back in"
     const title = isWorkspaceConnectionError
-      ? "SalesFrame could not connect to the workspace service"
+      ? "SalesFrame is having trouble reaching your workspace"
       : "SalesFrame needs to reload this workspace"
     const body = isWorkspaceConnectionError
-      ? "The app opened, but the workspace connection is not ready. Try again once; if it keeps happening, contact support so we can fix the setup."
+      ? "Your browser opened SalesFrame, but the workspace connection is not ready yet. Try once more, or head back to the homepage while we get it back in shape."
       : "We hit a snag opening this view. Reloading will bring you back to the latest saved workspace state."
 
     return (
@@ -64,10 +68,16 @@ export class AppErrorBoundary extends React.Component<
             <p className="text-sm leading-relaxed text-muted-foreground">
               {body}
             </p>
-            <Button className="w-fit gap-2" onClick={this.handleReload}>
-              <RotateCcwIcon />
-              {isWorkspaceConnectionError ? "Try again" : "Reload SalesFrame"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button className="gap-2" onClick={this.handleReload}>
+                <RotateCcwIcon />
+                {isWorkspaceConnectionError ? "Try again" : "Reload SalesFrame"}
+              </Button>
+              <Button className="gap-2" variant="outline" onClick={this.handleHome}>
+                <HomeIcon />
+                Back to homepage
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </main>

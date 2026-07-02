@@ -1,5 +1,5 @@
 import * as React from "react"
-import type { User } from "@supabase/supabase-js"
+import type { SupabaseClient, User } from "@supabase/supabase-js"
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -23,6 +23,7 @@ import {
   FilterIcon,
   ImageIcon,
   KeyRoundIcon,
+  LayoutDashboardIcon,
   ListChecksIcon,
   Mic2Icon,
   MoonIcon,
@@ -139,6 +140,7 @@ import type { CsvImportType } from "@/lib/csv-import"
 import { normalizeCloseDateForPersistence } from "@/lib/date-utils"
 import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
 import { createClient } from "@/lib/supabase/client"
+import type { Database } from "@/lib/supabase/database.types"
 import {
   deleteOpenAiKey,
   getOpenAiKeyStatus,
@@ -399,7 +401,6 @@ const breadcrumbPlaybookDetailViews = [
 const breadcrumbSettingsDetailViews = ["capture", "retention", "ai"]
 const mobileStartCallViews = [
   "home",
-  "account",
   "opportunities",
   "calls",
   "recordings",
@@ -409,12 +410,56 @@ const minimumWorkspaceLoadMs = 3000
 const minimumPageLoadMs = 700
 const sellerDomainLookupDebounceMs = 2000
 const colorModeStorageKey = "salesframe.color-mode"
+const captureSettingsStorageKey = "salesframe.capture-settings"
+
+type CaptureSettings = {
+  browserTab: boolean
+  inPersonMic: boolean
+}
+
+const defaultCaptureSettings: CaptureSettings = {
+  browserTab: true,
+  inPersonMic: true,
+}
 
 function getInitialDarkMode() {
   if (typeof window === "undefined") return false
 
   try {
     return window.localStorage.getItem(colorModeStorageKey) === "dark"
+  } catch {
+    return false
+  }
+}
+
+function getCaptureSettingsStorageKey(workspaceId: string) {
+  return `${captureSettingsStorageKey}.${workspaceId || "default"}`
+}
+
+function readCaptureSettings(workspaceId: string): CaptureSettings {
+  if (typeof window === "undefined") return defaultCaptureSettings
+
+  try {
+    const stored = window.localStorage.getItem(getCaptureSettingsStorageKey(workspaceId))
+    if (!stored) return defaultCaptureSettings
+
+    const parsed = JSON.parse(stored) as Partial<CaptureSettings>
+
+    return {
+      browserTab: typeof parsed.browserTab === "boolean" ? parsed.browserTab : defaultCaptureSettings.browserTab,
+      inPersonMic: typeof parsed.inPersonMic === "boolean" ? parsed.inPersonMic : defaultCaptureSettings.inPersonMic,
+    }
+  } catch {
+    return defaultCaptureSettings
+  }
+}
+
+function saveCaptureSettings(workspaceId: string, settings: CaptureSettings) {
+  if (typeof window === "undefined") return false
+
+  try {
+    window.localStorage.setItem(getCaptureSettingsStorageKey(workspaceId), JSON.stringify(settings))
+    return true
   } catch {
     return false
   }
@@ -1954,8 +1999,19 @@ function getLatestCallForOpportunity({
   return preferredCall ?? opportunityCalls[0] ?? null
 }
 
+function createOptionalSupabaseClient(): SupabaseClient<Database> | null {
+  try {
+    return createClient()
+  } catch {
+    return null
+  }
+}
+
+const authConnectionUnavailableMessage =
+  "SalesFrame cannot reach sign-in right now. Try again in a moment."
+
 function App() {
-  const supabase = React.useMemo(() => createClient(), [])
+  const supabase = React.useMemo(() => createOptionalSupabaseClient(), [])
   const [activeView, setActiveView] = React.useState("home")
   const [workspaceNavItems, setWorkspaceNavItems] = React.useState<WorkspaceNavItem[]>([])
   const [activeWorkspaceId, setActiveWorkspaceId] = React.useState("")
@@ -2136,6 +2192,15 @@ function App() {
   }, [])
 
   React.useEffect(() => {
+    if (!supabase) {
+      setAuthSession(null)
+      setAuthLoading(false)
+      if (getPublicAuthRouteFromPath() !== "landing") {
+        setAuthStatusMessage(authConnectionUnavailableMessage)
+      }
+      return
+    }
+
     let mounted = true
 
     supabase.auth.getSession().then(({ data, error }) => {
@@ -2163,7 +2228,7 @@ function App() {
       mounted = false
       subscription.unsubscribe()
     }
-  }, [])
+  }, [supabase])
 
   React.useEffect(() => {
     if (!authSession) return
@@ -4204,6 +4269,11 @@ function App() {
       return
     }
 
+    if (!supabase) {
+      setAuthStatusMessage(authConnectionUnavailableMessage)
+      return
+    }
+
     setAuthSubmitting(true)
     setAuthStatusMessage("")
 
@@ -4244,6 +4314,11 @@ function App() {
 
     if (values.password !== values.confirmPassword) {
       setAuthStatusMessage("Passwords do not match.")
+      return
+    }
+
+    if (!supabase) {
+      setAuthStatusMessage(authConnectionUnavailableMessage)
       return
     }
 
@@ -4290,6 +4365,11 @@ function App() {
   const handleForgotPassword = async (email: string) => {
     if (!email.trim()) {
       setAuthStatusMessage("Enter your email first, then request a password reset.")
+      return
+    }
+
+    if (!supabase) {
+      setAuthStatusMessage(authConnectionUnavailableMessage)
       return
     }
 
@@ -4372,7 +4452,7 @@ function App() {
       pageLoadTimeoutRef.current = null
     }
 
-    const { error } = await supabase.auth.signOut()
+    const { error } = supabase ? await supabase.auth.signOut() : { error: null }
 
     setAuthSession(null)
     setWorkspaceNavItems([])
@@ -4967,7 +5047,6 @@ function App() {
             ) : (
               <SectionView
                 activeView={activeView}
-                opportunity={activeOpportunity}
                 onNavigate={handleNavigate}
               />
             )}
@@ -15006,12 +15085,15 @@ function SettingsView({
   const [apiKey, setApiKey] = React.useState("")
   const [isSavingKey, setIsSavingKey] = React.useState(false)
   const [saveMessage, setSaveMessage] = React.useState("")
-  const [captureSettings, setCaptureSettings] = React.useState({
-    browserTab: true,
-    inPersonMic: true,
-  })
+  const [captureSettings, setCaptureSettings] = React.useState<CaptureSettings>(() => readCaptureSettings(workspaceId))
+  const [captureSettingsMessage, setCaptureSettingsMessage] = React.useState("")
   const hasApiKey = apiKey.trim().length > 0
   const hasSavedKey = savedKeyState !== null
+
+  React.useEffect(() => {
+    setCaptureSettings(readCaptureSettings(workspaceId))
+    setCaptureSettingsMessage("")
+  }, [workspaceId])
 
   React.useEffect(() => {
     let cancelled = false
@@ -15082,6 +15164,20 @@ function SettingsView({
     } finally {
       setIsSavingKey(false)
     }
+  }
+
+  const handleCaptureSettingChange = (id: keyof CaptureSettings, checked: boolean) => {
+    const nextSettings = {
+      ...captureSettings,
+      [id]: checked,
+    }
+
+    setCaptureSettings(nextSettings)
+    setCaptureSettingsMessage(
+      saveCaptureSettings(workspaceId, nextSettings)
+        ? "Capture preference saved for this workspace on this browser."
+        : "Capture preference changed for this session. Browser storage was not available."
+    )
   }
 
   return (
@@ -15218,15 +15314,14 @@ function SettingsView({
                   aria-label={`Toggle ${item.title}`}
                   checked={captureSettings[item.id]}
                   disabled={!item.configurable}
-                  onCheckedChange={(checked) =>
-                    setCaptureSettings((settings) => ({
-                      ...settings,
-                      [item.id]: checked,
-                    }))
-                  }
+                  onCheckedChange={(checked) => handleCaptureSettingChange(item.id, checked)}
                 />
               </div>
             ))}
+            <p className="text-sm text-muted-foreground" aria-live="polite">
+              {captureSettingsMessage ||
+                "Capture preferences are saved in this browser for the active workspace."}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -15236,45 +15331,53 @@ function SettingsView({
 
 function SectionView({
   activeView,
-  opportunity,
   onNavigate,
 }: {
   activeView: string
-  opportunity: Opportunity
   onNavigate: (view: string) => void
 }) {
   const label = viewLabels[activeView] ?? "Workspace"
-  const cards = sectionCards[activeView] ?? sectionCards.default
+  const cards = sectionCards[activeView] ?? []
 
   return (
     <div className="grid gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>{label}</CardTitle>
+          <CardTitle>{cards.length ? label : "This section is not available"}</CardTitle>
           <CardDescription>
-            Explore how this section will work for {opportunity.name}.
+            {cards.length
+              ? "Use this section to keep the workspace focused and easy to navigate."
+              : "That page is not in the current workspace menu. Head back to Home or open the call cockpit."}
           </CardDescription>
           <CardAction>
-            <Button variant="outline" className="gap-2" onClick={() => onNavigate("workspace")}>
-              <PhoneCallIcon />
-              Back to live workspace
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" className="gap-2" onClick={() => onNavigate("home")}>
+                <LayoutDashboardIcon />
+                Home
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={() => onNavigate("workspace")}>
+                <PhoneCallIcon />
+                Call cockpit
+              </Button>
+            </div>
           </CardAction>
         </CardHeader>
       </Card>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {cards.map((card) => (
-          <Card key={card.title}>
-            <CardHeader>
-              <CardDescription>{card.kicker}</CardDescription>
-              <CardTitle>{card.title}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm leading-relaxed text-muted-foreground">{card.body}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {cards.length ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {cards.map((card) => (
+            <Card key={card.title}>
+              <CardHeader>
+                <CardDescription>{card.kicker}</CardDescription>
+                <CardTitle>{card.title}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm leading-relaxed text-muted-foreground">{card.body}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
