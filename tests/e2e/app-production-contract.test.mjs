@@ -1327,6 +1327,7 @@ test("personal account timezone is selected from a dropdown", async () => {
     app.indexOf("function TimezoneSelect("),
     app.indexOf("function EditableTextareaField(")
   )
+  const avatarUi = await read("src/components/ui/avatar.tsx")
 
   assert.match(app, /const timezoneOptions = \[/)
   assert.match(app, /Australia\/Sydney/)
@@ -1350,6 +1351,10 @@ test("personal account timezone is selected from a dropdown", async () => {
   assert.match(profilePage, /aria-live="polite">Unsaved changes<\/p>/)
   assert.doesNotMatch(profilePage, /<Badge variant="secondary">\{profile\.role\}<\/Badge>/)
   assert.doesNotMatch(profilePage, /<Badge variant=\{hasChanges \? "default" : "outline"\}>\{hasChanges \? "Unsaved" : "Saved"\}<\/Badge>/)
+  assert.match(avatarUi, /decoding = "async"/)
+  assert.match(avatarUi, /draggable = false/)
+  assert.match(avatarUi, /decoding=\{decoding\}/)
+  assert.match(avatarUi, /draggable=\{draggable\}/)
   assert.match(timezoneSelect, /<Select value=\{value\} onValueChange=\{onChange\}>/)
   assert.match(timezoneSelect, /<SelectTrigger id=\{id\} className="w-full">/)
 })
