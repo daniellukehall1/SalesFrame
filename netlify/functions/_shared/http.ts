@@ -137,6 +137,10 @@ function getPublicAiProviderMessage(message: string) {
     return "OpenAI is taking longer than expected. Try again in a moment."
   }
 
+  if (isTechnicalErrorMessage(message)) {
+    return "SalesFrame could not finish the AI step. Try again in a moment."
+  }
+
   return "SalesFrame could not finish the AI step. Try again in a moment."
 }
 
@@ -156,6 +160,13 @@ const technicalErrorPatterns = [
   /required .* properties/i,
   /invalid url \(post/i,
   /parameter is not supported/i,
+  /internal server error/i,
+  /bad gateway/i,
+  /gateway timeout/i,
+  /unexpected token/i,
+  /<!doctype/i,
+  /<html/i,
+  /stack trace|traceback/i,
   /malformed json/i,
   /cannot read properties/i,
   /is not a function/i,

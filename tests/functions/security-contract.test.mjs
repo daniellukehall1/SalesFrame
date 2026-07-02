@@ -196,6 +196,22 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
   assert.equal(modelPayload.error.code, "openai_model_error")
   assert.equal(modelPayload.error.message, "OpenAI could not use the selected model. Contact support if this keeps happening.")
 
+  const htmlPlatformResponse = errorResponse(
+    upstreamFailure("<!doctype html><html><body>Bad Gateway</body></html>", "openai_gateway_html")
+  )
+  const htmlPlatformPayload = await htmlPlatformResponse.json()
+
+  assert.equal(htmlPlatformResponse.status, 502)
+  assert.equal(htmlPlatformPayload.error.code, "openai_gateway_html")
+  assert.equal(htmlPlatformPayload.error.message, "SalesFrame could not finish the AI step. Try again in a moment.")
+
+  const runtimeResponse = errorResponse(new Error("TypeError: Cannot read properties of undefined (reading 'id')\nstack trace"))
+  const runtimePayload = await runtimeResponse.json()
+
+  assert.equal(runtimeResponse.status, 500)
+  assert.equal(runtimePayload.error.code, "server_error")
+  assert.equal(runtimePayload.error.message, "SalesFrame could not finish that request. Try again in a moment.")
+
   const validationResponse = errorResponse(badRequest("workspaceId is required.", "workspace_id_required"))
   const validationPayload = await validationResponse.json()
 

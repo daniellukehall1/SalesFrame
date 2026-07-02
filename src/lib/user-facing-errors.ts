@@ -18,6 +18,13 @@ const technicalErrorPatterns = [
   /invalid json/i,
   /invalid url \(post/i,
   /parameter is not supported/i,
+  /internal server error/i,
+  /bad gateway/i,
+  /gateway timeout/i,
+  /unexpected token/i,
+  /<!doctype/i,
+  /<html/i,
+  /stack trace|traceback/i,
   /cannot read properties/i,
   /is not a function/i,
 ]
