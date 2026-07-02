@@ -16,6 +16,28 @@ test("shared button defaults to non-submit for form safety", async () => {
   assert.match(button, /\{\.\.\.props\}/)
 })
 
+test("GitHub release checks run the same production gate as local deploys", async () => {
+  const workflow = await read(".github/workflows/ci.yml")
+  const packageJson = await read("package.json")
+  const readme = await read("README.md")
+  const smokeChecklist = await read("docs/production-smoke-checklist.md")
+
+  assert.match(packageJson, /"packageManager": "pnpm@11\.7\.0"/)
+  assert.match(workflow, /name: Release Checks/)
+  assert.match(workflow, /pull_request:/)
+  assert.match(workflow, /push:/)
+  assert.match(workflow, /branches:\s*\n\s*- main/)
+  assert.match(workflow, /permissions:\s*\n\s*contents: read/)
+  assert.match(workflow, /uses: pnpm\/action-setup@v4/)
+  assert.match(workflow, /version: 11\.7\.0/)
+  assert.match(workflow, /uses: actions\/setup-node@v4/)
+  assert.match(workflow, /node-version: 22/)
+  assert.match(workflow, /pnpm install --frozen-lockfile/)
+  assert.match(workflow, /pnpm check/)
+  assert.match(readme, /GitHub Actions runs `pnpm check`/)
+  assert.match(smokeChecklist, /GitHub Actions release check passes/)
+})
+
 test("modal dismissal stays deliberate on prep and destructive dialogs", async () => {
   const app = await read("src/App.tsx")
   const workspaceSwitcher = await read("src/components/workspace-switcher.tsx")

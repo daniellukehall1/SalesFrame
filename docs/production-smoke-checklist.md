@@ -5,6 +5,7 @@ Run this before every production deploy.
 ## Netlify And Supabase
 
 - Local release gate completes with `pnpm check`.
+- GitHub Actions release check passes on `main` or on the pull request being deployed.
 - Secret scan completes with no tracked OpenAI, GitHub, Supabase secret, service-role, or credentialed database URLs.
 - Netlify build completes with `pnpm build`.
 - Netlify environment variables are configured: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_LOGO_DEV_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_KEY_ENCRYPTION_SECRET`.

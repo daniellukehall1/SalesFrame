@@ -172,6 +172,8 @@ Before changing production data behavior:
 
 Netlify deploys from GitHub.
 
+GitHub Actions runs `pnpm check` on pushes and pull requests to `main`. That gate runs the secret scan, typecheck, tests, and production build before Netlify should be treated as release-ready.
+
 Build settings:
 
 ```text
