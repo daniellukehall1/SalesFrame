@@ -584,6 +584,7 @@ function createAuthSessionFromUser(user: User): AuthSession {
 const supportedAvatarImageTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
 const maxAvatarFileSizeBytes = 5 * 1024 * 1024
 const maxAvatarSourcePixels = 16_000_000
+const salesFrameSupportEmail = "hello@salesframe.ai"
 
 function isSupportedAvatarImage(file: File) {
   return supportedAvatarImageTypes.has(file.type)
@@ -14264,7 +14265,6 @@ function PersonalAccountView({
   const [profileSavePending, setProfileSavePending] = React.useState(false)
   const [avatarUploadPending, setAvatarUploadPending] = React.useState(false)
   const [deletePhrase, setDeletePhrase] = React.useState("")
-  const [deletionRequested, setDeletionRequested] = React.useState(false)
   const avatarInputRef = React.useRef<HTMLInputElement | null>(null)
   const initials = draft.fullName
     .split(/\s+/)
@@ -14278,7 +14278,23 @@ function PersonalAccountView({
     draft.email.trim().length > 0 &&
     !profileSavePending &&
     !avatarUploadPending
-  const canRequestDeletion = deletePhrase.trim().toUpperCase() === "DELETE" && !deletionRequested
+  const canRequestDeletion = deletePhrase.trim().toUpperCase() === "DELETE"
+  const deletionRequestHref = React.useMemo(() => {
+    const subject = encodeURIComponent("SalesFrame account deletion request")
+    const body = encodeURIComponent([
+      "Hi SalesFrame,",
+      "",
+      "Please help me delete my SalesFrame account.",
+      "",
+      `Name: ${draft.fullName.trim() || profile.fullName}`,
+      `Email: ${draft.email.trim() || profile.email}`,
+      `Workspace ID: ${workspaceId || "Not available"}`,
+      "",
+      "I understand you will verify identity and workspace ownership before deletion.",
+    ].join("\n"))
+
+    return `mailto:${salesFrameSupportEmail}?subject=${subject}&body=${body}`
+  }, [draft.email, draft.fullName, profile.email, profile.fullName, workspaceId])
 
   React.useEffect(() => {
     setDraft(profile)
@@ -14379,9 +14395,8 @@ function PersonalAccountView({
   const handleRequestDeletion = () => {
     if (!canRequestDeletion) return
 
-    setDeletionRequested(true)
-    setDeletePhrase("")
-    setStatusMessage("Account deletion request submitted.")
+    window.location.href = deletionRequestHref
+    setStatusMessage("Your email app should open with a deletion request ready to send.")
   }
 
   return (
@@ -14597,7 +14612,7 @@ function PersonalAccountView({
               <div>
                 <p className="text-sm font-medium">Deleting your account requires confirmation</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  We will verify identity, review workspace ownership, and confirm how customer records should be handled.
+                  Send a deletion request to {salesFrameSupportEmail}. We will verify identity, review workspace ownership, and confirm how customer records should be handled.
                 </p>
               </div>
             </div>
@@ -14607,26 +14622,14 @@ function PersonalAccountView({
             <Input
               id="delete-personal-account"
               value={deletePhrase}
-              disabled={deletionRequested}
               placeholder="DELETE"
               onChange={(event) => setDeletePhrase(event.currentTarget.value)}
             />
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="destructive" disabled={!canRequestDeletion} onClick={handleRequestDeletion}>
-              {deletionRequested ? "Deletion requested" : "Request account deletion"}
+              Request account deletion
             </Button>
-            {deletionRequested ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setDeletionRequested(false)
-                  setStatusMessage("Account deletion request cancelled.")
-                }}
-              >
-                Cancel deletion request
-              </Button>
-            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -15294,7 +15297,7 @@ function SettingsView({
                   <p className="mt-1 text-sm text-muted-foreground">
                     {hasSavedKey
                       ? "AI-assisted workflows can use this connection for enabled features."
-                      : "Add your key when you are ready to test AI-powered transcription, notes, and question guidance."}
+                      : "Add your key to power transcription, notes, and question guidance for this workspace."}
                   </p>
                 </div>
               </div>

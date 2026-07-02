@@ -572,6 +572,10 @@ test("CSV import lives only on the personal Account page and scopes to the selec
     personalAccountView.indexOf("<CardTitle>Data import</CardTitle>"),
     personalAccountView.indexOf("<CardTitle>Delete account</CardTitle>")
   )
+  const deleteAccountCard = personalAccountView.slice(
+    personalAccountView.indexOf("<CardTitle>Delete account</CardTitle>"),
+    personalAccountView.length
+  )
 
   assert.match(app, /import \{ CsvImportDialog \} from "@\/components\/csv-import-dialog"/)
   assert.match(app, /profileViews\.includes\(activeView\)[\s\S]*<PersonalAccountView/)
@@ -601,6 +605,12 @@ test("CSV import lives only on the personal Account page and scopes to the selec
   assert.match(personalAccountView, /onOpenCsvImport: \(mode: CsvImportType\) => void/)
   assert.doesNotMatch(personalAccountView, /Importing into: \{workspaceName\}/)
   assert.doesNotMatch(dataImportCard, /<CardAction>/)
+  assert.match(personalAccountView, /mailto:\$\{salesFrameSupportEmail\}/)
+  assert.match(personalAccountView, /window\.location\.href = deletionRequestHref/)
+  assert.match(personalAccountView, /Your email app should open with a deletion request ready to send\./)
+  assert.doesNotMatch(deleteAccountCard, /Account deletion request submitted/)
+  assert.doesNotMatch(deleteAccountCard, /deletionRequested/)
+  assert.doesNotMatch(deleteAccountCard, /Cancel deletion request/)
 
   assert.doesNotMatch(customerAccountView, /Data import/)
   assert.doesNotMatch(customerAccountView, /CsvImportDialog/)
@@ -2332,6 +2342,8 @@ test("setup flows use saved OpenAI keys and route missing keys to settings", asy
   assert.doesNotMatch(settingsPage, /Chrome extension/)
   assert.doesNotMatch(settingsPage, /Meeting bot/)
   assert.doesNotMatch(settingsPage, /Available soon/)
+  assert.doesNotMatch(settingsPage, /ready to test|test AI-powered/)
+  assert.match(settingsPage, /Add your key to power transcription, notes, and question guidance for this workspace\./)
 })
 
 test("Start Call research step routes missing OpenAI keys to settings", async () => {
