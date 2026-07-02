@@ -907,8 +907,12 @@ test("playbook multi-select stays compact instead of rendering decorative pills"
 
   assert.match(playbookMultiSelect, /const visiblePlaybooks = selectedPlaybooks\.slice\(0, 2\)/)
   assert.match(playbookMultiSelect, /const hiddenPlaybookCount = Math\.max\(0, selectedPlaybooks\.length - visiblePlaybooks\.length\)/)
-  assert.match(playbookMultiSelect, /<span className="truncate">\{visiblePlaybooks\.join\(", "\)\}<\/span>/)
+  assert.match(playbookMultiSelect, /const selectedPlaybookLabel = selectedPlaybooks\.length \? formatPlaybooks\(selectedPlaybooks\) : "Select playbooks"/)
+  assert.match(playbookMultiSelect, /aria-label=\{`Selected playbooks: \$\{selectedPlaybookLabel\}`\}/)
+  assert.match(playbookMultiSelect, /title=\{selectedPlaybookLabel\}/)
+  assert.match(playbookMultiSelect, /<span className="truncate">\{visiblePlaybooks\.length \? visiblePlaybooks\.join\(", "\) : "Select playbooks"\}<\/span>/)
   assert.match(playbookMultiSelect, /\+\{hiddenPlaybookCount\} more/)
+  assert.match(playbookMultiSelect, /focus-visible:ring-2 focus-visible:ring-ring/)
   assert.doesNotMatch(playbookMultiSelect, /<Badge/)
   assert.doesNotMatch(playbookMultiSelect, /flex-wrap/)
 })

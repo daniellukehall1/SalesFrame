@@ -8784,6 +8784,7 @@ function PlaybookMultiSelect({
   const selectedPlaybooks = normalizePlaybooks(value)
   const visiblePlaybooks = selectedPlaybooks.slice(0, 2)
   const hiddenPlaybookCount = Math.max(0, selectedPlaybooks.length - visiblePlaybooks.length)
+  const selectedPlaybookLabel = selectedPlaybooks.length ? formatPlaybooks(selectedPlaybooks) : "Select playbooks"
 
   const togglePlaybook = (playbook: CallPlaybook) => {
     const nextValue = selectedPlaybooks.includes(playbook)
@@ -8802,10 +8803,12 @@ function PlaybookMultiSelect({
         className="h-auto min-h-9 w-full min-w-0 justify-between gap-2 px-3 py-2 text-left font-normal"
         aria-expanded={open}
         aria-haspopup="listbox"
+        aria-label={`Selected playbooks: ${selectedPlaybookLabel}`}
+        title={selectedPlaybookLabel}
         onClick={() => setOpen((value) => !value)}
       >
         <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-sm">
-          <span className="truncate">{visiblePlaybooks.join(", ")}</span>
+          <span className="truncate">{visiblePlaybooks.length ? visiblePlaybooks.join(", ") : "Select playbooks"}</span>
           {hiddenPlaybookCount > 0 ? (
             <span className="shrink-0 text-muted-foreground">+{hiddenPlaybookCount} more</span>
           ) : null}
@@ -8828,7 +8831,7 @@ function PlaybookMultiSelect({
                 type="button"
                 role="option"
                 aria-selected={isSelected}
-                className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left hover:bg-muted"
+                className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => togglePlaybook(playbook)}
               >
                 <span
