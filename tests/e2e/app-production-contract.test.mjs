@@ -93,6 +93,13 @@ test("modal dismissal stays deliberate on prep and destructive dialogs", async (
   for (const dialogSource of [deleteDialog, editWorkspaceDialog, deleteWorkspaceDialog]) {
     assert.match(dialogSource, /<DialogFooter className="gap-3 max-sm:\[&_\[data-slot=button\]\]:w-full sm:justify-between">/)
   }
+
+  assert.match(deleteWorkspaceDialog, /const \[deleteSubmitting, setDeleteSubmitting\] = React\.useState\(false\)/)
+  assert.match(deleteWorkspaceDialog, /onOpenChange=\{\(nextOpen\) => \(!nextOpen && !deleteSubmitting \? onCancel\(\) : undefined\)\}/)
+  assert.match(deleteWorkspaceDialog, /disabled=\{deleteSubmitting\}[\s\S]*Cancel/)
+  assert.match(deleteWorkspaceDialog, /disabled=\{isLastWorkspace \|\| deleteSubmitting\}/)
+  assert.match(deleteWorkspaceDialog, /\{deleteSubmitting \? "Deleting\.\.\." : "Delete workspace"\}/)
+  assert.match(deleteWorkspaceDialog, /role="alert"[\s\S]*\{deleteError\}/)
 })
 
 test("last workspace deletion explains the guard instead of hiding the action", async () => {
@@ -101,7 +108,7 @@ test("last workspace deletion explains the guard instead of hiding the action", 
   assert.doesNotMatch(workspaceSwitcher, /disabled=\{workspaces\.length <= 1\}/)
   assert.match(workspaceSwitcher, /const isLastWorkspace = workspaceCount <= 1/)
   assert.match(workspaceSwitcher, /Create another workspace before deleting this one/)
-  assert.match(workspaceSwitcher, /disabled=\{isLastWorkspace\}/)
+  assert.match(workspaceSwitcher, /disabled=\{isLastWorkspace \|\| deleteSubmitting\}/)
 })
 
 test("Start Call uses the real call capture hook and post-call function", async () => {
@@ -560,8 +567,9 @@ test("call cockpit feedback buttons suppress acted-on questions and force AI ref
   assert.match(cockpitCard, /!manualCoach\.askedQuestionIds\.includes\(rawLiveQuestion\.id\)/)
   assert.match(cockpitCard, /!manualCoach\.deferredQuestionIds\.includes\(rawLiveQuestion\.id\)/)
   assert.match(cockpitCard, /Getting the next recommendation/)
-  assert.match(cockpitCard, /OpenAI is updating the next seller move/)
-  assert.match(cockpitCard, /The previous recommendation is hidden/)
+  assert.match(cockpitCard, /Working on the next move/)
+  assert.match(cockpitCard, /checking the conversation flow before it shows another question/)
+  assert.doesNotMatch(cockpitCard, /The previous recommendation is hidden/)
   assert.match(app, /Why this fits/)
   assert.match(app, /How SalesFrame keeps the next move natural/)
   assert.match(app, /The cockpit is using the live recommendation/)
@@ -2507,6 +2515,7 @@ test("workspace onboarding does not reset steps while saving OpenAI key", async 
   assert.match(onboardingDialog, /onClick=\{\(\) => void onBackToLogin\(\)\}/)
   assert.match(onboardingDialog, /rounded-lg bg-\[#0f0f10\] text-white">\s*<AudioLinesIcon aria-hidden="true" className="size-5" \/>/)
   assert.match(onboardingDialog, /const \[step, setStep\] = React\.useState<1 \| 2 \| 3 \| 4>\(1\)/)
+  assert.match(onboardingDialog, /Label htmlFor="onboarding-seller-domain">Your company domain<\/Label>[\s\S]*id="onboarding-seller-domain"[\s\S]*Label htmlFor="onboarding-seller-company">Your company<\/Label>/)
   assert.match(onboardingDialog, /\{ id: 4, label: "Import" \}/)
   assert.match(onboardingDialog, /const currentStepItem = stepItems\.find/)
   assert.match(onboardingDialog, /Step \{step\} of \{stepItems\.length\}: \{currentStepItem\.label\}/)

@@ -5609,6 +5609,15 @@ function WorkspaceOnboardingDialog({
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="grid gap-2">
+                <Label htmlFor="onboarding-seller-domain">Your company domain</Label>
+                <Input
+                  id="onboarding-seller-domain"
+                  value={sellerDomain}
+                  placeholder="salesframe.ai"
+                  onChange={(event) => handleDomainChange(event.currentTarget.value)}
+                />
+              </div>
+              <div className="grid gap-2">
                 <Label htmlFor="onboarding-seller-company">Your company</Label>
                 <Input
                   id="onboarding-seller-company"
@@ -5618,15 +5627,6 @@ function WorkspaceOnboardingDialog({
                     setSellerCompany(event.currentTarget.value)
                     setStatusMessage("")
                   }}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="onboarding-seller-domain">Company domain</Label>
-                <Input
-                  id="onboarding-seller-domain"
-                  value={sellerDomain}
-                  placeholder="salesframe.ai"
-                  onChange={(event) => handleDomainChange(event.currentTarget.value)}
                 />
               </div>
             </div>
@@ -10796,10 +10796,10 @@ function NextQuestionCard({
           ? "Checking if this still fits"
           : "Ready for your next call"
   const emptyGuidanceTitle = hasRecentManualAction
-    ? "OpenAI is updating the next seller move"
+    ? "Working on the next move"
     : "Start a call when you are ready"
   const emptyGuidanceDescription = hasRecentManualAction
-    ? "SalesFrame has captured your feedback and is asking OpenAI for the next natural question. The previous recommendation is hidden so it does not keep distracting the seller."
+    ? "SalesFrame heard that signal and is checking the conversation flow before it shows another question."
     : "SalesFrame will check audio, use the account context, opportunity history, call type, and selected playbooks, then bring back the first natural seller move before recording begins."
   return (
     <Card>

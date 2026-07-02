@@ -175,7 +175,9 @@ export function WorkspaceSwitcher({
       }
       setDeletingWorkspaceId(null)
     } catch (error: unknown) {
-      setStatusMessage(getUserFacingErrorMessage(error, "Workspace could not be deleted."))
+      const message = getUserFacingErrorMessage(error, "Workspace could not be deleted.")
+      setStatusMessage(message)
+      throw new Error(message)
     }
   }
 
@@ -428,13 +430,35 @@ function DeleteWorkspaceDialog({
   workspace: WorkspaceNavItem | null
   workspaceCount: number
   onCancel: () => void
-  onConfirm: () => void
+  onConfirm: () => Promise<void> | void
 }) {
+  const [deleteError, setDeleteError] = React.useState("")
+  const [deleteSubmitting, setDeleteSubmitting] = React.useState(false)
+
+  React.useEffect(() => {
+    setDeleteError("")
+    setDeleteSubmitting(false)
+  }, [workspace?.id])
+
   if (!workspace) return null
   const isLastWorkspace = workspaceCount <= 1
 
+  const handleDelete = async () => {
+    if (isLastWorkspace || deleteSubmitting) return
+
+    setDeleteError("")
+    setDeleteSubmitting(true)
+
+    try {
+      await onConfirm()
+    } catch (error: unknown) {
+      setDeleteError(getUserFacingErrorMessage(error, "Workspace could not be deleted."))
+      setDeleteSubmitting(false)
+    }
+  }
+
   return (
-    <Dialog open onOpenChange={(nextOpen) => (!nextOpen ? onCancel() : undefined)}>
+    <Dialog open onOpenChange={(nextOpen) => (!nextOpen && !deleteSubmitting ? onCancel() : undefined)}>
       <DialogContent
         className="max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 sm:max-w-md"
         onEscapeKeyDown={(event) => event.preventDefault()}
@@ -459,12 +483,17 @@ function DeleteWorkspaceDialog({
             Create another workspace before deleting this one. SalesFrame keeps one workspace so your account has somewhere to store accounts, calls, and settings.
           </p>
         ) : null}
+        {deleteError ? (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+            {deleteError}
+          </div>
+        ) : null}
         <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <Button variant="outline" onClick={onCancel}>
+          <Button variant="outline" disabled={deleteSubmitting} onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="destructive" disabled={isLastWorkspace} onClick={onConfirm}>
-            Delete workspace
+          <Button variant="destructive" disabled={isLastWorkspace || deleteSubmitting} onClick={handleDelete}>
+            {deleteSubmitting ? "Deleting..." : "Delete workspace"}
           </Button>
         </DialogFooter>
       </DialogContent>

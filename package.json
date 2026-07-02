@@ -14,6 +14,8 @@
     "test": "node --test \"tests/**/*.test.mjs\"",
     "test:e2e": "node --test \"tests/e2e/**/*.test.mjs\"",
     "test:functions": "node --test \"tests/functions/**/*.test.mjs\"",
+    "deploy:status": "pnpm dlx netlify status",
+    "deploy:prod": "pnpm dlx netlify deploy --prod --build",
     "sync:supabase-email-templates": "node scripts/sync-supabase-email-templates.mjs"
   },
   "dependencies": {

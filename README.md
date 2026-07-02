@@ -241,6 +241,8 @@ More detail lives in:
 
 ## Deployment Flow
 
+Full release details live in `docs/deployment-runbook.md`.
+
 For ordinary releases:
 
 1. Make the change.
@@ -249,6 +251,16 @@ For ordinary releases:
 4. Push to GitHub.
 5. Confirm Netlify deploys the exact commit.
 6. Smoke check `https://salesframe.ai`.
+
+Manual Netlify fallback:
+
+```bash
+pnpm deploy:status
+pnpm deploy:prod
+```
+
+Use a real local GitHub credential (`gh auth login` then `gh auth setup-git`).
+Do not paste GitHub or Netlify tokens into command lines.
 
 ## Security Notes
 
