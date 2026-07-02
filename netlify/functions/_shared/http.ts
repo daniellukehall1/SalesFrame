@@ -30,17 +30,8 @@ export function dataResponse(data: unknown, status = 200) {
 }
 
 export function errorResponse(error: unknown, defaultMessage = "SalesFrame could not finish that request. Try again in a moment.") {
-  const appError =
-    error instanceof AppError
-      ? error
-      : isMissingServerConfiguration(error)
-        ? new AppError(
-            "server_configuration_missing",
-            "SalesFrame could not reach its AI services. Contact support if this keeps happening.",
-            503
-          )
-        : new AppError("server_error", defaultMessage)
-  const publicMessage = getPublicErrorMessage(appError, defaultMessage)
+  const appError = toAppError(error, defaultMessage)
+  const publicMessage = getPublicAppErrorMessage(appError, defaultMessage)
 
   return jsonResponse(
     {
@@ -51,6 +42,18 @@ export function errorResponse(error: unknown, defaultMessage = "SalesFrame could
     },
     appError.status
   )
+}
+
+export function getPublicErrorMessageForError(error: unknown, defaultMessage = "SalesFrame could not finish that request. Try again in a moment.") {
+  if (!(error instanceof AppError) && error instanceof Error) {
+    const message = error.message.trim()
+
+    if (message && !isMissingServerConfiguration(error) && !isTechnicalErrorMessage(message)) {
+      return message
+    }
+  }
+
+  return getPublicAppErrorMessage(toAppError(error, defaultMessage), defaultMessage)
 }
 
 export async function readJson<T>(request: Request): Promise<T> {
@@ -96,7 +99,21 @@ function isMissingServerConfiguration(error: unknown) {
   )
 }
 
-function getPublicErrorMessage(error: AppError, defaultMessage: string) {
+function toAppError(error: unknown, defaultMessage: string) {
+  if (error instanceof AppError) return error
+
+  if (isMissingServerConfiguration(error)) {
+    return new AppError(
+      "server_configuration_missing",
+      "SalesFrame could not reach its AI services. Contact support if this keeps happening.",
+      503
+    )
+  }
+
+  return new AppError("server_error", defaultMessage)
+}
+
+function getPublicAppErrorMessage(error: AppError, defaultMessage: string) {
   const message = error.message.trim() || defaultMessage
 
   if (error.code === "server_configuration_missing") return message

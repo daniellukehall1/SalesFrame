@@ -68,12 +68,12 @@ export class AppErrorBoundary extends React.Component<
             <p className="text-sm leading-relaxed text-muted-foreground">
               {body}
             </p>
-            <div className="flex flex-wrap gap-2">
-              <Button className="gap-2" onClick={this.handleTryAgain}>
+            <div className="flex flex-wrap gap-2 max-sm:[&_[data-slot=button]]:w-full">
+              <Button className="h-10 gap-2 md:h-8" onClick={this.handleTryAgain}>
                 <RotateCcwIcon />
                 Try again
               </Button>
-              <Button className="gap-2" variant="outline" onClick={this.handleHome}>
+              <Button className="h-10 gap-2 md:h-8" variant="outline" onClick={this.handleHome}>
                 <HomeIcon />
                 Back to homepage
               </Button>

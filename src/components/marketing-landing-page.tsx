@@ -41,11 +41,45 @@ function useIsMobileLandingViewport() {
   return isMobile
 }
 
-function useTypewriter(text: string, speed = 38, startDelay = 600) {
-  const [displayed, setDisplayed] = React.useState("")
-  const [done, setDone] = React.useState(false)
+function usePrefersReducedMotion() {
+  const getPrefersReducedMotion = React.useCallback(() => {
+    if (typeof window === "undefined") return false
+
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  }, [])
+  const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(getPrefersReducedMotion)
 
   React.useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const handleChange = () => setPrefersReducedMotion(mediaQuery.matches)
+
+    handleChange()
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange)
+
+      return () => mediaQuery.removeEventListener("change", handleChange)
+    }
+
+    mediaQuery.addListener(handleChange)
+
+    return () => mediaQuery.removeListener(handleChange)
+  }, [])
+
+  return prefersReducedMotion
+}
+
+function useTypewriter(text: string, speed = 38, startDelay = 600, prefersReducedMotion = false) {
+  const [displayed, setDisplayed] = React.useState(prefersReducedMotion ? text : "")
+  const [done, setDone] = React.useState(prefersReducedMotion)
+
+  React.useEffect(() => {
+    if (prefersReducedMotion) {
+      setDisplayed(text)
+      setDone(true)
+      return
+    }
+
     setDisplayed("")
     setDone(false)
 
@@ -67,7 +101,7 @@ function useTypewriter(text: string, speed = 38, startDelay = 600) {
       window.clearTimeout(timeoutId)
       if (intervalId !== null) window.clearInterval(intervalId)
     }
-  }, [speed, startDelay, text])
+  }, [prefersReducedMotion, speed, startDelay, text])
 
   return { displayed, done }
 }
@@ -113,12 +147,18 @@ export function MarketingLandingPage({
   const seekingRef = React.useRef(false)
   const videoReadyRef = React.useRef(false)
   const copyResetTimeoutRef = React.useRef<number | null>(null)
-  const [actionsVisible, setActionsVisible] = React.useState(false)
+  const isMobileLandingViewport = useIsMobileLandingViewport()
+  const prefersReducedMotion = usePrefersReducedMotion()
+  const [actionsVisible, setActionsVisible] = React.useState(prefersReducedMotion)
   const [copied, setCopied] = React.useState(false)
   const [videoReady, setVideoReady] = React.useState(false)
   const [videoUnavailable, setVideoUnavailable] = React.useState(false)
-  const isMobileLandingViewport = useIsMobileLandingViewport()
-  const { displayed, done } = useTypewriter(isMobileLandingViewport ? mobileTypedIntro : desktopTypedIntro)
+  const { displayed, done } = useTypewriter(
+    isMobileLandingViewport ? mobileTypedIntro : desktopTypedIntro,
+    38,
+    600,
+    prefersReducedMotion
+  )
 
   const seekToTarget = React.useCallback(() => {
     const video = videoRef.current
@@ -134,10 +174,15 @@ export function MarketingLandingPage({
   }, [])
 
   React.useEffect(() => {
+    if (prefersReducedMotion) {
+      setActionsVisible(true)
+      return
+    }
+
     const timerId = window.setTimeout(() => setActionsVisible(true), 400)
 
     return () => window.clearTimeout(timerId)
-  }, [])
+  }, [prefersReducedMotion])
 
   React.useEffect(() => {
     const timerId = window.setTimeout(() => {
@@ -148,6 +193,8 @@ export function MarketingLandingPage({
   }, [])
 
   React.useEffect(() => {
+    if (prefersReducedMotion) return
+
     const handleMouseMove = (event: MouseEvent) => {
       const video = videoRef.current
       const previousX = prevXRef.current
@@ -170,7 +217,7 @@ export function MarketingLandingPage({
     window.addEventListener("mousemove", handleMouseMove)
 
     return () => window.removeEventListener("mousemove", handleMouseMove)
-  }, [seekToTarget])
+  }, [prefersReducedMotion, seekToTarget])
 
   React.useEffect(() => {
     return () => {
@@ -300,7 +347,8 @@ export function MarketingLandingPage({
 
           <div
             className={[
-              "landing-actions transition-[opacity,transform] duration-[400ms] ease-out",
+              "landing-actions",
+              prefersReducedMotion ? "translate-y-0 opacity-100 transition-none" : "transition-[opacity,transform] duration-[400ms] ease-out",
               actionsVisible ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
             ].join(" ")}
           >

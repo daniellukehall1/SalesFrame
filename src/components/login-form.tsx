@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 
 const authTextButtonClass =
-  "rounded-sm underline underline-offset-4 outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
+  "inline-flex min-h-10 items-center rounded-md px-1 underline underline-offset-4 outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline sm:min-h-7"
 
 export type LoginFormValues = {
   email: string
@@ -83,6 +83,7 @@ export function LoginForm({
                   value={email}
                   placeholder="m@example.com"
                   required
+                  className="min-h-11 sm:min-h-8"
                   onChange={(event) => {
                     setEmail(event.currentTarget.value)
                     onFieldChange?.()
@@ -112,6 +113,7 @@ export function LoginForm({
                   type="password"
                   value={password}
                   required
+                  className="min-h-11 sm:min-h-8"
                   onChange={(event) => {
                     setPassword(event.currentTarget.value)
                     onFieldChange?.()
@@ -119,7 +121,7 @@ export function LoginForm({
                 />
               </Field>
               <Field>
-                <Button type="submit" disabled={isSubmitting}>
+                <Button type="submit" className="min-h-11 sm:min-h-8" disabled={isSubmitting}>
                   {isSubmitting ? "Opening SalesFrame..." : "Log in"}
                 </Button>
                 {statusMessage ? (

@@ -30,7 +30,7 @@ export function LegalDocumentPage({
     <main className="h-svh overflow-y-auto bg-background px-4 py-8 text-foreground">
       <div className="mx-auto grid w-full max-w-3xl gap-4">
         <div className="flex items-center justify-between gap-3">
-          <Button variant="outline" className="gap-2" onClick={onBack}>
+          <Button variant="outline" className="h-10 gap-2 px-3 md:h-8" onClick={onBack}>
             <ArrowLeftIcon />
             Back to SalesFrame
           </Button>

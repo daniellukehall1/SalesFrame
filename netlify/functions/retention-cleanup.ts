@@ -1,10 +1,24 @@
 import type { Config, Context } from "@netlify/functions"
 
-import { dataResponse, errorResponse } from "./_shared/http"
+import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson } from "./_shared/http"
 import { getSupabaseAdmin } from "./_shared/supabase"
 
-export default async (_request: Request, _context: Context) => {
+type ScheduledCleanupPayload = {
+  next_run?: unknown
+}
+
+function assertScheduledPayload(payload: ScheduledCleanupPayload) {
+  if (typeof payload.next_run !== "string" || Number.isNaN(Date.parse(payload.next_run))) {
+    throw badRequest("Scheduled cleanup request was not recognized.", "invalid_scheduled_cleanup_request")
+  }
+}
+
+export default async (request: Request, _context: Context) => {
   try {
+    if (request.method !== "POST") throw methodNotAllowed()
+
+    assertScheduledPayload(await readJson<ScheduledCleanupPayload>(request))
+
     const supabase = getSupabaseAdmin()
     const now = new Date().toISOString()
     const { data: expiredCalls, error } = await supabase
@@ -54,5 +68,6 @@ export default async (_request: Request, _context: Context) => {
 }
 
 export const config: Config = {
+  method: ["POST"],
   schedule: "@daily",
 }

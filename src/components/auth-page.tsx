@@ -86,7 +86,8 @@ export function AuthPage({
             <Button
               variant="ghost"
               size="sm"
-              className="gap-2"
+              className="h-10 gap-2 px-2 sm:h-8"
+              aria-label="Back to home"
               onClick={onBackHome}
             >
               <ArrowLeftIcon className="size-3.5" />

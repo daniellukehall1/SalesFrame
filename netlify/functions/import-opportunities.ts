@@ -24,7 +24,7 @@ import {
   type CurrencyCode,
 } from "../../src/lib/salesframe-core"
 import { buildAccountLogoMetadata } from "./_shared/account-logo"
-import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson } from "./_shared/http"
+import { badRequest, dataResponse, errorResponse, getPublicErrorMessageForError, methodNotAllowed, readJson } from "./_shared/http"
 import { authorizeWorkspace, requireUser } from "./_shared/supabase"
 
 type ImportOpportunitiesPayload = {
@@ -182,7 +182,7 @@ export default async (request: Request, _context: Context) => {
       } catch (error) {
         summary.failed += 1
         summary.failures.push({
-          message: error instanceof Error ? error.message : "Row could not be imported.",
+          message: getPublicErrorMessageForError(error, "Row could not be imported."),
           rowNumber: row.rowNumber,
           values: originalRow,
         })

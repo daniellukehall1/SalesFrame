@@ -148,7 +148,7 @@ test("shared HTTP errors use structured codes and expected statuses", async () =
 })
 
 test("shared HTTP error envelopes sanitize internal database and provider messages", async () => {
-  const { badRequest, errorResponse, upstreamFailure } = await loadSharedHttpModule()
+  const { badRequest, errorResponse, getPublicErrorMessageForError, upstreamFailure } = await loadSharedHttpModule()
 
   const databaseResponse = errorResponse(
     new Error('duplicate key value violates unique constraint "transcript_segments_call_source_openai_segment_unique_idx"')
@@ -220,6 +220,18 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
   assert.equal(validationResponse.status, 400)
   assert.equal(validationPayload.error.code, "workspace_id_required")
   assert.equal(validationPayload.error.message, "workspaceId is required.")
+
+  assert.equal(
+    getPublicErrorMessageForError(
+      new Error('duplicate key value violates unique constraint "accounts_workspace_name_key"'),
+      "Row could not be imported."
+    ),
+    "Row could not be imported."
+  )
+  assert.equal(
+    getPublicErrorMessageForError(new Error("Choose a duplicate account before updating this row."), "Row could not be imported."),
+    "Choose a duplicate account before updating this row."
+  )
 })
 
 test("expensive AI functions enforce authenticated rate limits", async () => {
@@ -272,6 +284,19 @@ test("environment readiness endpoint requires an authenticated user", async () =
 
   assert.match(envCheck, /requireUser\(request\)/)
   assert.match(envCheck, /dataResponse/)
+})
+
+test("retention cleanup only accepts scheduled POST payloads before service-role work", async () => {
+  const retentionCleanup = await read("netlify/functions/retention-cleanup.ts")
+
+  assert.match(retentionCleanup, /methodNotAllowed/)
+  assert.match(retentionCleanup, /readJson<ScheduledCleanupPayload>/)
+  assert.match(retentionCleanup, /function assertScheduledPayload/)
+  assert.match(retentionCleanup, /invalid_scheduled_cleanup_request/)
+  assert.match(retentionCleanup, /if \(request\.method !== "POST"\) throw methodNotAllowed\(\)/)
+  assert.ok(retentionCleanup.indexOf("assertScheduledPayload") < retentionCleanup.indexOf("const supabase = getSupabaseAdmin()"))
+  assert.match(retentionCleanup, /method: \["POST"\]/)
+  assert.match(retentionCleanup, /schedule: "@daily"/)
 })
 
 test("OpenAI helper supports strict structured output schemas", async () => {
@@ -371,6 +396,7 @@ test("CSV import functions authorize the active workspace and reject cross-works
   assert.match(accountImport, /assertAccountInWorkspace/)
   assert.match(accountImport, /\.eq\("id", row\.matchedAccountId\)[\s\S]*\.eq\("workspace_id", workspaceId\)/)
   assert.match(accountImport, /cross_workspace_account_rejected/)
+  assert.match(accountImport, /getPublicErrorMessageForError\(error, "Row could not be imported\."\)/)
   assert.doesNotMatch(accountImport, /getDecryptedOpenAiKey/)
   assert.doesNotMatch(accountImport, /openai/i)
 
@@ -387,6 +413,7 @@ test("CSV import functions authorize the active workspace and reject cross-works
   assert.match(opportunityImport, /replaceOpportunityPlaybooks/)
   assert.match(opportunityImport, /callPlaybookAliases/)
   assert.match(opportunityImport, /canonicalPlaybook/)
+  assert.match(opportunityImport, /getPublicErrorMessageForError\(error, "Row could not be imported\."\)/)
   assert.doesNotMatch(opportunityImport, /getDecryptedOpenAiKey/)
   assert.doesNotMatch(opportunityImport, /openai/i)
 
