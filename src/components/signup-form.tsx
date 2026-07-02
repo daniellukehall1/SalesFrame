@@ -31,6 +31,8 @@ export function SignupForm({
   className,
   isSubmitting = false,
   statusMessage,
+  statusTone = "info",
+  onFieldChange,
   onLegalClick,
   onSubmit,
   onSwitchToLogin,
@@ -38,6 +40,8 @@ export function SignupForm({
 }: Omit<React.ComponentProps<"div">, "onSubmit"> & {
   isSubmitting?: boolean
   statusMessage?: string
+  statusTone?: "success" | "error" | "info"
+  onFieldChange?: () => void
   onLegalClick?: (document: "terms" | "privacy") => void
   onSubmit?: (values: SignupFormValues) => void
   onSwitchToLogin?: () => void
@@ -81,7 +85,10 @@ export function SignupForm({
                   value={name}
                   placeholder="John Doe"
                   required
-                  onChange={(event) => setName(event.currentTarget.value)}
+                  onChange={(event) => {
+                    setName(event.currentTarget.value)
+                    onFieldChange?.()
+                  }}
                 />
               </Field>
               <Field>
@@ -98,7 +105,10 @@ export function SignupForm({
                   value={email}
                   placeholder="m@example.com"
                   required
-                  onChange={(event) => setEmail(event.currentTarget.value)}
+                  onChange={(event) => {
+                    setEmail(event.currentTarget.value)
+                    onFieldChange?.()
+                  }}
                 />
               </Field>
               <Field>
@@ -116,7 +126,10 @@ export function SignupForm({
                       type="password"
                       value={password}
                       required
-                      onChange={(event) => setPassword(event.currentTarget.value)}
+                      onChange={(event) => {
+                        setPassword(event.currentTarget.value)
+                        onFieldChange?.()
+                      }}
                     />
                   </Field>
                   <Field>
@@ -134,7 +147,10 @@ export function SignupForm({
                       type="password"
                       value={confirmPassword}
                       required
-                      onChange={(event) => setConfirmPassword(event.currentTarget.value)}
+                      onChange={(event) => {
+                        setConfirmPassword(event.currentTarget.value)
+                        onFieldChange?.()
+                      }}
                     />
                   </Field>
                 </Field>
@@ -147,7 +163,15 @@ export function SignupForm({
                   {isSubmitting ? "Creating your account..." : "Create account"}
                 </Button>
                 {statusMessage ? (
-                  <FieldDescription className="text-center" aria-live="polite" role="status">
+                  <FieldDescription
+                    className={cn(
+                      "text-center",
+                      statusTone === "error" && "text-destructive",
+                      statusTone === "success" && "text-emerald-600"
+                    )}
+                    aria-live={statusTone === "error" ? "assertive" : "polite"}
+                    role={statusTone === "error" ? "alert" : "status"}
+                  >
                     {statusMessage}
                   </FieldDescription>
                 ) : null}

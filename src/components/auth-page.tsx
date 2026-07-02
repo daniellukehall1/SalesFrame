@@ -12,15 +12,18 @@ import { SignupForm, type SignupFormValues } from "@/components/signup-form"
 import { Button } from "@/components/ui/button"
 
 export type AuthMode = "login" | "signup"
+export type AuthStatusTone = "success" | "error" | "info"
 
 export function AuthPage({
   darkMode,
   isSubmitting = false,
   mode,
   statusMessage,
+  statusTone = "info",
   onDarkModeChange,
   onForgotPassword,
   onBackHome,
+  onFieldChange,
   onLegalClick,
   onLogin,
   onModeChange,
@@ -30,8 +33,10 @@ export function AuthPage({
   isSubmitting?: boolean
   mode: AuthMode
   statusMessage?: string
+  statusTone?: AuthStatusTone
   onDarkModeChange: (value: boolean) => void
   onBackHome: () => void
+  onFieldChange?: () => void
   onForgotPassword: (email: string) => void
   onLegalClick: (document: "terms" | "privacy") => void
   onLogin: (values: LoginFormValues) => void
@@ -117,6 +122,8 @@ export function AuthPage({
               <LoginForm
                 isSubmitting={isSubmitting}
                 statusMessage={statusMessage}
+                statusTone={statusTone}
+                onFieldChange={onFieldChange}
                 onForgotPassword={onForgotPassword}
                 onSubmit={onLogin}
                 onSwitchToSignup={() => onModeChange("signup")}
@@ -125,6 +132,8 @@ export function AuthPage({
               <SignupForm
                 isSubmitting={isSubmitting}
                 statusMessage={statusMessage}
+                statusTone={statusTone}
+                onFieldChange={onFieldChange}
                 onLegalClick={onLegalClick}
                 onSubmit={onSignup}
                 onSwitchToLogin={() => onModeChange("login")}

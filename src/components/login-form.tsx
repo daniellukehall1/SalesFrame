@@ -29,6 +29,8 @@ export function LoginForm({
   className,
   isSubmitting = false,
   statusMessage,
+  statusTone = "info",
+  onFieldChange,
   onForgotPassword,
   onSubmit,
   onSwitchToSignup,
@@ -36,6 +38,8 @@ export function LoginForm({
 }: Omit<React.ComponentProps<"div">, "onSubmit"> & {
   isSubmitting?: boolean
   statusMessage?: string
+  statusTone?: "success" | "error" | "info"
+  onFieldChange?: () => void
   onForgotPassword?: (email: string) => void
   onSubmit?: (values: LoginFormValues) => void
   onSwitchToSignup?: () => void
@@ -79,7 +83,10 @@ export function LoginForm({
                   value={email}
                   placeholder="m@example.com"
                   required
-                  onChange={(event) => setEmail(event.currentTarget.value)}
+                  onChange={(event) => {
+                    setEmail(event.currentTarget.value)
+                    onFieldChange?.()
+                  }}
                 />
               </Field>
               <Field>
@@ -105,7 +112,10 @@ export function LoginForm({
                   type="password"
                   value={password}
                   required
-                  onChange={(event) => setPassword(event.currentTarget.value)}
+                  onChange={(event) => {
+                    setPassword(event.currentTarget.value)
+                    onFieldChange?.()
+                  }}
                 />
               </Field>
               <Field>
@@ -113,7 +123,15 @@ export function LoginForm({
                   {isSubmitting ? "Opening SalesFrame..." : "Log in"}
                 </Button>
                 {statusMessage ? (
-                  <FieldDescription className="text-center" aria-live="polite" role="status">
+                  <FieldDescription
+                    className={cn(
+                      "text-center",
+                      statusTone === "error" && "text-destructive",
+                      statusTone === "success" && "text-emerald-600"
+                    )}
+                    aria-live={statusTone === "error" ? "assertive" : "polite"}
+                    role={statusTone === "error" ? "alert" : "status"}
+                  >
                     {statusMessage}
                   </FieldDescription>
                 ) : null}

@@ -2090,6 +2090,7 @@ function App() {
   const [authLoading, setAuthLoading] = React.useState(true)
   const [authSubmitting, setAuthSubmitting] = React.useState(false)
   const [authStatusMessage, setAuthStatusMessage] = React.useState("")
+  const [authStatusTone, setAuthStatusTone] = React.useState<"success" | "error" | "info">("info")
   const [savedOpenAiKeyState, setSavedOpenAiKeyState] = React.useState<SavedOpenAiKeyState | null>(null)
   const [openAiKeyStatusMessage, setOpenAiKeyStatusMessage] = React.useState("")
   const [legalPage, setLegalPage] = React.useState<LegalPageId | null>(() => getLegalPageFromPath())
@@ -2241,6 +2242,7 @@ function App() {
       setAuthSession(null)
       setAuthLoading(false)
       if (getPublicAuthRouteFromPath() !== "landing") {
+        setAuthStatusTone("error")
         setAuthStatusMessage(authConnectionUnavailableMessage)
       }
       return
@@ -2252,6 +2254,7 @@ function App() {
       if (!mounted) return
 
       if (error) {
+        setAuthStatusTone("error")
         setAuthStatusMessage(getUserFacingErrorMessage(error, "Session could not be restored. Sign in again to continue."))
       }
 
@@ -2265,6 +2268,7 @@ function App() {
       setAuthSession(session?.user ? createAuthSessionFromUser(session.user) : null)
       setAuthLoading(false)
       if (session?.user) {
+        setAuthStatusTone("info")
         setAuthStatusMessage("")
       }
     })
@@ -4267,6 +4271,7 @@ function App() {
   const handleAuthModeChange = (mode: AuthMode) => {
     setAuthMode(mode)
     setPublicAuthRoute(mode)
+    setAuthStatusTone("info")
     setAuthStatusMessage("")
     const nextPath = `/${mode}`
     if (window.location.pathname !== nextPath) {
@@ -4278,6 +4283,7 @@ function App() {
     setLegalPage(null)
     setAuthMode("login")
     setPublicAuthRoute("login")
+    setAuthStatusTone("info")
     setAuthStatusMessage("")
     if (window.location.pathname !== "/login") {
       window.history.pushState(null, "", "/login")
@@ -4288,6 +4294,7 @@ function App() {
     setLegalPage(null)
     setAuthMode("signup")
     setPublicAuthRoute("signup")
+    setAuthStatusTone("info")
     setAuthStatusMessage("")
     if (window.location.pathname !== "/signup") {
       window.history.pushState(null, "", "/signup")
@@ -4297,29 +4304,41 @@ function App() {
   const handleAuthBackHome = () => {
     setLegalPage(null)
     setPublicAuthRoute("landing")
+    setAuthStatusTone("info")
     setAuthStatusMessage("")
     if (window.location.pathname !== "/") {
       window.history.pushState(null, "", "/")
     }
   }
 
+  const handleAuthFieldChange = () => {
+    if (!authStatusMessage) return
+
+    setAuthStatusTone("info")
+    setAuthStatusMessage("")
+  }
+
   const handleAuthLogin = async (values: LoginFormValues) => {
     if (!values.email.trim()) {
+      setAuthStatusTone("error")
       setAuthStatusMessage("Enter an email address to continue.")
       return
     }
 
     if (values.password.length < 8) {
+      setAuthStatusTone("error")
       setAuthStatusMessage("Password must be at least 8 characters.")
       return
     }
 
     if (!supabase) {
+      setAuthStatusTone("error")
       setAuthStatusMessage(authConnectionUnavailableMessage)
       return
     }
 
     setAuthSubmitting(true)
+    setAuthStatusTone("info")
     setAuthStatusMessage("")
 
     try {
@@ -4329,6 +4348,7 @@ function App() {
       })
 
       if (error) {
+        setAuthStatusTone("error")
         setAuthStatusMessage(getUserFacingErrorMessage(error, "Sign-in could not be completed."))
         return
       }
@@ -4340,6 +4360,7 @@ function App() {
         }
       }
     } catch (caughtError: unknown) {
+      setAuthStatusTone("error")
       setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Sign-in could not be completed."))
     } finally {
       setAuthSubmitting(false)
@@ -4348,26 +4369,31 @@ function App() {
 
   const handleAuthSignup = async (values: SignupFormValues) => {
     if (!values.name.trim() || !values.email.trim()) {
+      setAuthStatusTone("error")
       setAuthStatusMessage("Enter your name and email to create your account.")
       return
     }
 
     if (values.password.length < 8) {
+      setAuthStatusTone("error")
       setAuthStatusMessage("Password must be at least 8 characters.")
       return
     }
 
     if (values.password !== values.confirmPassword) {
+      setAuthStatusTone("error")
       setAuthStatusMessage("Passwords do not match.")
       return
     }
 
     if (!supabase) {
+      setAuthStatusTone("error")
       setAuthStatusMessage(authConnectionUnavailableMessage)
       return
     }
 
     setAuthSubmitting(true)
+    setAuthStatusTone("info")
     setAuthStatusMessage("")
 
     try {
@@ -4383,6 +4409,7 @@ function App() {
       })
 
       if (error) {
+        setAuthStatusTone("error")
         setAuthStatusMessage(getUserFacingErrorMessage(error, "Account could not be created."))
         return
       }
@@ -4398,9 +4425,11 @@ function App() {
         if (window.location.pathname !== "/login") {
           window.history.pushState(null, "", "/login")
         }
+        setAuthStatusTone("success")
         setAuthStatusMessage("Account created. Check your email to confirm your account before signing in.")
       }
     } catch (caughtError: unknown) {
+      setAuthStatusTone("error")
       setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Account could not be created."))
     } finally {
       setAuthSubmitting(false)
@@ -4409,27 +4438,33 @@ function App() {
 
   const handleForgotPassword = async (email: string) => {
     if (!email.trim()) {
+      setAuthStatusTone("error")
       setAuthStatusMessage("Enter your email first, then request a password reset.")
       return
     }
 
     if (!supabase) {
+      setAuthStatusTone("error")
       setAuthStatusMessage(authConnectionUnavailableMessage)
       return
     }
 
     setAuthSubmitting(true)
+    setAuthStatusTone("info")
+    setAuthStatusMessage("")
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo: getAuthRedirectUrl("/login"),
       })
 
+      setAuthStatusTone(error ? "error" : "success")
       setAuthStatusMessage(
         error
           ? getUserFacingErrorMessage(error, "Password reset email could not be sent.")
           : `Password reset email requested for ${email.trim()}.`
       )
     } catch (caughtError: unknown) {
+      setAuthStatusTone("error")
       setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Password reset email could not be sent."))
     } finally {
       setAuthSubmitting(false)
@@ -4526,6 +4561,7 @@ function App() {
     if (window.location.pathname !== nextPath) {
       window.history.pushState(null, "", nextPath)
     }
+    setAuthStatusTone(error ? "error" : "success")
     setAuthStatusMessage(error ? getUserFacingErrorMessage(error, "Sign-out could not be completed.") : "Signed out.")
   }
 
@@ -4822,8 +4858,10 @@ function App() {
         isSubmitting={authSubmitting}
         mode={renderedAuthMode}
         statusMessage={authStatusMessage}
+        statusTone={authStatusTone}
         onDarkModeChange={setDarkMode}
         onBackHome={handleAuthBackHome}
+        onFieldChange={handleAuthFieldChange}
         onForgotPassword={handleForgotPassword}
         onLegalClick={handleAuthLegalClick}
         onLogin={handleAuthLogin}
@@ -5602,7 +5640,7 @@ function WorkspaceOnboardingDialog({
           ) : null}
 
           {statusMessage ? (
-            <p className="text-sm text-destructive" aria-live="polite">
+            <p className="text-sm text-destructive" aria-live="assertive" role="alert">
               {statusMessage}
             </p>
           ) : null}
@@ -7035,7 +7073,8 @@ function StartRecordingDialog({
                       researchProfileStatus === "error" && "text-destructive",
                       researchProfileStatus === "success" && "text-emerald-600"
                     )}
-                    aria-live="polite"
+                    aria-live={researchProfileStatus === "error" ? "assertive" : "polite"}
+                    role={researchProfileStatus === "error" ? "alert" : "status"}
                   >
                     {researchProfileMessage ||
                       "Auto-filled from the domain and saved for this workspace once the call starts."}
@@ -7753,7 +7792,8 @@ function CreateAccountDialog({
                     researchProfileStatus === "error" && "text-destructive",
                     researchProfileStatus === "success" && "text-emerald-600"
                   )}
-                  aria-live="polite"
+                  aria-live={researchProfileStatus === "error" ? "assertive" : "polite"}
+                  role={researchProfileStatus === "error" ? "alert" : "status"}
                 >
                   {researchProfileMessage ||
                     (customerResearchEnabled
@@ -11482,29 +11522,27 @@ function SpeakerIdentityPanel({
   if (speakerRows.length === 0) return null
 
   return (
-    <details className="rounded-lg bg-muted/20 px-3 py-2">
+    <details className="group rounded-lg bg-muted/20 px-3 py-2">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
         <span className="text-xs font-medium text-muted-foreground">Speaker map</span>
-        <span className="flex shrink-0 items-center gap-2">
-          {nextSpeakerLabel ? (
+        <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      <div className="mt-2 grid gap-2">
+        {nextSpeakerLabel ? (
+          <div className="flex justify-end">
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="h-8 gap-1.5"
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                setAddedSpeakerLabels((labels) => [...labels, nextSpeakerLabel])
-              }}
+              aria-label={`Add ${nextSpeakerLabel} to speaker map`}
+              onClick={() => setAddedSpeakerLabels((labels) => [...labels, nextSpeakerLabel])}
             >
               <PlusIcon />
               Add speaker
             </Button>
-          ) : null}
-        </span>
-      </summary>
-      <div className="mt-2 grid gap-2">
+          </div>
+        ) : null}
         {speakerRows.map((speaker) => {
           const draftValue = draftNames[speaker.label] ?? ""
           const savedName = speaker.displayName === speaker.label ? "" : speaker.displayName
@@ -13713,6 +13751,7 @@ function PlaybooksView({
   )
   const [customDraft, setCustomDraft] = React.useState<EditableCustomFramework>(savedCustomFramework)
   const [customSaveMessage, setCustomSaveMessage] = React.useState("")
+  const [customSaveTone, setCustomSaveTone] = React.useState<"success" | "error" | "info">("info")
   const [customSaving, setCustomSaving] = React.useState(false)
   const playbookCatalog = React.useMemo(
     () =>
@@ -13772,6 +13811,7 @@ function PlaybooksView({
       [field]: value,
     }))
     setCustomSaveMessage("")
+    setCustomSaveTone("info")
   }
 
   const updateCustomField = (fieldId: string, values: Partial<EditableCustomFrameworkField>) => {
@@ -13780,6 +13820,7 @@ function PlaybooksView({
       fields: current.fields.map((field) => (field.id === fieldId ? { ...field, ...values } : field)),
     }))
     setCustomSaveMessage("")
+    setCustomSaveTone("info")
   }
 
   const removeCustomField = (fieldId: string) => {
@@ -13788,6 +13829,7 @@ function PlaybooksView({
       fields: current.fields.length > 1 ? current.fields.filter((field) => field.id !== fieldId) : current.fields,
     }))
     setCustomSaveMessage("")
+    setCustomSaveTone("info")
   }
 
   const addCustomField = () => {
@@ -13803,6 +13845,7 @@ function PlaybooksView({
       ],
     }))
     setCustomSaveMessage("")
+    setCustomSaveTone("info")
   }
 
   const updateCustomCriterion = (criterionId: string, text: string) => {
@@ -13813,6 +13856,7 @@ function PlaybooksView({
       ),
     }))
     setCustomSaveMessage("")
+    setCustomSaveTone("info")
   }
 
   const removeCustomCriterion = (criterionId: string) => {
@@ -13824,6 +13868,7 @@ function PlaybooksView({
           : current.exitCriteria,
     }))
     setCustomSaveMessage("")
+    setCustomSaveTone("info")
   }
 
   const addCustomCriterion = () => {
@@ -13845,14 +13890,17 @@ function PlaybooksView({
 
     setCustomSaving(true)
     setCustomSaveMessage("")
+    setCustomSaveTone("info")
 
     try {
       const persisted = (await onSaveCustomFramework?.(normalized)) ?? saveCustomFramework(normalized)
 
       setSavedCustomFramework(persisted)
       setCustomDraft(persisted)
+      setCustomSaveTone("success")
       setCustomSaveMessage("Custom framework saved.")
     } catch (caughtError: unknown) {
+      setCustomSaveTone("error")
       setCustomSaveMessage(getUserFacingErrorMessage(caughtError, "Custom framework could not be saved."))
     } finally {
       setCustomSaving(false)
@@ -13861,6 +13909,7 @@ function PlaybooksView({
 
   const handleResetCustomFramework = () => {
     setCustomDraft(savedCustomFramework)
+    setCustomSaveTone("info")
     setCustomSaveMessage("Unsaved custom framework changes reset.")
   }
 
@@ -13957,6 +14006,7 @@ function PlaybooksView({
         hasChanges={hasCustomChanges}
         isSaving={customSaving}
         saveMessage={customSaveMessage}
+        saveTone={customSaveTone}
         onAddCriterion={addCustomCriterion}
         onAddField={addCustomField}
         onBack={() => onNavigate("playbooks")}
@@ -14052,6 +14102,7 @@ function CustomFrameworkEditor({
   onReset,
   onSave,
   saveMessage,
+  saveTone,
 }: {
   draft: EditableCustomFramework
   hasChanges: boolean
@@ -14070,6 +14121,7 @@ function CustomFrameworkEditor({
   onReset: () => void
   onSave: () => void
   saveMessage: string
+  saveTone: "success" | "error" | "info"
 }) {
   return (
     <div className="grid gap-4" data-testid="custom-framework-editor">
@@ -14095,7 +14147,18 @@ function CustomFrameworkEditor({
           </div>
           <CardAction className="flex flex-wrap items-center gap-2">
             {saveMessage ? (
-              <p className="text-sm text-muted-foreground" aria-live="polite">{saveMessage}</p>
+              <p
+                className={cn(
+                  "text-sm",
+                  saveTone === "error" && "text-destructive",
+                  saveTone === "success" && "text-emerald-600",
+                  saveTone === "info" && "text-muted-foreground"
+                )}
+                aria-live={saveTone === "error" ? "assertive" : "polite"}
+                role={saveTone === "error" ? "alert" : "status"}
+              >
+                {saveMessage}
+              </p>
             ) : null}
             <Button variant="outline" size="sm" disabled={!hasChanges || isSaving} onClick={onReset}>
               Reset
@@ -14277,6 +14340,7 @@ function PersonalAccountView({
 }) {
   const [draft, setDraft] = React.useState(profile)
   const [statusMessage, setStatusMessage] = React.useState("")
+  const [statusTone, setStatusTone] = React.useState<"success" | "error" | "info">("info")
   const [profileSavePending, setProfileSavePending] = React.useState(false)
   const [avatarUploadPending, setAvatarUploadPending] = React.useState(false)
   const [deletePhrase, setDeletePhrase] = React.useState("")
@@ -14321,6 +14385,7 @@ function PersonalAccountView({
       [field]: value,
     }))
     setStatusMessage("")
+    setStatusTone("info")
   }
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -14330,24 +14395,29 @@ function PersonalAccountView({
     if (!file) return
 
     if (!isSupportedAvatarImage(file)) {
+      setStatusTone("error")
       setStatusMessage("Choose a PNG, JPEG, WebP, or GIF image.")
       return
     }
 
     if (file.size > maxAvatarFileSizeBytes) {
+      setStatusTone("error")
       setStatusMessage("Choose an image smaller than 5MB.")
       return
     }
 
     setAvatarUploadPending(true)
+    setStatusTone("info")
     setStatusMessage("Preparing photo...")
 
     try {
       const avatarUrl = await createAvatarDataUrl(file)
 
       updateDraft("avatarUrl", avatarUrl)
+      setStatusTone("success")
       setStatusMessage("Photo ready. Save profile to use it.")
     } catch (caughtError: unknown) {
+      setStatusTone("error")
       setStatusMessage(getUserFacingErrorMessage(caughtError, "Photo could not be uploaded."))
     } finally {
       setAvatarUploadPending(false)
@@ -14373,6 +14443,7 @@ function PersonalAccountView({
     }
 
     setProfileSavePending(true)
+    setStatusTone("info")
     setStatusMessage("Saving profile...")
 
     try {
@@ -14394,8 +14465,10 @@ function PersonalAccountView({
         title: savedProfile.role_title ?? nextProfile.title,
         timezone: savedProfile.timezone || nextProfile.timezone,
       })
+      setStatusTone("success")
       setStatusMessage("Profile saved.")
     } catch (caughtError: unknown) {
+      setStatusTone("error")
       setStatusMessage(getUserFacingErrorMessage(caughtError, "Profile could not be saved."))
     } finally {
       setProfileSavePending(false)
@@ -14404,6 +14477,7 @@ function PersonalAccountView({
 
   const handleResetProfile = () => {
     setDraft(profile)
+    setStatusTone("info")
     setStatusMessage("Unsaved profile changes reset.")
   }
 
@@ -14411,6 +14485,7 @@ function PersonalAccountView({
     if (!canRequestDeletion) return
 
     window.location.href = deletionRequestHref
+    setStatusTone("info")
     setStatusMessage("Your email app should open with a deletion request ready to send.")
   }
 
@@ -14560,7 +14635,16 @@ function PersonalAccountView({
             </Button>
           </div>
           {statusMessage ? (
-            <p className="text-sm text-muted-foreground" aria-live="polite">
+            <p
+              className={cn(
+                "text-sm",
+                statusTone === "error" && "text-destructive",
+                statusTone === "success" && "text-emerald-600",
+                statusTone === "info" && "text-muted-foreground"
+              )}
+              aria-live={statusTone === "error" ? "assertive" : "polite"}
+              role={statusTone === "error" ? "alert" : "status"}
+            >
               {statusMessage}
             </p>
           ) : null}
@@ -14867,7 +14951,8 @@ function SellerResearchProfileCard({
               status === "error" && "text-destructive",
               status === "success" && "text-emerald-600"
             )}
-            aria-live="polite"
+            aria-live={status === "error" ? "assertive" : "polite"}
+            role={status === "error" ? "alert" : "status"}
           >
             {message || "Changing the company domain clears this field, then refreshes it from OpenAI after you stop typing."}
           </p>
@@ -15155,12 +15240,14 @@ function SettingsView({
   const [saveMessageTone, setSaveMessageTone] = React.useState<"success" | "error">("success")
   const [captureSettings, setCaptureSettings] = React.useState<CaptureSettings>(() => readCaptureSettings(workspaceId))
   const [captureSettingsMessage, setCaptureSettingsMessage] = React.useState("")
+  const [captureSettingsTone, setCaptureSettingsTone] = React.useState<"success" | "warning">("success")
   const hasApiKey = apiKey.trim().length > 0
   const hasSavedKey = savedKeyState !== null
 
   React.useEffect(() => {
     setCaptureSettings(readCaptureSettings(workspaceId))
     setCaptureSettingsMessage("")
+    setCaptureSettingsTone("success")
   }, [workspaceId])
 
   React.useEffect(() => {
@@ -15248,8 +15335,10 @@ function SettingsView({
     }
 
     setCaptureSettings(nextSettings)
+    const didSave = saveCaptureSettings(workspaceId, nextSettings)
+    setCaptureSettingsTone(didSave ? "success" : "warning")
     setCaptureSettingsMessage(
-      saveCaptureSettings(workspaceId, nextSettings)
+      didSave
         ? "Capture preference saved for this workspace on this browser."
         : "Capture preference changed for this session. Browser storage was not available."
     )
@@ -15401,7 +15490,14 @@ function SettingsView({
                 />
               </div>
             ))}
-            <p className="text-sm text-muted-foreground" aria-live="polite">
+            <p
+              className={cn(
+                "text-sm",
+                captureSettingsTone === "warning" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"
+              )}
+              aria-live={captureSettingsTone === "warning" ? "assertive" : "polite"}
+              role={captureSettingsTone === "warning" ? "alert" : "status"}
+            >
               {captureSettingsMessage ||
                 "Capture preferences are saved in this browser for the active workspace."}
             </p>
