@@ -245,7 +245,6 @@ import {
   defaultSellerResearchProfile,
   normalizeCurrencyCode,
   trustedResearchSources,
-  workspaceDataStateLabels,
   workspaceDataStateOptions,
   type AccountDraft,
   type CallSummary,
@@ -14752,6 +14751,12 @@ function WorkspaceStateView({
   }
   const config = stateConfig[state]
   const body = state === "error" && message ? message : config.body
+  const workspaceMoment: Record<Exclude<WorkspaceDataState, "ready">, string> = {
+    loading: "SalesFrame is gathering this workspace.",
+    empty: "You have a clean start.",
+    error: "This needs another try.",
+    "permission-denied": "This workspace is not available here.",
+  }
 
   return (
     <div className="grid min-h-[calc(100svh-9rem)] place-items-center">
@@ -14780,9 +14785,9 @@ function WorkspaceStateView({
             </div>
           ) : (
             <div className="grid gap-3 rounded-lg border bg-muted/30 p-4 md:grid-cols-3">
-              <ContextTile icon={<TargetIcon />} label="Current view" value={viewLabels[activeView] ?? "Workspace"} />
-              <ContextTile icon={state === "empty" ? <Building2Icon /> : <DatabaseIcon />} label="Data state" value={workspaceDataStateLabels[state]} />
-              <ContextTile icon={state === "empty" ? <PlusIcon /> : <ShieldCheckIcon />} label="User action" value={config.primaryLabel} />
+              <ContextTile icon={<TargetIcon />} label="You are here" value={viewLabels[activeView] ?? "Workspace"} />
+              <ContextTile icon={state === "empty" ? <Building2Icon /> : <DatabaseIcon />} label="What is happening" value={workspaceMoment[state]} />
+              <ContextTile icon={state === "empty" ? <PlusIcon /> : <ShieldCheckIcon />} label="Best next move" value={config.primaryLabel} />
             </div>
           )}
           <div className="flex flex-wrap gap-2">

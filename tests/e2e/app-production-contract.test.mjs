@@ -2452,6 +2452,26 @@ test("customer-facing errors do not leak backend implementation details", async 
   assert.doesNotMatch(workspaceSwitcher, /error instanceof Error \? error\.message/)
 })
 
+test("workspace empty and recovery screens use human guidance instead of internal state labels", async () => {
+  const app = await read("src/App.tsx")
+  const workspaceStateView = app.slice(
+    app.indexOf("function WorkspaceStateView("),
+    app.indexOf("function SettingsView(")
+  )
+
+  assert.match(workspaceStateView, /You are here/)
+  assert.match(workspaceStateView, /What is happening/)
+  assert.match(workspaceStateView, /Best next move/)
+  assert.match(workspaceStateView, /SalesFrame is gathering this workspace\./)
+  assert.match(workspaceStateView, /You have a clean start\./)
+  assert.match(workspaceStateView, /This needs another try\./)
+  assert.match(workspaceStateView, /This workspace is not available here\./)
+  assert.doesNotMatch(workspaceStateView, /Current view/)
+  assert.doesNotMatch(workspaceStateView, /Data state/)
+  assert.doesNotMatch(workspaceStateView, /User action/)
+  assert.doesNotMatch(workspaceStateView, /workspaceDataStateLabels/)
+})
+
 test("vite chunking keeps UI libraries out of the core React chunk", async () => {
   const viteConfig = await read("vite.config.ts")
 
