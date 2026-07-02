@@ -1307,8 +1307,11 @@ test("sidebar menu triggers announce their purpose", async () => {
   assert.match(navProjects, /aria-expanded=\{allAccountsExpanded\}/)
   assert.match(navProjects, /aria-label=\{allAccountsExpanded \? "Collapse all account opportunities" : "Expand all account opportunities"\}/)
   assert.match(navProjects, /<SidebarMenu className="pb-4">/)
+  assert.match(navProjects, /aria-label="Create account"/)
   assert.match(navProjects, /<span className="sr-only">Create account<\/span>/)
+  assert.doesNotMatch(navProjects, /title="Create account"/)
   assert.match(sidebar, /<button[\s\S]*type="button"[\s\S]*data-sidebar="rail"[\s\S]*aria-label="Toggle Sidebar"/)
+  assert.doesNotMatch(sidebar, /title="Toggle Sidebar"/)
 })
 
 test("currency is configured at workspace and account level and formats opportunity amounts", async () => {

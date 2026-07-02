@@ -168,8 +168,8 @@ export function NavProjects({
           ) : null}
           <button
             type="button"
+            aria-label="Create account"
             className="flex size-7 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
-            title="Create account"
             onClick={onCreateAccount}
           >
             <PlusIcon className="size-4" />
