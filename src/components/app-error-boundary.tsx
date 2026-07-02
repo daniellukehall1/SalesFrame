@@ -34,8 +34,8 @@ export class AppErrorBoundary extends React.Component<
     }
   }
 
-  handleReload = () => {
-    window.location.reload()
+  handleTryAgain = () => {
+    this.setState({ error: null })
   }
 
   handleHome = () => {
@@ -49,10 +49,10 @@ export class AppErrorBoundary extends React.Component<
     const description = isWorkspaceConnectionError ? "Workspace connection" : "Let's get you back in"
     const title = isWorkspaceConnectionError
       ? "SalesFrame is having trouble reaching your workspace"
-      : "SalesFrame needs to reload this workspace"
+      : "SalesFrame needs another pass at this view"
     const body = isWorkspaceConnectionError
       ? "Your browser opened SalesFrame, but the workspace connection is not ready yet. Try once more, or head back to the homepage while we get it back in shape."
-      : "We hit a snag opening this view. Reloading will bring you back to the latest saved workspace state."
+      : "We hit a snag opening this view. Try again and SalesFrame will reopen it from the latest saved workspace state."
 
     return (
       <main className="grid min-h-svh place-items-center bg-background p-4 text-foreground">
@@ -69,9 +69,9 @@ export class AppErrorBoundary extends React.Component<
               {body}
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button className="gap-2" onClick={this.handleReload}>
+              <Button className="gap-2" onClick={this.handleTryAgain}>
                 <RotateCcwIcon />
-                {isWorkspaceConnectionError ? "Try again" : "Reload SalesFrame"}
+                Try again
               </Button>
               <Button className="gap-2" variant="outline" onClick={this.handleHome}>
                 <HomeIcon />
