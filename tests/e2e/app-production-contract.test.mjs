@@ -254,6 +254,8 @@ test("account enrichment is available on account creation, account intelligence,
   assert.doesNotMatch(app, /raw key/)
   assert.match(accountEnrichmentFunction, /suggestedCoreUpdates/)
   assert.match(accountEnrichmentFunction, /normalizeEmployeeCountCoreField/)
+  assert.match(accountEnrichmentFunction, /valueHasNonEmployeeScaleSignal/)
+  assert.match(accountEnrichmentFunction, /valueLooksLikeAudienceScale/)
   assert.match(accountEnrichmentFunction, /Never put users, active users, customers, subscribers, creators, members, downloads, revenue, valuation, or market scale into employeeCount/)
   assert.match(accountEnrichmentFunction, /buildAccountLogoMetadata/)
   assert.match(accountEnrichmentFunction, /buildAccountLogoMetadata\(updatedAccount\.website \|\| accountDomain\)/)

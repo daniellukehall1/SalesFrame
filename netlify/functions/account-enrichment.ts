@@ -205,18 +205,36 @@ function assertCoreField(value: unknown, fallback = ""): AccountEnrichmentCoreFi
 }
 
 function normalizeEmployeeCountCoreField(field: AccountEnrichmentCoreField): AccountEnrichmentCoreField {
-  const evidenceText = `${field.value} ${field.rationale} ${field.sourceLabel}`.toLowerCase()
-  const hasEmployeeSignal = /\b(employee|employees|headcount|staff|workforce|workers|people employed|team members)\b/.test(evidenceText)
-  const hasNonEmployeeScaleSignal =
-    /\b(active users?|monthly active users?|users?|customers?|subscribers?|members?|creators?|downloads?|visitors?|accounts?)\b/.test(evidenceText)
+  const valueText = field.value.toLowerCase()
+  const contextText = `${field.rationale} ${field.sourceLabel}`.toLowerCase()
+  const employeeSignalPattern =
+    /\b(employee|employees|headcount|staff|workforce|workers|people employed|team members|company size|organisation size|organization size|fte)\b/
+  const nonEmployeeScalePattern =
+    /\b(active users?|monthly active users?|users?|customers?|subscribers?|members?|creators?|downloads?|visitors?|accounts?|revenue|valuation|market cap)\b/
+  const highScaleNumberPattern = /\b\d+(?:[.,]\d+)?\s*(?:m|mn|million|b|bn|billion)\+?\b/
+  const valueHasEmployeeSignal = employeeSignalPattern.test(valueText)
+  const contextHasEmployeeSignal = employeeSignalPattern.test(contextText)
+  const valueHasNonEmployeeScaleSignal = nonEmployeeScalePattern.test(valueText)
+  const contextHasNonEmployeeScaleSignal = nonEmployeeScalePattern.test(contextText)
+  const valueLooksLikeAudienceScale =
+    highScaleNumberPattern.test(valueText) &&
+    !valueHasEmployeeSignal &&
+    !contextHasEmployeeSignal
 
-  if (field.value && hasNonEmployeeScaleSignal && !hasEmployeeSignal) {
+  if (
+    field.value &&
+    (
+      valueHasNonEmployeeScaleSignal ||
+      valueLooksLikeAudienceScale ||
+      (contextHasNonEmployeeScaleSignal && !contextHasEmployeeSignal)
+    )
+  ) {
     return {
       ...field,
       confidence: "low",
       rationale: [
         field.rationale,
-        "Rejected for employee count because the source describes users, customers, members, or another scale metric rather than workforce headcount.",
+        "Rejected for employee count because the source describes users, customers, revenue, market scale, or another non-workforce metric rather than headcount.",
       ].filter(Boolean).join(" "),
       value: "",
     }
