@@ -898,6 +898,21 @@ test("custom framework playbook has an editable builder", async () => {
   assert.doesNotMatch(app, /<CardTitle>Question generation<\/CardTitle>/)
 })
 
+test("playbook multi-select stays compact instead of rendering decorative pills", async () => {
+  const app = await read("src/App.tsx")
+  const playbookMultiSelect = app.slice(
+    app.indexOf("function PlaybookMultiSelect("),
+    app.indexOf("function HomeDashboard(")
+  )
+
+  assert.match(playbookMultiSelect, /const visiblePlaybooks = selectedPlaybooks\.slice\(0, 2\)/)
+  assert.match(playbookMultiSelect, /const hiddenPlaybookCount = Math\.max\(0, selectedPlaybooks\.length - visiblePlaybooks\.length\)/)
+  assert.match(playbookMultiSelect, /<span className="truncate">\{visiblePlaybooks\.join\(", "\)\}<\/span>/)
+  assert.match(playbookMultiSelect, /\+\{hiddenPlaybookCount\} more/)
+  assert.doesNotMatch(playbookMultiSelect, /<Badge/)
+  assert.doesNotMatch(playbookMultiSelect, /flex-wrap/)
+})
+
 test("MEDDICC and MEDDPICC fields use the correct order and Identify Pain label", async () => {
   const playbookReferenceData = await read("src/data/playbook-reference-data.tsx")
   const factory = await read("src/lib/record-factories.ts")

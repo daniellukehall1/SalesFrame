@@ -8782,6 +8782,8 @@ function PlaybookMultiSelect({
 }) {
   const [open, setOpen] = React.useState(false)
   const selectedPlaybooks = normalizePlaybooks(value)
+  const visiblePlaybooks = selectedPlaybooks.slice(0, 2)
+  const hiddenPlaybookCount = Math.max(0, selectedPlaybooks.length - visiblePlaybooks.length)
 
   const togglePlaybook = (playbook: CallPlaybook) => {
     const nextValue = selectedPlaybooks.includes(playbook)
@@ -8802,12 +8804,11 @@ function PlaybookMultiSelect({
         aria-haspopup="listbox"
         onClick={() => setOpen((value) => !value)}
       >
-        <span className="flex min-w-0 flex-1 flex-wrap gap-1 overflow-hidden">
-          {selectedPlaybooks.map((playbook) => (
-            <Badge key={playbook} variant="secondary" className="max-w-full truncate">
-              {playbook}
-            </Badge>
-          ))}
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-sm">
+          <span className="truncate">{visiblePlaybooks.join(", ")}</span>
+          {hiddenPlaybookCount > 0 ? (
+            <span className="shrink-0 text-muted-foreground">+{hiddenPlaybookCount} more</span>
+          ) : null}
         </span>
         <ChevronDownIcon className={cn("size-4 shrink-0 transition-transform", open && "rotate-180")} />
       </Button>
