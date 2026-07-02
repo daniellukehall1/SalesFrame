@@ -73,6 +73,8 @@ export type WorkspaceNavItem = {
   role: string
 }
 
+export type WorkspaceSavePayload = Pick<WorkspaceNavItem, "name" | "description" | "defaultCurrency">
+
 function WorkspaceLogo({ workspace }: { workspace: WorkspaceNavItem }) {
   const Icon = workspace.name.toLowerCase() === "salesframe" ? AudioLinesIcon : Building2Icon
 
@@ -96,7 +98,7 @@ export function WorkspaceSwitcher({
   onCreateWorkspace: () => void
   onDeleteWorkspace: (workspaceId: string) => Promise<void>
   onDuplicateWorkspace: (workspace: WorkspaceNavItem) => Promise<WorkspaceNavItem>
-  onUpdateWorkspace: (workspaceId: string, payload: Omit<WorkspaceNavItem, "id">) => Promise<WorkspaceNavItem>
+  onUpdateWorkspace: (workspaceId: string, payload: WorkspaceSavePayload) => Promise<WorkspaceNavItem>
   onWorkspaceChange?: (workspace: WorkspaceNavItem) => void
   workspaces: WorkspaceNavItem[]
 }) {
@@ -131,7 +133,7 @@ export function WorkspaceSwitcher({
     onWorkspaceChange?.(workspace)
   }
 
-  const handleSaveWorkspace = async (payload: Omit<WorkspaceNavItem, "id">) => {
+  const handleSaveWorkspace = async (payload: WorkspaceSavePayload) => {
     if (!editingWorkspace) return
 
     setIsSaving(true)
@@ -315,12 +317,11 @@ function WorkspaceFormDialog({
   statusMessage: string
   workspace: WorkspaceNavItem | null
   onOpenChange: (open: boolean) => void
-  onSave: (payload: Omit<WorkspaceNavItem, "id">) => void | Promise<void>
+  onSave: (payload: WorkspaceSavePayload) => void | Promise<void>
 }) {
   const [name, setName] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [defaultCurrency, setDefaultCurrency] = React.useState<CurrencyCode>(defaultCurrencyCode)
-  const [role, setRole] = React.useState("Owner")
 
   React.useEffect(() => {
     if (!open) return
@@ -328,7 +329,6 @@ function WorkspaceFormDialog({
     setName(workspace?.name ?? "")
     setDescription(workspace?.description ?? "Seller workspace")
     setDefaultCurrency(normalizeCurrencyCode(workspace?.defaultCurrency))
-    setRole(workspace?.role ?? "Owner")
   }, [open, workspace])
 
   const canSave = name.trim().length > 0
@@ -340,7 +340,6 @@ function WorkspaceFormDialog({
       name: name.trim(),
       description: description.trim() || "Seller workspace",
       defaultCurrency,
-      role: role.trim() || "Owner",
     })
   }
 
@@ -375,15 +374,6 @@ function WorkspaceFormDialog({
               value={description}
               placeholder="Seller workspace"
               onChange={(event) => setDescription(event.currentTarget.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="workspace-role">Your role</Label>
-            <Input
-              id="workspace-role"
-              value={role}
-              placeholder="Owner"
-              onChange={(event) => setRole(event.currentTarget.value)}
             />
           </div>
           <div className="grid gap-2">

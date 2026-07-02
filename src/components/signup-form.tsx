@@ -83,7 +83,7 @@ export function SignupForm({
                   name="name"
                   type="text"
                   value={name}
-                  placeholder="John Doe"
+                  placeholder="Your name"
                   required
                   className="min-h-11 sm:min-h-8"
                   onChange={(event) => {
@@ -104,7 +104,7 @@ export function SignupForm({
                   spellCheck={false}
                   type="email"
                   value={email}
-                  placeholder="m@example.com"
+                  placeholder="you@company.com"
                   required
                   className="min-h-11 sm:min-h-8"
                   onChange={(event) => {

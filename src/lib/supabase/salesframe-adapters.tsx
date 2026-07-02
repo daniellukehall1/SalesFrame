@@ -66,7 +66,7 @@ export function mapAccountRowsToNavItems(accounts: AccountRow[], opportunities: 
     return {
       id: account.id,
       name: account.name,
-      description: account.industry ?? "Account",
+      description: account.industry ?? "",
       website: account.website ?? "",
       currency: normalizeCurrencyCode(account.currency),
       logoDomain,
@@ -92,24 +92,23 @@ export function mapAccountRowsToNavItems(accounts: AccountRow[], opportunities: 
   })
 }
 
-export function mapAccountRowsToDrafts(accounts: AccountRow[], ownerName: string) {
+export function mapAccountRowsToDrafts(accounts: AccountRow[]) {
   return Object.fromEntries(
     accounts.map((account) => [
       account.id,
-      mapAccountRowToDraft(account, ownerName),
+      mapAccountRowToDraft(account),
     ])
   ) as Record<string, AccountDraft>
 }
 
-export function mapAccountRowToDraft(account: AccountRow, ownerName: string): AccountDraft {
+export function mapAccountRowToDraft(account: AccountRow): AccountDraft {
   return {
     accountName: account.name,
     website: account.website ?? "",
-    industry: account.industry ?? "Account",
+    industry: account.industry ?? "",
     employeeCount: account.employee_count ?? "",
     region: account.region ?? "Australia",
     currency: normalizeCurrencyCode(account.currency),
-    owner: ownerName,
     currentTools: account.current_tools ?? "",
     strategicInitiatives: account.strategic_initiatives ?? "",
     competitors: account.competitors ?? "",
@@ -122,13 +121,11 @@ export function mapOpportunityRowsToDrafts({
   opportunities,
   playbooks,
   playbookAssignments,
-  ownerName,
 }: {
   accounts?: AccountRow[]
   opportunities: OpportunityRow[]
   playbooks: PlaybookRow[]
   playbookAssignments: OpportunityPlaybookRow[]
-  ownerName: string
 }) {
   const accountById = new Map(accounts.map((account) => [account.id, account]))
 
@@ -140,7 +137,6 @@ export function mapOpportunityRowsToDrafts({
         opportunity,
         playbooks,
         playbookAssignments,
-        ownerName,
       }),
     ])
   ) as Record<string, OpportunityDraft>
@@ -205,25 +201,22 @@ export function mapOpportunityRowToDraft({
   opportunity,
   playbooks,
   playbookAssignments,
-  ownerName,
 }: {
   accountCurrency?: string | null
   opportunity: OpportunityRow
   playbooks: PlaybookRow[]
   playbookAssignments: OpportunityPlaybookRow[]
-  ownerName: string
 }): OpportunityDraft {
   return {
     opportunityName: opportunity.name,
     stage: opportunity.stage,
     amount: formatCurrencyAmount(opportunity.amount, normalizeCurrencyCode(accountCurrency)),
     closeDate: formatCloseDateValue(opportunity.close_date_note ?? opportunity.close_date),
-    owner: ownerName,
-    source: opportunity.source ?? "Manual update",
+    source: opportunity.source ?? "",
     frameworks: formatPlaybooks(getOpportunityPlaybooks(opportunity.id, playbooks, playbookAssignments)),
-    nextStep: opportunity.next_step ?? "Use the next call to identify pain, authority, and measurable impact.",
-    pain: opportunity.pain ?? "Not captured yet.",
-    decisionProcess: opportunity.decision_process ?? "Unknown.",
+    nextStep: opportunity.next_step ?? "",
+    pain: opportunity.pain ?? "",
+    decisionProcess: opportunity.decision_process ?? "",
     manualNotes: opportunity.manual_notes ?? "",
   }
 }

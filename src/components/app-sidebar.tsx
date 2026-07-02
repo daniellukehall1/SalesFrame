@@ -9,7 +9,7 @@ import {
 import { NavMain, type NavMainItem } from "@/components/nav-main"
 import { NavProjects, type AccountNavItem } from "@/components/nav-projects"
 import { NavUser } from "@/components/nav-user"
-import { WorkspaceSwitcher, type WorkspaceNavItem } from "@/components/workspace-switcher"
+import { WorkspaceSwitcher, type WorkspaceNavItem, type WorkspaceSavePayload } from "@/components/workspace-switcher"
 import {
   Sidebar,
   SidebarContent,
@@ -115,7 +115,7 @@ export function AppSidebar({
   onDuplicateWorkspace: (workspace: WorkspaceNavItem) => Promise<WorkspaceNavItem>
   onEditAccount: (id: string) => void
   onEditOpportunity: (id: string) => void
-  onUpdateWorkspace: (workspaceId: string, payload: Omit<WorkspaceNavItem, "id">) => Promise<WorkspaceNavItem>
+  onUpdateWorkspace: (workspaceId: string, payload: WorkspaceSavePayload) => Promise<WorkspaceNavItem>
   isWorkspaceLoading?: boolean
   onLogout: () => void
   onNavigate: (id: string) => void

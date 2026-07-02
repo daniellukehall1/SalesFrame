@@ -81,7 +81,7 @@ export function LoginForm({
                   spellCheck={false}
                   type="email"
                   value={email}
-                  placeholder="m@example.com"
+                  placeholder="you@company.com"
                   required
                   className="min-h-11 sm:min-h-8"
                   onChange={(event) => {

@@ -292,7 +292,6 @@ export type AccountDraft = {
   employeeCount: string
   region: string
   currency: CurrencyCode
-  owner: string
   currentTools: string
   strategicInitiatives: string
   competitors: string
@@ -304,7 +303,6 @@ export type OpportunityDraft = {
   stage: string
   amount: string
   closeDate: string
-  owner: string
   source: string
   frameworks: string
   nextStep: string
@@ -387,7 +385,6 @@ export type CreateOpportunityPayload = {
 
 export type EditOpportunityPayload = CreateOpportunityPayload & {
   opportunityId: string
-  owner: string
   source: string
 }
 

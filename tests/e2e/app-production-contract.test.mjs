@@ -111,6 +111,108 @@ test("last workspace deletion explains the guard instead of hiding the action", 
   assert.match(workspaceSwitcher, /disabled=\{isLastWorkspace \|\| deleteSubmitting\}/)
 })
 
+test("seller-owned account and opportunity fields do not persist system placeholder copy", async () => {
+  const app = await read("src/App.tsx")
+  const adapters = await read("src/lib/supabase/salesframe-adapters.tsx")
+  const relevantSources = [
+    app.slice(app.indexOf("function createOpportunityDraftFromRecord"), app.indexOf("type PostCallOutputView")),
+    app.slice(app.indexOf("const handleStartRecording"), app.indexOf("const handleCreateAccount")),
+    app.slice(app.indexOf("const handleCreateAccount"), app.indexOf("const handleCreateOpportunity")),
+    app.slice(app.indexOf("const handleCreateOpportunity"), app.indexOf("const handleEditOpportunity")),
+    app.slice(app.indexOf("const handleEditOpportunity"), app.indexOf("const updateAccountDraft")),
+    app.slice(app.indexOf("const handleSaveActiveOpportunityDraft"), app.indexOf("const activeOpportunityIndex")),
+    app.slice(app.indexOf("function EditAccountDialog"), app.indexOf("function AddOpportunityDialog")),
+    app.slice(app.indexOf("function EditOpportunityDialog"), app.indexOf("function DeleteRecordDialog")),
+    adapters.slice(adapters.indexOf("export function mapOpportunityRowToDraft"), adapters.indexOf("export function mapOpportunityRowToUi")),
+  ].join("\n")
+  const accountDraftSource = adapters.slice(
+    adapters.indexOf("export function mapAccountRowToDraft"),
+    adapters.indexOf("export function mapOpportunityRowsToDrafts")
+  )
+  const startRecordingHandler = app.slice(app.indexOf("const handleStartRecording"), app.indexOf("const handleCreateAccount"))
+  const workspaceCompletionHandler = app.slice(
+    app.indexOf("const handleCompleteWorkspaceOnboarding"),
+    app.indexOf("const handleOpenSettingsFromProfile")
+  )
+
+  assert.doesNotMatch(relevantSources, /Created from the/)
+  assert.doesNotMatch(relevantSources, /Not captured yet\./)
+  assert.doesNotMatch(relevantSources, /Unknown\./)
+  assert.doesNotMatch(relevantSources, /Use the (first|next) call to identify/)
+  assert.doesNotMatch(relevantSources, /Manual update/)
+  assert.doesNotMatch(relevantSources, /Daniel Hall/)
+  assert.match(app, /industry: draft\.industry\.trim\(\) \|\| null/)
+  assert.match(accountDraftSource, /industry: account\.industry \?\? ""/)
+  assert.doesNotMatch(accountDraftSource, /industry: account\.industry \?\? "Account"/)
+  assert.match(app, /setAccountRecordSaveMessage\("Add an account name before saving\."\)/)
+  assert.match(app, /setOpportunityRecordSaveMessage\("Add an opportunity name before saving\."\)/)
+  assert.doesNotMatch(app, /Untitled account/)
+  assert.doesNotMatch(app, /Untitled opportunity/)
+  assert.match(startRecordingHandler, /Add an account name before starting the call\./)
+  assert.match(startRecordingHandler, /Add an opportunity name before starting the call\./)
+  assert.doesNotMatch(startRecordingHandler, /payload\.accountName\.trim\(\) \|\| "New account"/)
+  assert.doesNotMatch(startRecordingHandler, /payload\.opportunityName\.trim\(\) \|\| "New opportunity"/)
+  assert.match(workspaceCompletionHandler, /Add a workspace name before finishing setup\./)
+  assert.doesNotMatch(workspaceCompletionHandler, /name: workspaceName\.trim\(\) \|\| "New workspace"/)
+})
+
+test("fresh user profile defaults do not expose a named demo seller", async () => {
+  const app = await read("src/App.tsx")
+  const initialProfile = app.slice(
+    app.indexOf("const initialPersonalAccountProfile"),
+    app.indexOf("const timezoneOptions")
+  )
+  const editAccountDialog = app.slice(app.indexOf("function EditAccountDialog"), app.indexOf("function AddOpportunityDialog"))
+  const editOpportunityDialog = app.slice(app.indexOf("function EditOpportunityDialog"), app.indexOf("function DeleteRecordDialog"))
+
+  assert.match(initialProfile, /fullName: "SalesFrame Seller"/)
+  assert.match(initialProfile, /email: ""/)
+  assert.match(initialProfile, /company: ""/)
+  assert.match(initialProfile, /bio: ""/)
+  assert.doesNotMatch(initialProfile, /Daniel Hall/)
+  assert.doesNotMatch(initialProfile, /seller@salesframe\.ai/)
+  assert.doesNotMatch(initialProfile, /Enterprise seller/)
+  assert.doesNotMatch(editAccountDialog, /Daniel Hall/)
+  assert.doesNotMatch(editOpportunityDialog, /Daniel Hall/)
+})
+
+test("public auth forms avoid stock template placeholders", async () => {
+  const loginForm = await read("src/components/login-form.tsx")
+  const signupForm = await read("src/components/signup-form.tsx")
+  const authForms = `${loginForm}\n${signupForm}`
+
+  assert.match(loginForm, /placeholder="you@company\.com"/)
+  assert.match(signupForm, /placeholder="Your name"/)
+  assert.match(signupForm, /placeholder="you@company\.com"/)
+  assert.doesNotMatch(authForms, /m@example\.com/)
+  assert.doesNotMatch(authForms, /John Doe/)
+})
+
+test("account and opportunity record forms only show fields backed by saved data", async () => {
+  const app = await read("src/App.tsx")
+  const core = await read("src/lib/salesframe-core.ts")
+  const adapters = await read("src/lib/supabase/salesframe-adapters.tsx")
+  const workspaceSwitcher = await read("src/components/workspace-switcher.tsx")
+  const workspaceFormDialog = workspaceSwitcher.slice(
+    workspaceSwitcher.indexOf("function WorkspaceFormDialog"),
+    workspaceSwitcher.indexOf("function DeleteWorkspaceDialog")
+  )
+
+  assert.doesNotMatch(core, /\n\s*owner: string/)
+  assert.doesNotMatch(app, /id="account-owner"/)
+  assert.doesNotMatch(app, /id="opportunity-owner"/)
+  assert.doesNotMatch(app, /id="edit-account-owner"/)
+  assert.doesNotMatch(app, /id="edit-opportunity-owner"/)
+  assert.doesNotMatch(app, /onAccountDraftChange\("owner"/)
+  assert.doesNotMatch(app, /onOpportunityDraftChange\("owner"/)
+  assert.doesNotMatch(adapters, /ownerName/)
+  assert.match(workspaceSwitcher, /export type WorkspaceSavePayload = Pick<WorkspaceNavItem, "name" \| "description" \| "defaultCurrency">/)
+  assert.doesNotMatch(workspaceFormDialog, /workspace-role/)
+  assert.doesNotMatch(workspaceFormDialog, /setRole/)
+  assert.doesNotMatch(workspaceFormDialog, /role: role/)
+  assert.doesNotMatch(workspaceFormDialog, /Your role/)
+})
+
 test("Start Call uses the real call capture hook and post-call function", async () => {
   const app = await read("src/App.tsx")
 

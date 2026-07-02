@@ -54,7 +54,7 @@ import { CsvImportDialog } from "@/components/csv-import-dialog"
 import type { LoginFormValues } from "@/components/login-form"
 import { type AccountNavItem } from "@/components/nav-projects"
 import type { SignupFormValues } from "@/components/signup-form"
-import type { WorkspaceNavItem } from "@/components/workspace-switcher"
+import type { WorkspaceNavItem, WorkspaceSavePayload } from "@/components/workspace-switcher"
 import { buildAccountLogoMetadata } from "@/lib/account-logo"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -343,16 +343,16 @@ type PublicAuthRoute = "landing" | "login" | "signup"
 
 const initialPersonalAccountProfile: PersonalAccountProfile = {
   avatarUrl: "",
-  fullName: "Daniel Hall",
-  email: "seller@salesframe.ai",
-  title: "Enterprise seller",
-  company: "SalesFrame",
+  fullName: "SalesFrame Seller",
+  email: "",
+  title: "Seller",
+  company: "",
   role: "Individual seller",
   region: "Australia",
   timezone: "Australia/Sydney",
   phone: "",
   linkedin: "",
-  bio: "Uses SalesFrame to prepare calls, enforce qualification methodology, and keep opportunity context current.",
+  bio: "",
 }
 
 const timezoneOptions = [
@@ -661,7 +661,6 @@ function createAccountDraftFromRecord(account: AccountNavItem): AccountDraft {
     employeeCount: "",
     region: "Australia",
     currency: normalizeCurrencyCode(account.currency),
-    owner: "",
     currentTools: "",
     strategicInitiatives: "",
     competitors: "",
@@ -675,12 +674,11 @@ function createOpportunityDraftFromRecord(opportunity: Opportunity): Opportunity
     stage: opportunity.stage,
     amount: opportunity.amount,
     closeDate: opportunity.closeDate,
-    owner: "",
-    source: "Manual update",
+    source: "",
     frameworks: formatPlaybooks(defaultCallPlaybooks),
-    nextStep: "Use the next call to identify pain, authority, and measurable impact.",
-    pain: "Not captured yet.",
-    decisionProcess: "Unknown.",
+    nextStep: "",
+    pain: "",
+    decisionProcess: "",
     manualNotes: "",
   }
 }
@@ -2548,14 +2546,13 @@ function App() {
       setTranscriptsByCallId(mapTranscriptSegmentsByCallId({ callSpeakers, transcriptSegments }))
       setWorkspaceAccounts(nextAccounts)
       setWorkspaceOpportunities(nextOpportunities)
-      setAccountDrafts(mapAccountRowsToDrafts(accountRows, personalAccountProfile.fullName))
+      setAccountDrafts(mapAccountRowsToDrafts(accountRows))
       setOpportunityDrafts(
         mapOpportunityRowsToDrafts({
           accounts: accountRows,
           opportunities: opportunityRows,
           playbooks: playbookRows,
           playbookAssignments,
-          ownerName: personalAccountProfile.fullName,
         })
       )
       setAccountEnrichmentById(
@@ -2595,7 +2592,6 @@ function App() {
   }, [
     activeWorkspaceId,
     authSession,
-    personalAccountProfile.fullName,
   ])
 
   React.useEffect(() => {
@@ -3343,19 +3339,26 @@ function App() {
     const isNewAccount = payload.accountMode === "new"
     let accountId = isNewAccount ? "" : payload.accountId
     const accountName = isNewAccount
-      ? payload.accountName.trim() || "New account"
+      ? payload.accountName.trim()
       : workspaceAccounts.find((account) => account.id === accountId)?.name ?? "Selected account"
     const accountWebsite = isNewAccount
       ? normalizeSellerDomain(payload.accountWebsite)
       : workspaceAccounts.find((account) => account.id === accountId)?.website ?? ""
     const accountIndustry = isNewAccount
-      ? payload.accountIndustry.trim() || "New account"
-      : workspaceAccounts.find((account) => account.id === accountId)?.description ?? "Existing account"
+      ? payload.accountIndustry.trim()
+      : workspaceAccounts.find((account) => account.id === accountId)?.description ?? ""
     let createdCallId = ""
     let createdAccountRow: Awaited<ReturnType<typeof createSupabaseAccount>> | null = null
     let createdOpportunityRow: Awaited<ReturnType<typeof createSupabaseOpportunity>> | null = null
 
     try {
+      if (isNewAccount && !accountName) {
+        throw new Error("Add an account name before starting the call.")
+      }
+      if (!isNewAccount && !accountId) {
+        throw new Error("Choose an account before starting the call.")
+      }
+
       if (providedOpenAiKey) {
         await saveRequiredOpenAiKey(providedOpenAiKey)
         throwIfStartCancelled()
@@ -3368,10 +3371,10 @@ function App() {
           workspace_id: activeWorkspaceId,
           name: accountName,
           website: accountWebsite || null,
-          industry: accountIndustry,
+          industry: accountIndustry || null,
           region: "Australia",
           currency: normalizeCurrencyCode(payload.accountCurrency),
-          notes: "Created from the start call flow.",
+          notes: "",
           ...buildAccountLogoMetadata(accountWebsite),
         })
         throwIfStartCancelled()
@@ -3383,8 +3386,15 @@ function App() {
       const isNewOpportunity = isNewAccount || payload.opportunityMode === "new"
       let opportunityId = isNewOpportunity ? "" : payload.opportunityId
       const opportunityName = isNewOpportunity
-        ? payload.opportunityName.trim() || "New opportunity"
+        ? payload.opportunityName.trim()
         : workspaceOpportunities.find((opportunity) => opportunity.id === opportunityId)?.name ?? "Selected opportunity"
+
+      if (isNewOpportunity && !opportunityName) {
+        throw new Error("Add an opportunity name before starting the call.")
+      }
+      if (!isNewOpportunity && !opportunityId) {
+        throw new Error("Choose an opportunity before starting the call.")
+      }
 
       if (isNewOpportunity) {
         const opportunity = await createSupabaseOpportunity({
@@ -3396,10 +3406,10 @@ function App() {
           close_date: null,
           close_date_note: "Not set",
           source: "Call recording",
-          pain: "Not captured yet.",
-          decision_process: "Unknown.",
-          next_step: "Use the first call to identify pain, authority, and measurable impact.",
-          manual_notes: "Created from the start call flow.",
+          pain: "",
+          decision_process: "",
+          next_step: "",
+          manual_notes: "",
           call_type: payload.callType,
         })
         throwIfStartCancelled()
@@ -3432,7 +3442,7 @@ function App() {
       const selectedAccountRecord = workspaceAccounts.find((account) => account.id === accountId)
       const selectedOpportunityRecord = workspaceOpportunities.find((opportunity) => opportunity.id === opportunityId)
       const initialAccountProfile = createdAccountRow
-        ? mapAccountRowToDraft(createdAccountRow, personalAccountProfile.fullName)
+        ? mapAccountRowToDraft(createdAccountRow)
         : accountDrafts[accountId] ?? createAccountDraftFromRecord(selectedAccountRecord ?? {
             ...emptyAccount,
             id: accountId,
@@ -3524,7 +3534,7 @@ function App() {
         )
         setAccountDrafts((drafts) => ({
           ...drafts,
-          [accountRow.id]: mapAccountRowToDraft(accountRow, personalAccountProfile.fullName),
+          [accountRow.id]: mapAccountRowToDraft(accountRow),
         }))
       } else if (createdOpportunityRow) {
         const opportunityRow = createdOpportunityRow
@@ -3568,7 +3578,6 @@ function App() {
             opportunity: opportunityRow,
             playbooks: workspacePlaybooks,
             playbookAssignments,
-            ownerName: personalAccountProfile.fullName,
           }),
         }))
       }
@@ -3787,7 +3796,7 @@ function App() {
     }
 
     const accountName = payload.accountName.trim()
-    const accountIndustry = payload.industry.trim() || "New account"
+    const accountIndustry = payload.industry.trim()
     const selectedPlaybooks = normalizePlaybooks(payload.playbooks)
     const shouldCreateOpportunity = payload.createOpportunity && payload.opportunityName.trim().length > 0
     const providedOpenAiKey = payload.openAiApiKey.trim()
@@ -3804,7 +3813,7 @@ function App() {
         workspace_id: activeWorkspaceId,
         name: accountName,
         website: normalizedWebsite,
-        industry: accountIndustry,
+        industry: accountIndustry || null,
         employee_count: payload.employeeCount.trim(),
         region: payload.region.trim() || "Australia",
         currency: normalizeCurrencyCode(payload.currency),
@@ -3829,10 +3838,10 @@ function App() {
           close_date: closeDateValue.date,
           close_date_note: closeDateValue.note,
           source: "Manual account creation",
-          pain: payload.pain.trim() || "Not captured yet.",
-          decision_process: "Unknown.",
-          next_step: payload.nextStep.trim() || "Use the first call to identify pain, authority, and measurable impact.",
-          manual_notes: "Created from the create account flow.",
+          pain: payload.pain.trim(),
+          decision_process: "",
+          next_step: payload.nextStep.trim(),
+          manual_notes: "",
           call_type: "Discovery",
         })
 
@@ -3902,7 +3911,7 @@ function App() {
             )
             setAccountDrafts((drafts) => ({
               ...drafts,
-              [enrichment.account.id]: mapAccountRowToDraft(enrichment.account, personalAccountProfile.fullName),
+              [enrichment.account.id]: mapAccountRowToDraft(enrichment.account),
             }))
             setAccountEnrichmentById((profiles) => ({
               ...profiles,
@@ -3955,10 +3964,10 @@ function App() {
         close_date: closeDateValue.date,
         close_date_note: closeDateValue.note,
         source: "Manual opportunity creation",
-        pain: payload.pain.trim() || "Not captured yet.",
-        decision_process: payload.decisionProcess.trim() || "Unknown.",
-        next_step: payload.nextStep.trim() || "Use the first call to identify pain, authority, and measurable impact.",
-        manual_notes: payload.manualNotes.trim() || "Created from the add opportunity flow.",
+        pain: payload.pain.trim(),
+        decision_process: payload.decisionProcess.trim(),
+        next_step: payload.nextStep.trim(),
+        manual_notes: payload.manualNotes.trim(),
         call_type: "Discovery",
       })
 
@@ -3993,14 +4002,14 @@ function App() {
     }
 
     const accountName = payload.accountName.trim() || currentAccount.name
-    const industry = payload.industry.trim() || currentAccount.description
+    const industry = payload.industry.trim()
     const normalizedWebsite = normalizeSellerDomain(payload.website)
 
     try {
       await updateSupabaseAccount(payload.accountId, {
         name: accountName,
         website: normalizedWebsite,
-        industry,
+        industry: industry || null,
         employee_count: payload.employeeCount.trim(),
         region: payload.region.trim() || "Australia",
         currency: normalizeCurrencyCode(payload.currency),
@@ -4049,11 +4058,11 @@ function App() {
         amount,
         close_date: closeDateValue.date,
         close_date_note: closeDateValue.note,
-        source: payload.source.trim() || "Manual update",
-        pain: payload.pain.trim() || "Not captured yet.",
-        decision_process: payload.decisionProcess.trim() || "Unknown.",
-        next_step: payload.nextStep.trim() || "Use the next call to identify pain, authority, and measurable impact.",
-        manual_notes: payload.manualNotes.trim() || "Updated from the edit opportunity modal.",
+        source: payload.source.trim(),
+        pain: payload.pain.trim(),
+        decision_process: payload.decisionProcess.trim(),
+        next_step: payload.nextStep.trim(),
+        manual_notes: payload.manualNotes.trim(),
       })
 
       await replaceOpportunityPlaybooks(
@@ -4116,15 +4125,21 @@ function App() {
     if (!activeAccount.id) return false
 
     const draft = accountDrafts[activeAccount.id] ?? createAccountDraftFromRecord(activeAccount)
+    if (!draft.accountName.trim()) {
+      setAccountRecordSaveStatus("error")
+      setAccountRecordSaveMessage("Add an account name before saving.")
+      return false
+    }
+
     setAccountRecordSaveStatus("saving")
     setAccountRecordSaveMessage("")
 
     try {
       const normalizedWebsite = normalizeSellerDomain(draft.website)
       const updatedAccount = await updateSupabaseAccount(activeAccount.id, {
-        name: draft.accountName.trim() || "Untitled account",
+        name: draft.accountName.trim(),
         website: normalizedWebsite,
-        industry: draft.industry.trim() || "Account",
+        industry: draft.industry.trim() || null,
         employee_count: draft.employeeCount.trim(),
         region: draft.region.trim() || "Australia",
         currency: normalizeCurrencyCode(draft.currency),
@@ -4148,7 +4163,7 @@ function App() {
       )
       setAccountDrafts((drafts) => ({
         ...drafts,
-        [updatedAccount.id]: mapAccountRowToDraft(updatedAccount, personalAccountProfile.fullName),
+        [updatedAccount.id]: mapAccountRowToDraft(updatedAccount),
       }))
       setWorkspaceErrorMessage("")
       setAccountRecordSaveStatus("saved")
@@ -4208,7 +4223,7 @@ function App() {
       )
       setAccountDrafts((drafts) => ({
         ...drafts,
-        [response.account.id]: mapAccountRowToDraft(response.account, personalAccountProfile.fullName),
+        [response.account.id]: mapAccountRowToDraft(response.account),
       }))
       setAccountEnrichmentById((profiles) => ({
         ...profiles,
@@ -4285,6 +4300,12 @@ function App() {
     if (!activeOpportunity.id) return
 
     const draft = opportunityDrafts[activeOpportunity.id] ?? createOpportunityDraftFromRecord(activeOpportunity)
+    if (!draft.opportunityName.trim()) {
+      setOpportunityRecordSaveStatus("error")
+      setOpportunityRecordSaveMessage("Add an opportunity name before saving.")
+      return
+    }
+
     const selectedPlaybooks = normalizePlaybooks(parsePlaybookSelection(draft.frameworks))
     const closeDateValue = normalizeCloseDateForPersistence(draft.closeDate, activeOpportunity.closeDate)
     const formattedAmount = formatCurrencyAmount(draft.amount.trim() || "Unqualified", activeAccount.currency)
@@ -4293,15 +4314,15 @@ function App() {
 
     try {
       const updatedOpportunity = await updateSupabaseOpportunity(activeOpportunity.id, {
-        name: draft.opportunityName.trim() || "Untitled opportunity",
+        name: draft.opportunityName.trim(),
         stage: draft.stage.trim() || "Discovery",
         amount: formattedAmount,
         close_date: closeDateValue.date,
         close_date_note: closeDateValue.note,
-        source: draft.source.trim() || "Manual update",
-        pain: draft.pain.trim() || "Not captured yet.",
-        decision_process: draft.decisionProcess.trim() || "Unknown.",
-        next_step: draft.nextStep.trim() || "Use the next call to identify pain, authority, and measurable impact.",
+        source: draft.source.trim(),
+        pain: draft.pain.trim(),
+        decision_process: draft.decisionProcess.trim(),
+        next_step: draft.nextStep.trim(),
         manual_notes: draft.manualNotes.trim(),
       })
 
@@ -4352,7 +4373,6 @@ function App() {
           ...mapOpportunityRowToDraft({
             accountCurrency: activeAccount.currency,
             opportunity: updatedOpportunity,
-            ownerName: personalAccountProfile.fullName,
             playbookAssignments: selectedPlaybookIds.map((playbookId) => ({
               id: `${updatedOpportunity.id}-${playbookId}`,
               opportunity_id: updatedOpportunity.id,
@@ -4756,7 +4776,7 @@ function App() {
 
   const handleUpdateWorkspace = async (
     workspaceId: string,
-    payload: Omit<WorkspaceNavItem, "id">
+    payload: WorkspaceSavePayload
   ) => {
     const updatedWorkspace = await updateSupabaseWorkspace(workspaceId, {
       name: payload.name,
@@ -4820,9 +4840,13 @@ function App() {
 
     const isUnsavedWorkspaceDraft = workspaceSetupDraft?.id.startsWith("new-workspace-") ?? false
 
+    if (workspaceSetupDraft && !workspaceName.trim()) {
+      throw new Error("Add a workspace name before finishing setup.")
+    }
+
     if (workspaceSetupDraft && isUnsavedWorkspaceDraft) {
       const createdWorkspace = await createSupabaseWorkspace({
-        name: workspaceName.trim() || "New workspace",
+        name: workspaceName.trim(),
         description: workspaceDescription.trim() || "Seller workspace",
         default_currency: normalizeCurrencyCode(workspaceCurrency),
       })
@@ -8135,7 +8159,6 @@ function EditAccountDialog({
   const [employeeCount, setEmployeeCount] = React.useState("")
   const [region, setRegion] = React.useState("")
   const [currency, setCurrency] = React.useState<CurrencyCode>(defaultCurrencyCode)
-  const [owner, setOwner] = React.useState("")
   const [currentTools, setCurrentTools] = React.useState("")
   const [strategicInitiatives, setStrategicInitiatives] = React.useState("")
   const [competitors, setCompetitors] = React.useState("")
@@ -8152,7 +8175,6 @@ function EditAccountDialog({
     setEmployeeCount(draft?.employeeCount ?? "")
     setRegion(draft?.region ?? "Australia")
     setCurrency(draft?.currency ?? account.currency)
-    setOwner(draft?.owner ?? "Daniel Hall")
     setCurrentTools(draft?.currentTools ?? "")
     setStrategicInitiatives(draft?.strategicInitiatives ?? "")
     setCompetitors(draft?.competitors ?? "")
@@ -8176,7 +8198,6 @@ function EditAccountDialog({
       employeeCount,
       region,
       currency,
-      owner,
       currentTools,
       strategicInitiatives,
       competitors,
@@ -8256,15 +8277,6 @@ function EditAccountDialog({
                 value={region}
                 placeholder="Australia"
                 onChange={(event) => setRegion(event.currentTarget.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-account-owner">Owner</Label>
-              <Input
-                id="edit-account-owner"
-                value={owner}
-                placeholder="Owner"
-                onChange={(event) => setOwner(event.currentTarget.value)}
               />
             </div>
             <CurrencySelect
@@ -8649,7 +8661,6 @@ function EditOpportunityDialog({
   const [stage, setStage] = React.useState("Discovery")
   const [amount, setAmount] = React.useState("")
   const [closeDate, setCloseDate] = React.useState("")
-  const [owner, setOwner] = React.useState("")
   const [source, setSource] = React.useState("")
   const [selectedPlaybooks, setSelectedPlaybooks] = React.useState<CallPlaybook[]>(defaultCallPlaybooks)
   const [nextStep, setNextStep] = React.useState("")
@@ -8667,8 +8678,7 @@ function EditOpportunityDialog({
     setStage(draft?.stage ?? opportunity.stage)
     setAmount(draft?.amount ?? opportunity.amount)
     setCloseDate(draft?.closeDate ?? opportunity.closeDate)
-    setOwner(draft?.owner ?? "Daniel Hall")
-    setSource(draft?.source ?? "Manual update")
+    setSource(draft?.source ?? "")
     setSelectedPlaybooks(parsePlaybookSelection(draft?.frameworks))
     setNextStep(draft?.nextStep ?? "")
     setPain(draft?.pain ?? "")
@@ -8693,7 +8703,6 @@ function EditOpportunityDialog({
       stage,
       amount,
       closeDate,
-      owner,
       source,
       playbooks: selectedPlaybooks,
       nextStep,
@@ -8805,16 +8814,7 @@ function EditOpportunityDialog({
               />
             </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-opportunity-owner">Owner</Label>
-              <Input
-                id="edit-opportunity-owner"
-                value={owner}
-                placeholder="Owner"
-                onChange={(event) => setOwner(event.currentTarget.value)}
-              />
-            </div>
+          <div className="grid gap-3">
             <div className="grid gap-2">
               <Label htmlFor="edit-opportunity-source">Source</Label>
               <Input
@@ -9683,12 +9683,6 @@ function AccountView({
                   id="account-currency"
                   value={accountDraft.currency}
                   onChange={(value) => onAccountDraftChange("currency", value)}
-                />
-                <EditableTextField
-                  id="account-owner"
-                  label="Owner"
-                  value={accountDraft.owner}
-                  onChange={(value) => onAccountDraftChange("owner", value)}
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -11473,7 +11467,6 @@ function AccountRecordPanel({
     ["Employees", accountDraft.employeeCount],
     ["Region", accountDraft.region],
     ["Currency", accountDraft.currency],
-    ["Owner", accountDraft.owner],
   ]
   const accountContextRows = [
     ["Current tools", accountDraft.currentTools],
@@ -12617,12 +12610,6 @@ function OpportunityProfile({
               onChange={(value) => onOpportunityDraftChange("closeDate", value)}
             />
           </div>
-          <EditableTextField
-            id="opportunity-owner"
-            label="Owner"
-            value={opportunityDraft.owner}
-            onChange={(value) => onOpportunityDraftChange("owner", value)}
-          />
           <EditableTextField
             id="opportunity-source"
             label="Source"
