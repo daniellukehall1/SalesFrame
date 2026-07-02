@@ -9591,18 +9591,8 @@ function AccountView({
                       {visibleOpportunities.map((opportunity) => (
                         <tr
                           key={opportunity.id}
-                          tabIndex={0}
-                          role="button"
-                          aria-label={`Open ${opportunity.name}`}
-                          className="cursor-pointer border-b transition-colors hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 last:border-b-0"
+                          className="cursor-pointer border-b transition-colors hover:bg-muted/30 last:border-b-0"
                           onClick={() => onOpportunitySelect(opportunity.id)}
-                          onKeyDown={(event) => {
-                            if (event.currentTarget !== event.target) return
-                            if (event.key !== "Enter" && event.key !== " ") return
-
-                            event.preventDefault()
-                            onOpportunitySelect(opportunity.id)
-                          }}
                         >
                           <td className="min-w-0 px-3 py-3 align-middle">
                             <button
@@ -13387,18 +13377,8 @@ function CallsView({
             return (
             <div
               key={call.id}
-              tabIndex={0}
-              role="button"
-              aria-label={`Open ${call.title}`}
-              className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 md:grid-cols-[1fr_120px_220px] md:items-center"
+              className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-colors hover:bg-muted/50 md:grid-cols-[1fr_120px_220px] md:items-center"
               onClick={() => onCallSelect(call.id)}
-              onKeyDown={(event) => {
-                if (event.currentTarget !== event.target) return
-                if (event.key !== "Enter" && event.key !== " ") return
-
-                event.preventDefault()
-                onCallSelect(call.id)
-              }}
             >
               <div className="flex items-start gap-3">
                 <div className="flex size-10 items-center justify-center rounded-lg bg-muted">
@@ -13410,7 +13390,7 @@ function CallsView({
                 </div>
               </div>
               <span className={cn("text-sm font-medium", getCallStatusTextClassName(displayStatus))}>{displayStatus}</span>
-              <div className="flex gap-2 md:justify-end" onClick={(event) => event.stopPropagation()}>
+              <div className="flex gap-2 md:justify-end" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
                 <Button
                   size="sm"
                   variant="outline"
