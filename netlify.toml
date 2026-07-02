@@ -16,7 +16,7 @@
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "DENY"
-    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https://img.logo.dev https://salesframe.ai; media-src 'self' blob: data:; font-src 'self' data: https://db.onlinewebfonts.com; style-src 'self' 'unsafe-inline' https://db.onlinewebfonts.com; script-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.openai.com wss://api.openai.com; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests"
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https://img.logo.dev https://salesframe.ai; media-src 'self' blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.openai.com wss://api.openai.com; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests"
     Permissions-Policy = "accelerometer=(), bluetooth=(), camera=(), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), serial=(), usb=()"
 
 [[headers]]
