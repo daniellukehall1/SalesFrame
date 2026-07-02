@@ -140,7 +140,8 @@ export function CsvImportDialog({
   const counts = getCsvImportCounts(previewRows)
   const filteredRows = filterCsvImportRows(previewRows, filter)
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / csvImportLimits.reviewPageSize))
-  const pagedRows = filteredRows.slice((page - 1) * csvImportLimits.reviewPageSize, page * csvImportLimits.reviewPageSize)
+  const safePage = Math.min(page, totalPages)
+  const pagedRows = filteredRows.slice((safePage - 1) * csvImportLimits.reviewPageSize, safePage * csvImportLimits.reviewPageSize)
   const importableRows = previewRows.filter((row) => row.action !== "skip" && !row.issues.some((issue) => issue.severity === "error"))
 
   React.useEffect(() => {
@@ -164,6 +165,10 @@ export function CsvImportDialog({
   React.useEffect(() => {
     setPage(1)
   }, [filter, step])
+
+  React.useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0]
@@ -565,13 +570,13 @@ export function CsvImportDialog({
               </div>
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm text-muted-foreground">
-                  Page {page} of {totalPages}
+                  Page {safePage} of {totalPages}
                 </p>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
+                  <Button variant="outline" size="sm" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
                     Previous
                   </Button>
-                  <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>
+                  <Button variant="outline" size="sm" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>
                     Next
                   </Button>
                 </div>

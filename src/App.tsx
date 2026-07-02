@@ -208,9 +208,11 @@ import {
   upsertCallSpeaker,
   upsertSellerResearchProfile,
   type AccountEnrichmentProfileRow,
+  type CallSpeakerRow,
   type PlaybookFieldRow,
   type PlaybookRow,
   type PostCallOutputRow,
+  type TranscriptSegmentRow,
 } from "@/lib/supabase/salesframe-data"
 import {
   getFuzzyMatches,
@@ -1559,6 +1561,62 @@ function getThirdDiarizedSpeakerLabel(sourceHint: string): TranscriptSpeaker {
   return sourceHint === "meeting_audio" ? "Customer 3" : "Customer 2"
 }
 
+function formatPersistedTranscriptTime(value: number | null) {
+  if (value === null) return "live"
+
+  const totalSeconds = Math.max(0, Math.round(value / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`
+}
+
+function mapTranscriptSegmentsByCallId({
+  callSpeakers,
+  transcriptSegments,
+}: {
+  callSpeakers: CallSpeakerRow[]
+  transcriptSegments: TranscriptSegmentRow[]
+}) {
+  const speakerByCallId = new Map<string, Map<string, CallSpeakerRow>>()
+  const transcriptByCallId: Record<string, Opportunity["transcript"]> = {}
+
+  callSpeakers.forEach((speaker) => {
+    const speakers = speakerByCallId.get(speaker.call_id) ?? new Map<string, CallSpeakerRow>()
+    speakers.set(speaker.id, speaker)
+    speakerByCallId.set(speaker.call_id, speakers)
+  })
+
+  transcriptSegments
+    .slice()
+    .sort((left, right) => (left.start_ms ?? 0) - (right.start_ms ?? 0))
+    .forEach((segment) => {
+      const speaker = segment.speaker_id
+        ? speakerByCallId.get(segment.call_id)?.get(segment.speaker_id) ?? null
+        : null
+      const speakerLabel = getCanonicalTranscriptSpeakerLabel(normalizeTranscriptSpeakerLabel(speaker?.label ?? "Unknown"))
+      const transcript = transcriptByCallId[segment.call_id] ?? []
+
+      transcript.push({
+        id: segment.id,
+        speaker: speakerLabel,
+        speakerAttributionReason: segment.speaker_attribution_reason ?? undefined,
+        speakerConfidence: segment.speaker_confidence ?? undefined,
+        speakerDisplayName: speaker?.display_name || speaker?.label || speakerLabel,
+        speakerId: speaker?.id,
+        speakerLabel,
+        speakerNeedsReview: segment.speaker_needs_review,
+        speakerSource: segment.speaker_source ?? segment.speaker_attribution ?? undefined,
+        time: formatPersistedTranscriptTime(segment.start_ms),
+        text: segment.text,
+      })
+
+      transcriptByCallId[segment.call_id] = transcript
+    })
+
+  return transcriptByCallId
+}
+
 function mapOpenAiKeyStatusToSavedState(status: OpenAiKeyStatus): SavedOpenAiKeyState | null {
   if (!status.connected || !status.fingerprint || !status.savedAt) return null
 
@@ -1905,11 +1963,13 @@ function App() {
   const [workspacePlaybookFields, setWorkspacePlaybookFields] = React.useState<PlaybookFieldRow[]>([])
   const [workspaceCalls, setWorkspaceCalls] = React.useState<CallSummary[]>([])
   const [postCallOutputsByCallId, setPostCallOutputsByCallId] = React.useState<Record<string, PostCallOutputView>>({})
+  const [transcriptsByCallId, setTranscriptsByCallId] = React.useState<Record<string, Opportunity["transcript"]>>({})
   const [workspaceAccounts, setWorkspaceAccounts] = React.useState<AccountNavItem[]>([])
   const [workspaceOpportunities, setWorkspaceOpportunities] = React.useState<Opportunity[]>([])
   const [activeAccountId, setActiveAccountId] = React.useState("")
   const [activeOpportunityId, setActiveOpportunityId] = React.useState("")
   const [activeCallId, setActiveCallId] = React.useState("")
+  const [postCallFocusCallId, setPostCallFocusCallId] = React.useState("")
   const [activeCallStartedAt, setActiveCallStartedAt] = React.useState("")
   const [createAccountOpen, setCreateAccountOpen] = React.useState(false)
   const [createOpportunityOpen, setCreateOpportunityOpen] = React.useState(false)
@@ -2030,6 +2090,7 @@ function App() {
   const setupWorkspace = workspaceSetupDraft ?? activeWorkspace
   const activePostCallCallId =
     activeCallId ||
+    postCallFocusCallId ||
     workspaceCalls
       .filter((call) => call.opportunityId === activeOpportunity.id)
       .sort((left, right) => {
@@ -2040,6 +2101,12 @@ function App() {
       })[0]?.id ||
     ""
   const activePostCallOutput = activePostCallCallId ? postCallOutputsByCallId[activePostCallCallId] ?? null : null
+  const activePostCallTranscript =
+    activePostCallCallId && activePostCallCallId === activeCallId && transcript.length > 0
+      ? transcript
+      : activePostCallCallId
+        ? transcriptsByCallId[activePostCallCallId] ?? []
+        : activeOpportunity.transcript
 
   React.useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode)
@@ -2364,6 +2431,7 @@ function App() {
       setWorkspacePlaybookFields(playbookFieldRows)
       setWorkspaceCalls(mapCallRowsToSummaries(callRows))
       setPostCallOutputsByCallId(mapPostCallOutputsByCallId(postCallOutputs))
+      setTranscriptsByCallId(mapTranscriptSegmentsByCallId({ callSpeakers, transcriptSegments }))
       setWorkspaceAccounts(nextAccounts)
       setWorkspaceOpportunities(nextOpportunities)
       setAccountDrafts(mapAccountRowsToDrafts(accountRows, personalAccountProfile.fullName))
@@ -2519,6 +2587,7 @@ function App() {
 
   const handleAccountSelect = (accountId: string) => {
     setActiveAccountId(accountId)
+    setPostCallFocusCallId("")
     const firstOpportunity = workspaceOpportunities.find((opportunity) => opportunity.accountId === accountId)
     if (firstOpportunity) {
       setActiveOpportunityId(firstOpportunity.id)
@@ -2531,6 +2600,7 @@ function App() {
     if (selectedOpportunity) {
       setActiveAccountId(selectedOpportunity.accountId)
       setActiveOpportunityId(opportunityId)
+      setPostCallFocusCallId("")
       handleNavigate("opportunity-record")
     }
   }
@@ -2644,16 +2714,18 @@ function App() {
 
   const handleCallSelect = (callId: string) => {
     const selectedCall = workspaceCalls.find((call) => call.id === callId)
+    if (!selectedCall) return
+
     const selectedOpportunity = workspaceOpportunities.find(
-      (opportunity) => opportunity.id === selectedCall?.opportunityId
+      (opportunity) => opportunity.id === selectedCall.opportunityId
     )
+    if (!selectedOpportunity) return
 
-    if (selectedOpportunity) {
-      setActiveAccountId(selectedOpportunity.accountId)
-      setActiveOpportunityId(selectedOpportunity.id)
-    }
+    setActiveAccountId(selectedOpportunity.accountId)
+    setActiveOpportunityId(selectedOpportunity.id)
+    setPostCallFocusCallId(callId)
 
-    handleNavigate("calls")
+    handleNavigate("post-call")
   }
 
   const handleOpenCreateOpportunity = (accountId = activeAccount.id) => {
@@ -2760,6 +2832,12 @@ function App() {
       }
 
       setPendingDeleteRecord(null)
+      if (
+        (pendingDeleteRecord.type === "call" && pendingDeleteRecord.id === postCallFocusCallId) ||
+        (pendingDeleteRecord.type === "opportunity" && pendingDeleteRecord.id === activeOpportunityId)
+      ) {
+        setPostCallFocusCallId("")
+      }
       if (
         (pendingDeleteRecord.type === "call" && pendingDeleteRecord.id === activeCallIdRef.current) ||
         deletingActiveOpportunity
@@ -4765,7 +4843,9 @@ function App() {
                 opportunityDrafts={opportunityDrafts}
                 playbookFields={workspacePlaybookFields}
                 playbookRows={workspacePlaybooks}
+                postCallFocusCallId={postCallFocusCallId}
                 postCallOutput={activePostCallOutput}
+                postCallTranscript={activePostCallTranscript}
                 savedOpenAiKeyState={savedOpenAiKeyState}
                 sellerResearchProfile={sellerResearchProfile}
                 sellerName={personalAccountProfile.fullName}
@@ -4859,15 +4939,13 @@ function App() {
                 activeView={activeView}
                 calls={workspaceCalls}
                 opportunityDrafts={opportunityDrafts}
-                opportunity={activeOpportunity}
                 opportunities={workspaceOpportunities}
                 savedOpenAiKeyState={savedOpenAiKeyState}
                 sellerResearchProfile={sellerResearchProfile}
                 workspaceId={activeWorkspaceId}
-                onNavigate={handleNavigate}
+                onCallSelect={handleCallSelect}
                 onDeleteCall={handleRequestDeleteCall}
                 onOpenSettings={() => handleNavigate("ai")}
-                onOpportunitySelect={handleOpportunitySelect}
                 onStartRecording={handleStartRecording}
               />
             ) : playbookViews.includes(activeView) ? (
@@ -9759,7 +9837,9 @@ function WorkspaceView({
   opportunityDrafts,
   playbookFields,
   playbookRows,
+  postCallFocusCallId,
   postCallOutput,
+  postCallTranscript,
   savedOpenAiKeyState,
   sellerResearchProfile,
   sellerName,
@@ -9806,7 +9886,9 @@ function WorkspaceView({
   opportunityDrafts: Record<string, OpportunityDraft>
   playbookFields: PlaybookFieldRow[]
   playbookRows: PlaybookRow[]
+  postCallFocusCallId: string
   postCallOutput: PostCallOutputView | null
+  postCallTranscript: Opportunity["transcript"]
   savedOpenAiKeyState: SavedOpenAiKeyState | null
   sellerResearchProfile: SellerResearchProfile
   sellerName: string
@@ -9848,12 +9930,12 @@ function WorkspaceView({
   const postCallReplayCall = getLatestReplayableCallForOpportunity({
     calls,
     opportunityId: opportunity.id,
-    preferredCallId: activeCallId,
+    preferredCallId: activeCallId || postCallFocusCallId,
   })
   const postCallTranscriptCall = getLatestCallForOpportunity({
     calls,
     opportunityId: opportunity.id,
-    preferredCallId: activeCallId,
+    preferredCallId: activeCallId || postCallFocusCallId,
   })
 
   React.useEffect(() => {
@@ -10167,6 +10249,7 @@ function WorkspaceView({
           opportunity={opportunity}
           output={postCallOutput}
           replayCall={postCallReplayCall}
+          transcript={postCallTranscript}
           transcriptCall={postCallTranscriptCall}
           onDeleteCall={onDeleteCall}
           onViewNextCallBrief={() => onNavigate("opportunity-intelligence")}
@@ -12543,6 +12626,7 @@ function PostCallPanel({
   opportunity,
   output,
   replayCall,
+  transcript,
   transcriptCall,
   onDeleteCall,
   onViewNextCallBrief,
@@ -12550,6 +12634,7 @@ function PostCallPanel({
   opportunity: Opportunity
   output: PostCallOutputView | null
   replayCall: CallSummary | null
+  transcript: Opportunity["transcript"]
   transcriptCall: CallSummary | null
   onDeleteCall: (callId: string) => void
   onViewNextCallBrief: () => void
@@ -12559,7 +12644,7 @@ function PostCallPanel({
       .split(/\n+/)
       .map((item) => item.replace(/^[-*]\s*/, "").trim())
       .filter(Boolean) ?? []
-  const hasTranscriptLines = opportunity.transcript.some((line) => line.text.trim())
+  const hasTranscriptLines = transcript.some((line) => line.text.trim())
 
   return (
     <div className={cn("grid gap-4", replayCall && "xl:grid-cols-[minmax(0,1fr)_420px]")}>
@@ -12568,7 +12653,7 @@ function PostCallPanel({
           call={replayCall}
           notes={opportunity.notes}
           onDeleteCall={onDeleteCall}
-          transcript={opportunity.transcript}
+          transcript={transcript}
         />
       ) : null}
       {!replayCall && transcriptCall && hasTranscriptLines ? (
@@ -12583,7 +12668,7 @@ function PostCallPanel({
                 size="sm"
                 variant="outline"
                 className="gap-2"
-                onClick={() => downloadTranscriptFile(transcriptCall, opportunity.transcript)}
+                onClick={() => downloadTranscriptFile(transcriptCall, transcript)}
               >
                 <DownloadIcon />
                 Download transcript
@@ -12797,6 +12882,10 @@ function OpportunitiesView({
     setPage(1)
   }, [query, stageFilter, coverageFilter, sort])
 
+  React.useEffect(() => {
+    if (page > pageCount) setPage(pageCount)
+  }, [page, pageCount])
+
   return (
     <div className="grid gap-4">
       <Card>
@@ -12868,6 +12957,7 @@ function OpportunitiesView({
                 setStageFilter("all")
                 setCoverageFilter("all")
                 setSort("gaps")
+                setPage(1)
               }}
             >
               <FilterIcon />
@@ -13022,15 +13112,13 @@ function CallsView({
   activeView,
   calls,
   opportunityDrafts,
-  opportunity,
   opportunities,
   savedOpenAiKeyState,
   sellerResearchProfile,
   workspaceId,
+  onCallSelect,
   onDeleteCall,
-  onNavigate,
   onOpenSettings,
-  onOpportunitySelect,
   onStartRecording,
 }: {
   accounts: AccountNavItem[]
@@ -13039,15 +13127,13 @@ function CallsView({
   activeView: string
   calls: CallSummary[]
   opportunityDrafts: Record<string, OpportunityDraft>
-  opportunity: Opportunity
   opportunities: Opportunity[]
   savedOpenAiKeyState: SavedOpenAiKeyState | null
   sellerResearchProfile: SellerResearchProfile
   workspaceId: string
+  onCallSelect: (callId: string) => void
   onDeleteCall: (callId: string) => void
-  onNavigate: (view: string) => void
   onOpenSettings: () => void
-  onOpportunitySelect: (id: string) => void
   onStartRecording: StartRecordingHandler
 }) {
   const callsPageSize = 10
@@ -13181,7 +13267,18 @@ function CallsView({
             return (
             <div
               key={call.id}
-              className="grid gap-3 rounded-lg bg-muted/30 p-4 md:grid-cols-[1fr_120px_220px] md:items-center"
+              tabIndex={0}
+              role="button"
+              aria-label={`Open ${call.title}`}
+              className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 md:grid-cols-[1fr_120px_220px] md:items-center"
+              onClick={() => onCallSelect(call.id)}
+              onKeyDown={(event) => {
+                if (event.currentTarget !== event.target) return
+                if (event.key !== "Enter" && event.key !== " ") return
+
+                event.preventDefault()
+                onCallSelect(call.id)
+              }}
             >
               <div className="flex items-start gap-3">
                 <div className="flex size-10 items-center justify-center rounded-lg bg-muted">
@@ -13193,18 +13290,19 @@ function CallsView({
                 </div>
               </div>
               <span className={cn("text-sm font-medium", getCallStatusTextClassName(displayStatus))}>{displayStatus}</span>
-              <div className="flex gap-2 md:justify-end">
+              <div className="flex gap-2 md:justify-end" onClick={(event) => event.stopPropagation()}>
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!canReplayCall(call)}
-                  onClick={() => onNavigate("post-call")}
+                  aria-label={`Open ${call.title}`}
+                  onClick={() => onCallSelect(call.id)}
                 >
-                  Replay
+                  Open
                 </Button>
                 <Button
                   size="sm"
                   variant="destructive"
+                  aria-label={`Delete ${call.title}`}
                   onClick={() => onDeleteCall(call.id)}
                 >
                   Delete
