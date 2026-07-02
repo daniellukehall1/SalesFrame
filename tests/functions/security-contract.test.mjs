@@ -130,6 +130,11 @@ test("shared HTTP errors use structured codes and expected statuses", async () =
   assert.match(http, /duplicate key value violates/)
   assert.match(http, /parameter is not supported/)
   assert.match(http, /SalesFrame could not finish the AI step\. Try again in a moment\./)
+  assert.match(http, /getPublicAiProviderMessage/)
+  assert.match(http, /workspace key needs billing or quota attention/)
+  assert.match(http, /OpenAI is receiving too many requests at once/)
+  assert.match(http, /OpenAI could not use the selected model/)
+  assert.match(http, /OpenAI is taking longer than expected/)
   assert.match(http, /isMissingServerConfiguration/)
   assert.match(browserSupabaseClient, /SalesFrame could not connect to the workspace service\. Contact support if this keeps happening\./)
   assert.doesNotMatch(browserSupabaseClient, /Missing Supabase environment variables/)
@@ -160,6 +165,36 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
   assert.equal(providerResponse.status, 502)
   assert.equal(providerPayload.error.code, "openai_request_failed")
   assert.equal(providerPayload.error.message, "SalesFrame could not finish the AI step. Try again in a moment.")
+
+  const quotaResponse = errorResponse(
+    upstreamFailure("insufficient_quota: You exceeded your current quota.", "openai_quota_exceeded")
+  )
+  const quotaPayload = await quotaResponse.json()
+
+  assert.equal(quotaResponse.status, 502)
+  assert.equal(quotaPayload.error.code, "openai_quota_exceeded")
+  assert.equal(
+    quotaPayload.error.message,
+    "OpenAI could not run this step because the workspace key needs billing or quota attention. Check the key in Settings, then try again."
+  )
+
+  const rateLimitResponse = errorResponse(
+    upstreamFailure("Rate limit reached for requests.", "openai_rate_limit")
+  )
+  const rateLimitPayload = await rateLimitResponse.json()
+
+  assert.equal(rateLimitResponse.status, 502)
+  assert.equal(rateLimitPayload.error.code, "openai_rate_limit")
+  assert.equal(rateLimitPayload.error.message, "OpenAI is receiving too many requests at once. Wait a moment, then try again.")
+
+  const modelResponse = errorResponse(
+    upstreamFailure("The model `gpt-example` does not exist.", "openai_model_error")
+  )
+  const modelPayload = await modelResponse.json()
+
+  assert.equal(modelResponse.status, 502)
+  assert.equal(modelPayload.error.code, "openai_model_error")
+  assert.equal(modelPayload.error.message, "OpenAI could not use the selected model. Contact support if this keeps happening.")
 
   const validationResponse = errorResponse(badRequest("workspaceId is required.", "workspace_id_required"))
   const validationPayload = await validationResponse.json()

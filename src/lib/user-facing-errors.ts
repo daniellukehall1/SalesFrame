@@ -57,6 +57,22 @@ export function getUserFacingErrorMessage(error: unknown, fallback: string) {
     return "OpenAI could not use that key. Check the key in Settings, then try again."
   }
 
+  if (/insufficient_quota|quota|billing|hard limit|usage limit|credits/i.test(message)) {
+    return "OpenAI could not run this step because the workspace key needs billing or quota attention. Check the key in Settings, then try again."
+  }
+
+  if (/rate.?limit|too many requests|\b429\b/i.test(message)) {
+    return "OpenAI is receiving too many requests at once. Wait a moment, then try again."
+  }
+
+  if (/model_not_found|model .* does not exist|unsupported model|model .* unavailable/i.test(message)) {
+    return "OpenAI could not use the selected model. Contact support if this keeps happening."
+  }
+
+  if (/timeout|timed out|service unavailable|temporarily unavailable|overloaded/i.test(message)) {
+    return "OpenAI is taking longer than expected. Try again in a moment."
+  }
+
   if (technicalErrorPatterns.some((pattern) => pattern.test(message))) {
     return fallback
   }
