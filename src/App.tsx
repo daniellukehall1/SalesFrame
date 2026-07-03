@@ -2606,9 +2606,7 @@ function App() {
       seller_company: sellerResearchProfile.sellerCompany,
       seller_domain: sellerResearchProfile.sellerDomain,
       product_context: sellerResearchProfile.productContext,
-    }).catch((error: unknown) => {
-      setWorkspaceErrorMessage(getUserFacingErrorMessage(error, "Seller research settings could not be saved."))
-    })
+    }).catch(() => undefined)
   }, [activeWorkspaceId, authSession, sellerResearchProfile])
 
   React.useEffect(() => {
@@ -2728,12 +2726,7 @@ function App() {
       question: signal.question,
       reason: signal.reason,
       target: signal.target,
-    }).catch((caughtError: unknown) => {
-      setNotes((items) => [
-        `Coach feedback could not be saved: ${getUserFacingErrorMessage(caughtError, "SalesFrame could not save that coach signal yet.")}`,
-        ...items,
-      ].slice(0, 6))
-    })
+    }).catch(() => undefined)
   }, [])
 
   const createLiveCoachFeedbackSignal = React.useCallback((
@@ -2978,7 +2971,6 @@ function App() {
 
   const handleRecordingChange = async (recording: boolean) => {
     if (recording) {
-      setWorkspaceErrorMessage("Use Start call so the call is attached to an account, opportunity, and playbooks.")
       return
     }
 
@@ -3028,7 +3020,7 @@ function App() {
       activeCallIdRef.current = ""
       setActiveCallStartedAt("")
       handleNavigate("post-call")
-      setWorkspaceErrorMessage(getUserFacingErrorMessage(caughtError, "Call stopped locally, but final save needs attention."))
+      setPostCallError(getUserFacingErrorMessage(caughtError, "Call stopped locally, but final save needs attention."))
     } finally {
       setIsStoppingCall(false)
     }
@@ -3114,9 +3106,7 @@ function App() {
         return nextItems
       })
     } catch (caughtError: unknown) {
-      setWorkspaceErrorMessage(
-        getUserFacingErrorMessage(caughtError, "Speaker label could not be saved.")
-      )
+      setPostCallError(getUserFacingErrorMessage(caughtError, "Speaker label could not be saved."))
     }
   }
 
@@ -3130,7 +3120,7 @@ function App() {
     }
 
     const nextDisplayName = (isMe ? personalAccountProfile.fullName || "Me" : displayName).trim() || speakerLabel
-    const applySpeakerIdentity = (identity: CallSpeakerIdentity, speakerId?: string, shouldAddNote = true) => {
+    const applySpeakerIdentity = (identity: CallSpeakerIdentity, speakerId?: string) => {
       const normalizedIdentity: CallSpeakerIdentity = {
         ...identity,
         displayName: identity.displayName.trim() || identity.label,
@@ -3187,12 +3177,6 @@ function App() {
 
         return nextItems
       })
-      if (shouldAddNote) {
-        setNotes((items) => [
-          `${normalizedIdentity.label} is labelled as ${normalizedIdentity.displayName} for this call.`,
-          ...items,
-        ].slice(0, 6))
-      }
     }
 
     const nextIdentity: CallSpeakerIdentity = {
@@ -3224,7 +3208,7 @@ function App() {
         label: speakerLabel,
       }
 
-      applySpeakerIdentity(savedIdentity, savedSpeaker.id, false)
+      applySpeakerIdentity(savedIdentity, savedSpeaker.id)
 
       return {
         message: "Speaker name saved.",
@@ -3232,10 +3216,9 @@ function App() {
       }
     } catch (caughtError: unknown) {
       const message = getUserFacingErrorMessage(caughtError, "Speaker identity could not be saved.")
-      setNotes((items) => [`Speaker name was applied locally, but could not be saved yet: ${message}`, ...items].slice(0, 6))
 
       return {
-        message: `Speaker name applied locally. Save will retry on the next call refresh: ${message}`,
+        message: `Speaker name applied. SalesFrame will save it when the connection settles: ${message}`,
         persistence: "local",
       }
     }
@@ -3622,15 +3605,7 @@ function App() {
       speakerIdentitiesRef.current = {}
       transcriptRef.current = []
       setTranscript([])
-      setNotes(
-        [
-          payload.customerResearch.enabled ? "Customer research is running in the background." : "",
-          initialGuidance.uiMode === "listen"
-            ? "OpenAI is ready. The first seller move is to listen before asking."
-            : "OpenAI is ready with the first live recommendation.",
-          `Call started for ${accountName} / ${opportunityName}.`,
-        ].filter(Boolean)
-      )
+      setNotes([])
       setElapsed(0)
 
       if (payload.customerResearch.enabled) {
@@ -3649,14 +3624,8 @@ function App() {
             if (!research) {
               throw new Error("Customer research could not be prepared. Try again, or continue without research.")
             }
-
-            setNotes((items) => [`Customer research: ${research.researchSummary}`, ...items].slice(0, 6))
           })
-          .catch((caughtError: unknown) => {
-            const message = getUserFacingErrorMessage(caughtError, "Customer research could not be completed.")
-            setWorkspaceErrorMessage(message)
-            setNotes((items) => [`Customer research needs attention: ${message}`, ...items].slice(0, 6))
-          })
+          .catch(() => undefined)
       }
 
       updatePreparationStep("audio", "Ready for the microphone and meeting audio step.")
@@ -3666,7 +3635,6 @@ function App() {
         callId: call.id,
         startedAt,
         workspaceId: activeWorkspaceId,
-        onNote: (note) => setNotes((items) => [note, ...items].slice(0, 6)),
         onDiarization: (result) => {
           void handleRollingDiarization(result)
         },
@@ -3793,8 +3761,6 @@ function App() {
       setActiveCallId("")
       activeCallIdRef.current = ""
       setActiveCallStartedAt("")
-      setWorkspaceErrorMessage(message)
-      setNotes((items) => [`Call capture needs attention: ${message}`, ...items].slice(0, 6))
 
       return {
         message,
@@ -3895,11 +3861,7 @@ function App() {
               throw new Error("Customer research could not be prepared. Try again from the account page.")
             }
           })
-          .catch((caughtError: unknown) => {
-            const message = getUserFacingErrorMessage(caughtError, "Customer research could not be completed.")
-
-            setNotes((items) => [`Customer research needs attention: ${message}`, ...items].slice(0, 6))
-          })
+          .catch(() => undefined)
       }
 
       setActiveAccountId(account.id)
@@ -3937,7 +3899,8 @@ function App() {
           } catch (caughtError: unknown) {
             const message = getUserFacingErrorMessage(caughtError, "Account enrichment could not be completed.")
 
-            setNotes((items) => [`Account enrichment needs attention: ${message}`, ...items].slice(0, 6))
+            setAccountEnrichmentRunStatus("error")
+            setAccountEnrichmentRunMessage(message)
           }
         })()
       }
@@ -4190,7 +4153,6 @@ function App() {
 
       setAccountRecordSaveStatus("error")
       setAccountRecordSaveMessage(message)
-      setWorkspaceErrorMessage(message)
       return false
     }
   }
@@ -4351,21 +4313,21 @@ function App() {
           opportunity.id === updatedOpportunity.id
             ? {
                 ...opportunity,
-	                amount: updatedOpportunity.amount ?? opportunity.amount,
-	                closeDate: closeDateValue.display,
-	                coverage: updatedOpportunity.coverage_score ?? opportunity.coverage,
-	                missing: updatedOpportunity.missing_count ?? opportunity.missing,
-	                name: updatedOpportunity.name,
-	                nextQuestion: updatedOpportunity.next_question ?? opportunity.nextQuestion,
+                amount: updatedOpportunity.amount ?? opportunity.amount,
+                closeDate: closeDateValue.display,
+                coverage: updatedOpportunity.coverage_score ?? opportunity.coverage,
+                missing: updatedOpportunity.missing_count ?? opportunity.missing,
+                name: updatedOpportunity.name,
+                nextQuestion: updatedOpportunity.next_question ?? opportunity.nextQuestion,
                 notes: [
                   updatedOpportunity.pain ? `Known pain: ${updatedOpportunity.pain}` : "",
                   updatedOpportunity.next_step ? `Next step: ${updatedOpportunity.next_step}` : "",
                   updatedOpportunity.manual_notes ?? "",
                 ].filter(Boolean),
-	                questionReason: updatedOpportunity.question_reason ?? opportunity.questionReason,
-	                stage: updatedOpportunity.stage,
-	                weak: updatedOpportunity.weak_count ?? opportunity.weak,
-	              }
+                questionReason: updatedOpportunity.question_reason ?? opportunity.questionReason,
+                stage: updatedOpportunity.stage,
+                weak: updatedOpportunity.weak_count ?? opportunity.weak,
+              }
             : opportunity
         )
       )
@@ -4403,13 +4365,12 @@ function App() {
       setCallPlaybooks(selectedPlaybooks)
       setWorkspaceErrorMessage("")
       setOpportunityRecordSaveStatus("saved")
-      setOpportunityRecordSaveMessage("Opportunity saved. AI methodology scoring refreshes from the next AI-processed call.")
+      setOpportunityRecordSaveMessage("Opportunity saved.")
     } catch (caughtError: unknown) {
       const message = getUserFacingErrorMessage(caughtError, "Opportunity fields could not be saved.")
 
       setOpportunityRecordSaveStatus("error")
       setOpportunityRecordSaveMessage(message)
-      setWorkspaceErrorMessage(message)
     }
   }
 
@@ -10418,7 +10379,7 @@ function WorkspaceView({
               setAiLiveGuidance(null)
               liveCoachHasGuidanceRef.current = false
               setLiveCoachStatus("error")
-              setLiveCoachError("AI coach returned an incomplete suggestion. Check OpenAI settings before relying on live coaching.")
+              setLiveCoachError("SalesFrame could not shape the next question yet. Check Settings if this keeps happening.")
               return
             }
 
@@ -12616,7 +12577,7 @@ function CallReplayContent({
             </div>
           ) : (
             <div className="rounded-lg border bg-background p-3 text-sm text-muted-foreground">
-              Call notes will appear here after AI notes or field evidence are saved.
+              Notes will appear here as SalesFrame captures useful moments from the conversation.
             </div>
           )}
         </div>

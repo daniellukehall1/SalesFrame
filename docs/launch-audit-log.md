@@ -4,6 +4,28 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 
 ## 2026-07-03
 
+### System health messages polluted live notes and workspace errors
+
+- Severity: Medium
+- Description: Live-call notes and the global workspace error channel could receive technical status text such as background research failures, account enrichment failures, speaker attribution warnings, and capture issues.
+- Root cause: Background workflows reused user-facing notes and workspace-level error state for local or non-blocking failures.
+- Recommended improvement: Keep seller notes focused on conversation substance and reserve workspace-level errors for true workspace data/access failures.
+- Fix applied: Removed the capture hook's `onNote` system-message path, stopped startup/research/enrichment/capture/speaker/coach failures from being inserted into notes, and moved inline action failures back to their local status surfaces.
+- Before impact: The Notes tab could feel like an error log during the highest-pressure workflow, and stale background failures could make the workspace feel more broken than it was.
+- After impact: Live notes stay calm and conversation-focused; technical issues remain visible through local capture, post-call, enrichment, or inline form status where relevant.
+- Verification: Added production-contract assertions that system health messages are not injected into notes, the capture hook no longer exposes `onNote`, and record mutation handlers do not push inline failures into the workspace error channel.
+
+### Status messages exposed implementation language
+
+- Severity: Low
+- Description: A few production-facing status messages still referenced internals such as AI methodology scoring, AI-processed calls, incomplete AI suggestions, and retrying on a call refresh.
+- Root cause: Several status strings were written around system behavior rather than what the seller needed to know in the moment.
+- Recommended improvement: Keep success and recovery messages short, calm, and workflow-oriented.
+- Fix applied: Reworded opportunity save, speaker naming fallback, live coach error, and post-call notes empty copy into seller-facing language.
+- Before impact: Small moments of the app could feel like a debug surface rather than a premium SaaS product.
+- After impact: Status copy now says what happened and what the seller can expect, without exposing backend mechanics.
+- Verification: Added production-contract assertions rejecting the old implementation-style phrases and requiring the calmer notes empty state.
+
 ### Start Call final step used a generic research label
 
 - Severity: Low

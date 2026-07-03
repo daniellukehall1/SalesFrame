@@ -82,7 +82,6 @@ type StartCallCaptureConfig = {
   onDiarization?: (result: CallCaptureDiarizationResult) => void
   startedAt: string
   workspaceId: string
-  onNote?: (note: string) => void
   onTranscript?: (line: CallCaptureTranscriptLine) => void
   onTranscriptUpdate?: (line: CallCaptureTranscriptLine) => void
 }
@@ -213,10 +212,6 @@ export function useCallCapture() {
           audio_source_summary: sources.map(summarizeAudioSource),
         })
         throwIfCallStartCancelled(config.abortSignal)
-
-        sources.forEach((source) => {
-          if (source.note) config.onNote?.(source.note)
-        })
 
         const recordingStream = createRecordingStream(sources)
         const diarizationSourceHint = getDiarizationSourceHint(sources, config.audioCaptureMode)
@@ -411,11 +406,7 @@ export function useCallCapture() {
               recentTranscript: recentTranscriptRef.current,
               segmentId: turn.segmentId,
               source,
-            }).catch((caughtError) => {
-              config.onNote?.(
-                `Speaker attribution needs review: ${getUserFacingErrorMessage(caughtError, "SalesFrame could not refine this speaker label yet.")}`
-              )
-            })
+            }).catch(() => undefined)
           }
         }
 
@@ -449,10 +440,11 @@ export function useCallCapture() {
             throwIfCallStartCancelled(config.abortSignal)
           } catch (caughtError: unknown) {
             if (connections.length === 0 && sources.length === 1) throw caughtError
-            config.onNote?.(
-              `${getAudioSourceLabel(source.kind)} transcription could not connect. ${
-                getUserFacingErrorMessage(caughtError, "Continuing with available audio.")
-              }`
+            setError(
+              `${getAudioSourceLabel(source.kind)} transcription could not connect. ${getUserFacingErrorMessage(
+                caughtError,
+                "SalesFrame is continuing with the audio it can hear."
+              )}`
             )
           }
         }
@@ -766,11 +758,9 @@ async function sendRollingDiarizationChunk({
     })
 
     config.onDiarization?.(result)
-  } catch (caughtError: unknown) {
+  } catch {
     if (force) {
-      config.onNote?.(
-        `Speaker diarization needs attention: ${getUserFacingErrorMessage(caughtError, "OpenAI could not process the rolling audio window.")}`
-      )
+      // Live notes should stay focused on the conversation; post-call cleanup can retry without adding system text.
     }
   } finally {
     rollingInFlightRef.current = false
