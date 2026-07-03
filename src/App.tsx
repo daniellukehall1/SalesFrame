@@ -6497,7 +6497,7 @@ function StartRecordingDialog({
     { label: "Account", icon: Building2Icon },
     { label: "Opportunity", icon: TargetIcon },
     { label: "Call", icon: PhoneCallIcon },
-    { label: "Research", icon: SearchIcon },
+    { label: "Seller Research", icon: SearchIcon },
   ]
   const currentRecordingStepLabel = recordingSteps[step - 1]?.label ?? recordingSteps[0].label
   const startPreparationSteps: StartCallPreparationStep[] = [
@@ -14336,7 +14336,7 @@ function PlaybooksView({
         <Card>
           <CardHeader>
             <CardTitle>Required fields</CardTitle>
-            <CardDescription>Evidence the seller needs to capture before the deal can progress</CardDescription>
+            <CardDescription>What SalesFrame will listen for as the deal moves forward</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             {selectedPlaybook.fields.map(([field, detail]) => (
@@ -15502,15 +15502,21 @@ function WorkspaceStateView({
               <ContextTile icon={state === "empty" ? <PlusIcon /> : <ShieldCheckIcon />} label="Best next move" value={config.primaryLabel} />
             </div>
           )}
-          <div className="flex flex-wrap gap-2">
-            <Button className="gap-2" onClick={config.primaryAction}>
-              {config.icon}
-              {config.primaryLabel}
-            </Button>
-            <Button variant="outline" onClick={config.secondaryAction}>
-              {config.secondaryLabel}
-            </Button>
-          </div>
+          {state === "loading" ? (
+            <p className="text-sm text-muted-foreground" role="status">
+              A few moving pieces are coming together. SalesFrame will bring you in when the workspace is ready.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button className="gap-2" onClick={config.primaryAction}>
+                {config.icon}
+                {config.primaryLabel}
+              </Button>
+              <Button variant="outline" onClick={config.secondaryAction}>
+                {config.secondaryLabel}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

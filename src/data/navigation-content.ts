@@ -59,7 +59,7 @@ export const sectionCards: Record<string, { kicker: string; title: string; body:
     {
       kicker: "Custom",
       title: "Configurable frameworks",
-      body: "Custom frameworks can model internal qualification standards without hardcoding team-specific language.",
+      body: "Custom frameworks can model your workspace's qualification standards without hardcoding team-specific language.",
     },
   ],
   settings: [

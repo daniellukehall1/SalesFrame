@@ -67,7 +67,7 @@ export const callPlaybookDescriptions: Record<CallPlaybook, string> = {
   "Value Selling": "Business issue, impact, value proof, required capabilities, and mutual value plan.",
   "Strategic Selling (Miller Heiman)": "Buying influences, win-results, response modes, red flags, and next best action.",
   "SPICED (Winning by Design)": "Situation, pain, impact, critical event, and decision for recurring revenue sales.",
-  "Custom framework": "Configurable internal fields and exit criteria.",
+  "Custom framework": "Workspace-specific fields, exit criteria, and coaching standards.",
 }
 
 export const callPlaybookAliases: Record<string, CallPlaybook> = {
