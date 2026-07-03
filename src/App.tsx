@@ -10558,7 +10558,7 @@ function WorkspaceView({
             onNavigate={onNavigate}
             onUseManualQuestion={onUseManualQuestion}
           />
-          <LiveCoachDetailTabs coachStatus={liveCoachStatus} guidance={liveGuidance} />
+          <LiveCoachDetailTabs guidance={liveGuidance} />
         </div>
         <LiveRail
           activeCallId={activeCallId}
@@ -11000,12 +11000,12 @@ function NextQuestionCard({
 }
 
 function LiveCoachDetailTabs({
-  coachStatus,
   guidance,
 }: {
-  coachStatus: LiveCoachStatus
   guidance: LiveGuidance | null
 }) {
+  if (!guidance) return null
+
   return (
     <Tabs defaultValue="gaps" className="grid gap-3">
       <TabsList className="grid w-full grid-cols-3 md:w-fit">
@@ -11014,35 +11014,31 @@ function LiveCoachDetailTabs({
         <TabsTrigger value="read">Coach read</TabsTrigger>
       </TabsList>
       <TabsContent value="gaps" className="m-0">
-        <PriorityGapsCard coachStatus={coachStatus} guidance={guidance} />
+        <PriorityGapsCard guidance={guidance} />
       </TabsContent>
       <TabsContent value="parked" className="m-0">
-        <ParkedIntentsCard coachStatus={coachStatus} guidance={guidance} />
+        <ParkedIntentsCard guidance={guidance} />
       </TabsContent>
       <TabsContent value="read" className="m-0">
-        <ConversationMapCard coachStatus={coachStatus} guidance={guidance} />
+        <ConversationMapCard guidance={guidance} />
       </TabsContent>
     </Tabs>
   )
 }
 
 function PriorityGapsCard({
-  coachStatus,
   guidance,
 }: {
-  coachStatus: LiveCoachStatus
-  guidance: LiveGuidance | null
+  guidance: LiveGuidance
 }) {
-  const gaps = guidance?.gaps ?? []
+  const gaps = guidance.gaps ?? []
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Intent clusters to cover</CardTitle>
         <CardDescription>
-          {guidance
-            ? "Shared playbook intents are ranked by timing, buyer mood, evidence strength, and conversational fit"
-            : "AI guidance must load before methodology intent clusters are ranked"}
+          Shared playbook intents are ranked by timing, buyer mood, evidence strength, and conversational fit
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
@@ -11067,13 +11063,7 @@ function PriorityGapsCard({
             </div>
           </div>
         ))}
-        {!guidance ? (
-          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-            {coachStatus === "error"
-              ? "SalesFrame needs the AI connection back before it can rank the next seller move."
-              : "SalesFrame is reading the selected playbooks and opportunity context."}
-          </div>
-        ) : gaps.length === 0 ? (
+        {gaps.length === 0 ? (
           <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
             Required live-call intent clusters have been asked or answered. The coach will listen for risk, contradiction, or a natural next step.
           </div>
@@ -11084,13 +11074,11 @@ function PriorityGapsCard({
 }
 
 function ParkedIntentsCard({
-  coachStatus,
   guidance,
 }: {
-  coachStatus: LiveCoachStatus
-  guidance: LiveGuidance | null
+  guidance: LiveGuidance
 }) {
-  const parkedIntents = guidance?.parkedIntents ?? []
+  const parkedIntents = guidance.parkedIntents ?? []
 
   return (
     <Card>
@@ -11125,13 +11113,7 @@ function ParkedIntentsCard({
             </p>
           </div>
         ))}
-        {!guidance ? (
-          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-            {coachStatus === "error"
-              ? "SalesFrame needs the AI connection back before it can keep parking questions."
-              : "SalesFrame will save important questions here when the conversation moves on."}
-          </div>
-        ) : parkedIntents.length === 0 ? (
+        {parkedIntents.length === 0 ? (
           <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
             Nothing is parked right now. The coach is following the current conversation thread.
           </div>
@@ -11142,14 +11124,12 @@ function ParkedIntentsCard({
 }
 
 function ConversationMapCard({
-  coachStatus,
   guidance,
 }: {
-  coachStatus: LiveCoachStatus
-  guidance: LiveGuidance | null
+  guidance: LiveGuidance
 }) {
-  const flow = guidance?.flow ?? []
-  const candidateScores = guidance?.candidateScores ?? []
+  const flow = guidance.flow ?? []
+  const candidateScores = guidance.candidateScores ?? []
 
   return (
     <Card>
@@ -11187,13 +11167,6 @@ function ConversationMapCard({
             </div>
           </div>
         ))}
-        {!guidance ? (
-          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-            {coachStatus === "error"
-              ? "SalesFrame needs the AI connection back before it can read the conversation flow."
-              : "SalesFrame is getting ready to read the account, opportunity, playbooks, and call context."}
-          </div>
-        ) : null}
       </CardContent>
     </Card>
   )
@@ -11915,6 +11888,8 @@ function LiveRail({
     captureStatus: displayCaptureStatus,
     guidance,
   })
+  const shouldShowSignalHealth =
+    isCaptureActive || ["permission-denied", "error", "upload-failed"].includes(displayCaptureStatus)
   const canStartFromRail =
     Boolean(startCallAction) &&
     !activeCallId &&
@@ -12007,14 +11982,7 @@ function LiveRail({
               Delete call
             </Button>
           ) : null}
-          <div className="grid gap-2">
-            {captureIndicators.map(([label, value]) => (
-              <div key={label} className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-                <span className="text-muted-foreground">{label}</span>
-                <span className="font-medium">{value}</span>
-              </div>
-            ))}
-          </div>
+          {shouldShowSignalHealth ? <CaptureSignalStack indicators={captureIndicators} /> : null}
         </CardContent>
       </Card>
       <Card className="order-1">
@@ -12036,9 +12004,10 @@ function LiveRail({
                 </div>
               ))}
               {visibleNotes.length === 0 ? (
-                <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  {hasSearch ? "No notes match this search." : "Notes will land here as the call gets going."}
-                </div>
+                <LiveCaptureEmptyState
+                  icon={<SquarePenIcon className="size-4 text-muted-foreground" />}
+                  message={hasSearch ? "No notes match this search." : "Notes will land here as the call gets going."}
+                />
               ) : null}
             </TabsContent>
             <TabsContent value="evidence" className="m-0 grid gap-2">
@@ -12052,10 +12021,10 @@ function LiveRail({
                 </div>
               ))}
               {visibleEvidence.length === 0 ? (
-                <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
-                  <FileTextIcon className="size-4 text-muted-foreground" />
-                  {hasSearch ? "No evidence matches this search" : "Evidence will appear as the conversation answers playbook fields."}
-                </div>
+                <LiveCaptureEmptyState
+                  icon={<FileTextIcon className="size-4 text-muted-foreground" />}
+                  message={hasSearch ? "No evidence matches this search" : "Evidence will appear as the conversation answers playbook fields."}
+                />
               ) : null}
             </TabsContent>
             <TabsContent value="transcript" className="m-0 max-h-[390px] overflow-y-auto pr-1">
@@ -12105,14 +12074,85 @@ function LiveRail({
                 })}
               </MessageGroup>
               {visibleTranscript.length === 0 ? (
-                <div className="mt-3 rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-                  {hasSearch ? "No transcript lines match this search." : "The transcript will appear here as people speak."}
-                </div>
+                <LiveCaptureEmptyState
+                  className="mt-3"
+                  icon={<AudioLinesIcon className="size-4 text-muted-foreground" />}
+                  message={hasSearch ? "No transcript lines match this search." : "The transcript will appear here as people speak."}
+                />
               ) : null}
             </TabsContent>
           </Tabs>
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+function LiveCaptureEmptyState({
+  className,
+  icon,
+  message,
+}: {
+  className?: string
+  icon: React.ReactNode
+  message: string
+}) {
+  return (
+    <div className={cn("flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground", className)}>
+      {icon}
+      <span>{message}</span>
+    </div>
+  )
+}
+
+type CaptureSignalTone = "live" | "building" | "warning" | "error" | "muted"
+
+type CaptureSignalIndicator = {
+  label: string
+  tone: CaptureSignalTone
+  value: string
+}
+
+function CaptureSignalStack({
+  indicators,
+}: {
+  indicators: CaptureSignalIndicator[]
+}) {
+  return (
+    <div className="grid gap-1.5" aria-live="polite">
+      {indicators.map((indicator) => (
+        <div
+          key={indicator.label}
+          className="flex items-center justify-between gap-3 rounded-lg bg-muted/25 px-3 py-2 text-sm"
+        >
+          <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+            <span
+              aria-hidden="true"
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                indicator.tone === "live" && "bg-emerald-500 shadow-[0_0_0_4px_rgb(16_185_129_/_0.12)]",
+                indicator.tone === "building" && "animate-pulse bg-sky-500 shadow-[0_0_0_4px_rgb(14_165_233_/_0.12)]",
+                indicator.tone === "warning" && "bg-amber-500 shadow-[0_0_0_4px_rgb(245_158_11_/_0.12)]",
+                indicator.tone === "error" && "bg-destructive shadow-[0_0_0_4px_rgb(239_68_68_/_0.12)]",
+                indicator.tone === "muted" && "bg-muted-foreground/40"
+              )}
+            />
+            <span className="truncate">{indicator.label}</span>
+          </span>
+          <span
+            className={cn(
+              "shrink-0 font-medium",
+              indicator.tone === "live" && "text-emerald-700 dark:text-emerald-300",
+              indicator.tone === "building" && "text-sky-700 dark:text-sky-300",
+              indicator.tone === "warning" && "text-amber-700 dark:text-amber-300",
+              indicator.tone === "error" && "text-destructive",
+              indicator.tone === "muted" && "text-muted-foreground"
+            )}
+          >
+            {indicator.value}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -12595,23 +12635,37 @@ function getAudioHealthIndicators({
   captureStatus: CallCaptureStatus
   guidance: LiveGuidance | null
 }) {
-  const customerAudioValue = audioPreflight
+  const isStarting = captureStatus === "requesting-permission" || captureStatus === "connecting"
+  const isLive = captureStatus === "recording" || captureStatus === "paused"
+  const needsAttention = ["permission-denied", "error", "upload-failed"].includes(captureStatus)
+  const sellerMic: CaptureSignalIndicator =
+    capturePermissionState === "denied" || captureStatus === "permission-denied"
+      ? { label: "Seller mic", tone: "error", value: "Blocked" }
+      : audioPreflight?.sellerMicReady
+        ? { label: "Seller mic", tone: isLive ? "live" : "building", value: isLive ? "Listening" : "Connected" }
+        : isStarting
+          ? { label: "Seller mic", tone: "building", value: "Checking" }
+          : { label: "Seller mic", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
+  const customerAudio: CaptureSignalIndicator = audioPreflight
     ? audioPreflight.requiredCustomerAudio
       ? audioPreflight.customerAudioReady
-        ? "Detected"
-        : "Not detected"
+        ? { label: "Customer audio", tone: isLive ? "live" : "building", value: isLive ? "Listening" : "Connected" }
+        : { label: "Customer audio", tone: needsAttention ? "error" : "warning", value: "Not detected" }
       : audioPreflight.mixedRoomReady
-        ? "Room mic"
-        : "Not required"
-    : captureStatus === "requesting-permission" || captureStatus === "connecting"
-      ? "Checking"
-      : "Not checked"
+        ? { label: "Customer audio", tone: isLive ? "live" : "building", value: isLive ? "Room mic" : "Connected" }
+        : { label: "Customer audio", tone: "muted", value: "Mic only" }
+    : isStarting
+      ? { label: "Customer audio", tone: "building", value: "Checking" }
+      : { label: "Customer audio", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
+  const aiGuidance: CaptureSignalIndicator = guidance
+    ? { label: "AI guidance", tone: "live", value: isLive ? "Reading flow" : "Ready" }
+    : isLive
+      ? { label: "AI guidance", tone: "building", value: "Building" }
+      : isStarting
+        ? { label: "AI guidance", tone: "building", value: "Preflight" }
+        : { label: "AI guidance", tone: needsAttention ? "warning" : "muted", value: "Preflight" }
 
-  return [
-    ["Seller mic", audioPreflight?.sellerMicReady ? "Ready" : capturePermissionState === "denied" ? "Blocked" : "Checking"],
-    ["Customer audio", customerAudioValue],
-    ["AI guidance", guidance ? "Ready" : captureStatus === "recording" || captureStatus === "paused" ? "Waiting" : "Preflight"],
-  ] as const
+  return [sellerMic, customerAudio, aiGuidance]
 }
 
 function getCaptureStatusLabel(status: CallCaptureStatus) {

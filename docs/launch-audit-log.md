@@ -102,3 +102,36 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 - Before impact: Sellers saw actions they could not take, which made the empty call cockpit feel less confident.
 - After impact: The empty live coach state stays focused on readiness; feedback controls appear only when the seller has a recommendation to act on.
 - Verification: Added a production-contract assertion that feedback controls are gated by `displayedQuestion` and are not disabled because no question exists.
+
+### Empty coach detail tabs exposed internal readiness state
+
+- Severity: Low
+- Description: The call cockpit showed `Gaps`, `Parked`, and `Coach read` tabs even before a live-guidance response existed.
+- Root cause: The detailed coach panels had their own empty states, duplicating the main guidance card and exposing internal AI-readiness language too early.
+- Recommended improvement: Keep the live moment focused on one clear readiness message; show deeper analysis only after there is real guidance to inspect.
+- Fix applied: `LiveCoachDetailTabs` now returns nothing until guidance exists, and the child cards no longer carry pre-guidance filler copy.
+- Before impact: The cockpit could feel more like a debugging surface than a calm sales coach before a call began.
+- After impact: Sellers see one focused empty state first; richer coach detail appears only when it has useful content.
+- Verification: Added production-contract assertions that the detail tabs are gated by `guidance` and the old pre-guidance filler copy is absent.
+
+### Live capture empty states drifted across tabs
+
+- Severity: Low
+- Description: The live capture `Evidence` empty state used a polished icon row, while `Notes` missed its icon and `Transcript` used a different block style.
+- Root cause: Each tab owned its own empty-state markup, so small visual decisions drifted apart.
+- Recommended improvement: Use one shared live-capture empty-state pattern for all three tabs.
+- Fix applied: Added `LiveCaptureEmptyState` and wired Notes, Evidence, and Transcript to the same bordered icon row treatment.
+- Before impact: The tabs felt slightly inconsistent despite belonging to the same live capture surface.
+- After impact: Notes, Evidence, and Transcript now feel like one coherent, calm component family.
+- Verification: Added production-contract assertions for the shared component, icon usage, and each tab's empty-state copy.
+
+### Capture readiness showed static technical checks too early
+
+- Severity: Low
+- Description: The capture card always showed `Seller mic`, `Customer audio`, and `AI guidance` rows, even before a call was starting.
+- Root cause: Audio health indicators were rendered as static setup rows rather than a live signal panel tied to capture activity.
+- Recommended improvement: Keep the pre-call state focused on the start action; show signal health only when capture is active or needs attention.
+- Fix applied: Added a live-only `CaptureSignalStack` with calm status dots and dynamic labels like `Listening`, `Connected`, `Building`, and `Not detected`.
+- Before impact: The capture area felt busier and more technical than necessary before a seller had started a call.
+- After impact: The card stays quiet before the call, then becomes a compact living health panel while SalesFrame is listening.
+- Verification: Added production-contract assertions for the live-only signal gate and dynamic signal states.
