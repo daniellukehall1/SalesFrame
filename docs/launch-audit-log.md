@@ -4,6 +4,50 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 
 ## 2026-07-03
 
+### Start Call could reveal the dashboard after successful setup
+
+- Severity: High
+- Description: After completing the Start Call modal, the modal could close back onto the seller dashboard instead of revealing the live call cockpit.
+- Root cause: The active account, opportunity, call refs, and cockpit route were only finalized at the end of the capture startup path, after browser audio setup had already begun.
+- Recommended improvement: Select the active call context and route the app to the live cockpit before waiting on capture startup, so the cockpit is the guaranteed background view when the modal closes.
+- Fix applied: Set active account/opportunity/call refs immediately after the call record and first AI guidance are ready, then move the app to the `workspace` active-call view before `callCapture.startCall`.
+- Before impact: A seller could finish the core setup flow, see the modal close, and land back on the dashboard even though they expected the live cockpit.
+- After impact: Successful call setup reveals the call cockpit consistently, with the correct active call context already available to stop recording, show guidance, and capture transcript.
+- Verification: Updated production-contract assertions so the active refs and cockpit route are set before capture startup begins.
+
+### Start Call modal overflowed on mobile
+
+- Severity: Medium
+- Description: The Start Call modal could let setup content flow horizontally off small mobile viewports.
+- Root cause: The modal used a four-column stepper at every size, several select triggers inherited the shared `w-fit` default, and the scroll body/cards did not consistently opt into `min-w-0`.
+- Recommended improvement: Make the modal mobile-first with a two-column stepper, full-width form controls, and explicit overflow containment.
+- Fix applied: Added mobile padding and min-width guards to the dialog, changed the stepper to two columns below `sm`, made Start Call selects full-width, and tightened the scroll body/card containment.
+- Before impact: Phone users could see controls or modal content slip outside the frame, making the core call-start workflow feel broken.
+- After impact: The Start Call setup flow stays contained, scrollable, and reachable on small screens without changing the desktop layout.
+- Verification: Added production-contract assertions for the mobile stepper, full-width Start Call selects, and overflow-safe modal body.
+
+### Stop-call errors sounded like system maintenance
+
+- Severity: Low
+- Description: Stop-call recovery messages used wording such as transcript finalisation, recording cleanup, and final save needing attention.
+- Root cause: Error copy was written from the implementation path rather than the seller's outcome after ending a call.
+- Recommended improvement: Explain what the user can trust and what SalesFrame is still preparing, without exposing internal processing terms.
+- Fix applied: Reworded stop-call transcript, audio recording, and post-call save messages into plain product language.
+- Before impact: A seller could stop a call and feel like the system had entered a fragile technical state.
+- After impact: The app now says the call ended and clearly names the post-call items that may still be catching up.
+- Verification: Added production-contract assertions rejecting the old finalisation/cleanup wording and requiring the calmer stop-call copy.
+
+### Live capture rail exposed delete during active recording
+
+- Severity: Low
+- Description: The call cockpit's capture rail showed a destructive `Delete call` action while a call was actively requesting permission, connecting, recording, paused, or stopping.
+- Root cause: The rail keyed the delete action only off `activeCallId`, so the action appeared in the live moment instead of staying in review/history surfaces.
+- Recommended improvement: Keep the active-call rail focused on stop/status/audio health, and reserve destructive deletion for non-live contexts where the seller has more attention.
+- Fix applied: Added a `canDeleteFromRail` guard so the call deletion action is hidden while capture is active.
+- Before impact: A seller could see a destructive action beside the live recording control during the highest-pressure part of the workflow.
+- After impact: The live rail stays calmer and safer while deletion remains available from call history, replay, and inactive call contexts.
+- Verification: Added a production-contract assertion that the live rail gates the delete action behind `!isCaptureActive`.
+
 ### System health messages polluted live notes and workspace errors
 
 - Severity: Medium

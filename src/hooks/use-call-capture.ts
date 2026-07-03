@@ -516,7 +516,7 @@ export function useCallCapture() {
         flushRealtimeAudioBuffers(realtimeDataChannelsRef.current)
         await waitForRealtimeFlush()
       } catch (caughtError: unknown) {
-        setError(getUserFacingErrorMessage(caughtError, "Realtime transcript finalisation needs attention."))
+        setError(getUserFacingErrorMessage(caughtError, "SalesFrame may need a moment to finish the last transcript lines."))
       }
 
       if (enableRollingDiarization) {
@@ -531,7 +531,7 @@ export function useCallCapture() {
       }
       blob = await stopRecorder(mediaRecorderRef.current, chunksRef.current)
     } catch (caughtError: unknown) {
-      setError(getUserFacingErrorMessage(caughtError, "Call capture stopped, but final recording cleanup needs attention."))
+      setError(getUserFacingErrorMessage(caughtError, "The call ended, but SalesFrame could not finish preparing the audio recording."))
     } finally {
       cleanup()
       activeConfigRef.current = null

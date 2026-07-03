@@ -3020,7 +3020,7 @@ function App() {
       activeCallIdRef.current = ""
       setActiveCallStartedAt("")
       handleNavigate("post-call")
-      setPostCallError(getUserFacingErrorMessage(caughtError, "Call stopped locally, but final save needs attention."))
+      setPostCallError(getUserFacingErrorMessage(caughtError, "The call ended, but SalesFrame could not finish saving every post-call item."))
     } finally {
       setIsStoppingCall(false)
     }
@@ -3508,10 +3508,14 @@ function App() {
       setActiveAccountId(accountId)
       setActiveOpportunityId(opportunityId)
       setActiveCallId(call.id)
+      activeAccountIdRef.current = accountId
+      activeOpportunityIdRef.current = opportunityId
+      activeCallIdRef.current = call.id
       setActiveCallStartedAt(startedAt)
       setCallType(payload.callType)
       setCallPlaybooks(selectedPlaybooks)
       setPageLoadingView(null)
+      setActiveView("workspace")
       setLiveGuidanceByCallId((items) => ({
         ...items,
         [call.id]: initialGuidance,
@@ -3659,7 +3663,6 @@ function App() {
       })
       throwIfStartCancelled()
       setIsRecording(true)
-      setActiveView("workspace")
 
       return {
         ok: true as const,
@@ -6853,7 +6856,7 @@ function StartRecordingDialog({
         </Button>
       </DialogTrigger>
       <DialogContent
-        className="grid max-h-[calc(100svh-2rem)] overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-2xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        className="grid max-h-[calc(100svh-2rem)] min-w-0 overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:gap-3 max-sm:p-3 max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-2xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -6892,385 +6895,387 @@ function StartRecordingDialog({
           </>
         ) : (
           <>
-        <p className="sr-only" aria-live="polite">
-          Step {step} of {recordingSteps.length}: {currentRecordingStepLabel}
-        </p>
-        <div className="grid grid-cols-4 gap-2" role="list" aria-label="Start call steps">
-          {recordingSteps.map(({ label, icon: Icon }, index) => {
-            const itemStep = (index + 1) as 1 | 2 | 3 | 4
-            const isActive = step === itemStep
-            const isComplete = step > itemStep
+            <p className="sr-only" aria-live="polite">
+              Step {step} of {recordingSteps.length}: {currentRecordingStepLabel}
+            </p>
+            <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4" role="list" aria-label="Start call steps">
+              {recordingSteps.map(({ label, icon: Icon }, index) => {
+                const itemStep = (index + 1) as 1 | 2 | 3 | 4
+                const isActive = step === itemStep
+                const isComplete = step > itemStep
 
-            return (
-              <div
-                key={label}
-                role="listitem"
-                aria-current={isActive ? "step" : undefined}
-                className={cn(
-                  "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
-                  isActive && "border-primary bg-primary/5",
-                  isComplete && "bg-muted/50"
-                )}
-              >
-                <span
-                  className={cn(
-                    "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background",
-                    isActive && "border-primary text-primary"
-                  )}
-                >
-                  {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
-                </span>
-                <span className="truncate font-medium">{label}</span>
-              </div>
-            )
-          })}
-        </div>
-
-        <div className="min-h-0 overflow-y-auto pr-1">
-        {step === 1 ? (
-          <div className="grid gap-4 rounded-lg border p-4">
-            <div className="flex items-center gap-2">
-              <Building2Icon className="size-4 text-muted-foreground" />
-              <p className="text-sm font-medium">Account</p>
-            </div>
-            <div className="grid gap-3">
-              <Label htmlFor="recording-account-mode">How should this call be attached?</Label>
-              <Select value={accountMode} onValueChange={handleAccountModeChange}>
-                <SelectTrigger id="recording-account-mode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="existing">Existing account</SelectItem>
-                  <SelectItem value="new">New account</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {accountMode === "existing" ? (
-                <div className="grid gap-2">
-                  <Label htmlFor="recording-account">Account</Label>
-                  <Select value={accountId} onValueChange={handleAccountChange}>
-                    <SelectTrigger id="recording-account">
-                      <SelectValue placeholder="Select account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {accounts.map((account) => (
-                        <SelectItem key={account.id} value={account.id}>
-                          {account.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="recording-account-name">Account name</Label>
-                    <Input
-                      id="recording-account-name"
-                      value={accountName}
-                      placeholder="e.g. Southern Cross Energy"
-                      onChange={(event) => setAccountName(event.currentTarget.value)}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="recording-account-website">Website or domain</Label>
-                    <Input
-                      id="recording-account-website"
-                      value={accountWebsite}
-                      placeholder="e.g. usemultiplier.com"
-                      onChange={(event) => handleNewAccountWebsiteChange(event.currentTarget.value)}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="recording-account-industry">Industry</Label>
-                    <Input
-                      id="recording-account-industry"
-                      value={accountIndustry}
-                      placeholder="e.g. Energy"
-                      onChange={(event) => setAccountIndustry(event.currentTarget.value)}
-                    />
-                  </div>
-                  <CurrencySelect
-                    id="recording-account-currency"
-                    value={accountCurrency}
-                    onChange={setAccountCurrency}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        {step === 2 ? (
-          <div className="grid gap-4 rounded-lg border p-4">
-            <div className="flex items-center gap-2">
-              <TargetIcon className="size-4 text-muted-foreground" />
-              <p className="text-sm font-medium">Opportunity</p>
-            </div>
-            <div className="grid gap-3">
-              <Label htmlFor="recording-opportunity-mode">What opportunity should receive the recording?</Label>
-              <Select
-                value={accountMode === "new" ? "new" : opportunityMode}
-                onValueChange={(value) => setOpportunityMode(value as "existing" | "new")}
-                disabled={accountMode === "new" || !canUseExistingOpportunity}
-              >
-                <SelectTrigger id="recording-opportunity-mode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="existing">Existing opportunity</SelectItem>
-                  <SelectItem value="new">New opportunity</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {accountMode === "existing" && opportunityMode === "existing" && canUseExistingOpportunity ? (
-                <div className="grid gap-2">
-                  <Label htmlFor="recording-opportunity">Opportunity</Label>
-                  <Select value={opportunityId} onValueChange={setOpportunityId}>
-                    <SelectTrigger id="recording-opportunity">
-                      <SelectValue placeholder="Select opportunity" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {accountOpportunities.map((opportunity) => (
-                        <SelectItem key={opportunity.id} value={opportunity.id}>
-                          {opportunity.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : (
-                <div className="grid gap-2">
-                  <Label htmlFor="recording-opportunity-name">Opportunity name</Label>
-                  <Input
-                    id="recording-opportunity-name"
-                    value={opportunityName}
-                    placeholder="e.g. Field Service Modernisation"
-                    onChange={(event) => setOpportunityName(event.currentTarget.value)}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        {step === 3 ? (
-          <div className="grid gap-4 rounded-lg border p-4">
-            <div className="flex items-center gap-2">
-              <PhoneCallIcon className="size-4 text-muted-foreground" />
-              <p className="text-sm font-medium">Call setup</p>
-            </div>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,240px)]">
-              <div className="grid min-w-0 gap-3 rounded-lg bg-muted/40 p-3">
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Account</p>
-                  <p className="mt-1 truncate text-sm font-medium">{accountSummary}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Opportunity</p>
-                  <p className="mt-1 truncate text-sm font-medium">{opportunitySummary}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Guidance</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    The live cockpit will only ask for fields required by the selected playbooks.
-                  </p>
-                </div>
-              </div>
-              <div className="grid min-w-0 content-start gap-4">
-                <div className="grid min-w-0 gap-2">
-                  <Label htmlFor="recording-call-type">Call type</Label>
-                  <Select value={callType} onValueChange={setCallType}>
-                    <SelectTrigger id="recording-call-type" className="w-full min-w-0 [&>span]:truncate">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {["Discovery", "Cold", "Inbound", "Outbound", "Demo", "Renewal", "Negotiation"].map((item) => (
-                        <SelectItem key={item} value={item}>
-                          {item}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid min-w-0 gap-2">
-                  <Label htmlFor="recording-audio-source">Audio source</Label>
-                  <Select
-                    value={audioCaptureMode}
-                    onValueChange={(value) => setAudioCaptureMode(value as CallAudioCaptureMode)}
-                  >
-                    <SelectTrigger id="recording-audio-source" className="w-full min-w-0 [&>span]:truncate">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="microphone">Microphone only</SelectItem>
-                      <SelectItem value="in_person_microphone" disabled={!capturePreferences.inPersonMic}>
-                        In-person meeting / phone mic
-                      </SelectItem>
-                      <SelectItem value="meeting_audio" disabled={!capturePreferences.browserTab}>
-                        Meeting app/tab audio + microphone
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {audioCaptureMode === "meeting_audio"
-                      ? "When prompted, share the meeting tab if the call is in-browser, or Entire Screen for native Zoom/Teams when available. Tick Share audio/System audio so SalesFrame can hear the buyer."
-                      : audioCaptureMode === "in_person_microphone"
-                        ? "Use this on iPhone or in-person meetings. Keep Safari open and the phone awake so the microphone can capture transcript and live questions."
-                      : "Uses your microphone only. This will not ask you to share your screen."}
-                  </p>
-                  {(!capturePreferences.browserTab || !capturePreferences.inPersonMic) ? (
-                    <p className="text-xs text-muted-foreground">
-                      Capture choices follow this workspace's Settings. Microphone only is always available.
-                    </p>
-                  ) : null}
-                </div>
-                <div className="grid min-w-0 gap-2">
-                  <Label htmlFor="recording-playbooks">Playbooks</Label>
-                  <PlaybookMultiSelect
-                    id="recording-playbooks"
-                    value={selectedPlaybooks}
-                    onChange={setSelectedPlaybooks}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {step === 4 ? (
-          <div className="grid gap-4 rounded-lg border p-4">
-            {!hasSavedOpenAiKey ? (
-              <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 sm:flex-row sm:items-center sm:justify-between" role="alert">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <CircleAlertIcon className="size-4 text-destructive" />
-                    <p className="text-sm font-medium text-destructive">OpenAI key required</p>
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Add the workspace OpenAI key in Settings before starting a call.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full gap-2 sm:w-fit"
-                  onClick={() => {
-                    setOpen(false)
-                    onOpenSettings?.()
-                  }}
-                >
-                  <KeyRoundIcon />
-                  Open settings
-                </Button>
-              </div>
-            ) : null}
-
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <SearchIcon className="size-4 text-muted-foreground" />
-                <p className="text-sm font-medium">Seller Research</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="customer-research-toggle" className="text-sm text-muted-foreground">
-                  Enable
-                </Label>
-                <Switch
-                  id="customer-research-toggle"
-                  checked={customerResearchEnabled}
-                  onCheckedChange={setCustomerResearchEnabled}
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-3">
-              <div className="grid gap-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="seller-domain">Your company domain</Label>
-                    <Input
-                      id="seller-domain"
-                      value={sellerDomain}
-                      disabled={!customerResearchEnabled}
-                      placeholder="e.g. salesframe.ai"
-                      onChange={(event) => handleSellerDomainChange(event.currentTarget.value)}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="seller-company">Your company</Label>
-                    <Input
-                      id="seller-company"
-                      value={sellerCompany}
-                      disabled={!customerResearchEnabled}
-                      placeholder="e.g. SalesFrame"
-                      onChange={(event) => setSellerCompany(event.currentTarget.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="customer-contact">Customer contact</Label>
-                    <Input
-                      id="customer-contact"
-                      value={customerContact}
-                      disabled={!customerResearchEnabled}
-                      placeholder="Optional"
-                      onChange={(event) => setCustomerContact(event.currentTarget.value)}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="customer-role">Customer role</Label>
-                    <Input
-                      id="customer-role"
-                      value={customerRole}
-                      disabled={!customerResearchEnabled}
-                      placeholder="Optional"
-                      onChange={(event) => setCustomerRole(event.currentTarget.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="product-context">What you sell</Label>
-                  <Textarea
-                    id="product-context"
-                    value={productContext}
-                    disabled={!customerResearchEnabled || researchProfileStatus === "loading"}
-                    className="min-h-20 resize-none"
-                    placeholder={
-                      researchProfileStatus === "loading"
-                        ? "Fetching information..."
-                        : "Describe the product or offer the AI should connect to customer research."
-                    }
-                    onChange={(event) => setProductContext(event.currentTarget.value)}
-                  />
-                  <p
+                return (
+                  <div
+                    key={label}
+                    role="listitem"
+                    aria-current={isActive ? "step" : undefined}
                     className={cn(
-                      "text-xs text-muted-foreground",
-                      researchProfileStatus === "loading" && "text-primary",
-                      researchProfileStatus === "error" && "text-destructive",
-                      researchProfileStatus === "success" && "text-emerald-600"
+                      "flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-sm sm:px-3",
+                      isActive && "border-primary bg-primary/5",
+                      isComplete && "bg-muted/50"
                     )}
-                    aria-live={researchProfileStatus === "error" ? "assertive" : "polite"}
-                    role={researchProfileStatus === "error" ? "alert" : "status"}
                   >
-                    {researchProfileMessage ||
-                      "Auto-filled from the domain and saved for this workspace once the call starts."}
-                  </p>
-                </div>
-              </div>
+                    <span
+                      className={cn(
+                        "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background",
+                        isActive && "border-primary text-primary"
+                      )}
+                    >
+                      {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
+                    </span>
+                    <span className="truncate font-medium">{label}</span>
+                  </div>
+                )
+              })}
             </div>
-          </div>
-        ) : null}
 
-        {startError ? (
-          <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive" role="alert">
-            {startError}
-          </div>
-        ) : null}
-        </div>
+            <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain pr-1 max-sm:pr-0">
+              {step === 1 ? (
+                <div className="grid min-w-0 gap-4 rounded-lg border p-3 sm:p-4">
+                  <div className="flex items-center gap-2">
+                    <Building2Icon className="size-4 text-muted-foreground" />
+                    <p className="text-sm font-medium">Account</p>
+                  </div>
+                  <div className="grid gap-3">
+                    <Label htmlFor="recording-account-mode">How should this call be attached?</Label>
+                    <Select value={accountMode} onValueChange={handleAccountModeChange}>
+                      <SelectTrigger id="recording-account-mode" className="w-full min-w-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="existing">Existing account</SelectItem>
+                        <SelectItem value="new">New account</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {accountMode === "existing" ? (
+                      <div className="grid gap-2">
+                        <Label htmlFor="recording-account">Account</Label>
+                        <Select value={accountId} onValueChange={handleAccountChange}>
+                          <SelectTrigger id="recording-account" className="w-full min-w-0">
+                            <SelectValue placeholder="Select account" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {accounts.map((account) => (
+                              <SelectItem key={account.id} value={account.id}>
+                                {account.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="grid gap-2">
+                          <Label htmlFor="recording-account-name">Account name</Label>
+                          <Input
+                            id="recording-account-name"
+                            value={accountName}
+                            placeholder="e.g. Southern Cross Energy"
+                            onChange={(event) => setAccountName(event.currentTarget.value)}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="recording-account-website">Website or domain</Label>
+                          <Input
+                            id="recording-account-website"
+                            value={accountWebsite}
+                            placeholder="e.g. usemultiplier.com"
+                            onChange={(event) => handleNewAccountWebsiteChange(event.currentTarget.value)}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="recording-account-industry">Industry</Label>
+                          <Input
+                            id="recording-account-industry"
+                            value={accountIndustry}
+                            placeholder="e.g. Energy"
+                            onChange={(event) => setAccountIndustry(event.currentTarget.value)}
+                          />
+                        </div>
+                        <CurrencySelect
+                          id="recording-account-currency"
+                          value={accountCurrency}
+                          onChange={setAccountCurrency}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {step === 2 ? (
+                <div className="grid min-w-0 gap-4 rounded-lg border p-3 sm:p-4">
+                  <div className="flex items-center gap-2">
+                    <TargetIcon className="size-4 text-muted-foreground" />
+                    <p className="text-sm font-medium">Opportunity</p>
+                  </div>
+                  <div className="grid gap-3">
+                    <Label htmlFor="recording-opportunity-mode">What opportunity should receive the recording?</Label>
+                    <Select
+                      value={accountMode === "new" ? "new" : opportunityMode}
+                      onValueChange={(value) => setOpportunityMode(value as "existing" | "new")}
+                      disabled={accountMode === "new" || !canUseExistingOpportunity}
+                    >
+                      <SelectTrigger id="recording-opportunity-mode" className="w-full min-w-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="existing">Existing opportunity</SelectItem>
+                        <SelectItem value="new">New opportunity</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {accountMode === "existing" && opportunityMode === "existing" && canUseExistingOpportunity ? (
+                      <div className="grid gap-2">
+                        <Label htmlFor="recording-opportunity">Opportunity</Label>
+                        <Select value={opportunityId} onValueChange={setOpportunityId}>
+                          <SelectTrigger id="recording-opportunity" className="w-full min-w-0">
+                            <SelectValue placeholder="Select opportunity" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {accountOpportunities.map((opportunity) => (
+                              <SelectItem key={opportunity.id} value={opportunity.id}>
+                                {opportunity.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="grid gap-2">
+                        <Label htmlFor="recording-opportunity-name">Opportunity name</Label>
+                        <Input
+                          id="recording-opportunity-name"
+                          value={opportunityName}
+                          placeholder="e.g. Field Service Modernisation"
+                          onChange={(event) => setOpportunityName(event.currentTarget.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {step === 3 ? (
+                <div className="grid min-w-0 gap-4 rounded-lg border p-3 sm:p-4">
+                  <div className="flex items-center gap-2">
+                    <PhoneCallIcon className="size-4 text-muted-foreground" />
+                    <p className="text-sm font-medium">Call setup</p>
+                  </div>
+                  <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,240px)]">
+                    <div className="grid min-w-0 gap-3 rounded-lg bg-muted/40 p-3">
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Account</p>
+                        <p className="mt-1 truncate text-sm font-medium">{accountSummary}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Opportunity</p>
+                        <p className="mt-1 truncate text-sm font-medium">{opportunitySummary}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Guidance</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          The live cockpit will only ask for fields required by the selected playbooks.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid min-w-0 content-start gap-4">
+                      <div className="grid min-w-0 gap-2">
+                        <Label htmlFor="recording-call-type">Call type</Label>
+                        <Select value={callType} onValueChange={setCallType}>
+                          <SelectTrigger id="recording-call-type" className="w-full min-w-0 [&>span]:truncate">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {["Discovery", "Cold", "Inbound", "Outbound", "Demo", "Renewal", "Negotiation"].map(
+                              (item) => (
+                                <SelectItem key={item} value={item}>
+                                  {item}
+                                </SelectItem>
+                              )
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid min-w-0 gap-2">
+                        <Label htmlFor="recording-audio-source">Audio source</Label>
+                        <Select
+                          value={audioCaptureMode}
+                          onValueChange={(value) => setAudioCaptureMode(value as CallAudioCaptureMode)}
+                        >
+                          <SelectTrigger id="recording-audio-source" className="w-full min-w-0 [&>span]:truncate">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="microphone">Microphone only</SelectItem>
+                            <SelectItem value="in_person_microphone" disabled={!capturePreferences.inPersonMic}>
+                              In-person meeting / phone mic
+                            </SelectItem>
+                            <SelectItem value="meeting_audio" disabled={!capturePreferences.browserTab}>
+                              Meeting app/tab audio + microphone
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          {audioCaptureMode === "meeting_audio"
+                            ? "When prompted, share the meeting tab if the call is in-browser, or Entire Screen for native Zoom/Teams when available. Tick Share audio/System audio so SalesFrame can hear the buyer."
+                            : audioCaptureMode === "in_person_microphone"
+                              ? "Use this on iPhone or in-person meetings. Keep Safari open and the phone awake so the microphone can capture transcript and live questions."
+                              : "Uses your microphone only. This will not ask you to share your screen."}
+                        </p>
+                        {!capturePreferences.browserTab || !capturePreferences.inPersonMic ? (
+                          <p className="text-xs text-muted-foreground">
+                            Capture choices follow this workspace's Settings. Microphone only is always available.
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="grid min-w-0 gap-2">
+                        <Label htmlFor="recording-playbooks">Playbooks</Label>
+                        <PlaybookMultiSelect
+                          id="recording-playbooks"
+                          value={selectedPlaybooks}
+                          onChange={setSelectedPlaybooks}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {step === 4 ? (
+                <div className="grid min-w-0 gap-4 rounded-lg border p-3 sm:p-4">
+                  {!hasSavedOpenAiKey ? (
+                    <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 sm:flex-row sm:items-center sm:justify-between" role="alert">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <CircleAlertIcon className="size-4 text-destructive" />
+                          <p className="text-sm font-medium text-destructive">OpenAI key required</p>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Add the workspace OpenAI key in Settings before starting a call.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full gap-2 sm:w-fit"
+                        onClick={() => {
+                          setOpen(false)
+                          onOpenSettings?.()
+                        }}
+                      >
+                        <KeyRoundIcon />
+                        Open settings
+                      </Button>
+                    </div>
+                  ) : null}
+
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <SearchIcon className="size-4 text-muted-foreground" />
+                      <p className="text-sm font-medium">Seller Research</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="customer-research-toggle" className="text-sm text-muted-foreground">
+                        Enable
+                      </Label>
+                      <Switch
+                        id="customer-research-toggle"
+                        checked={customerResearchEnabled}
+                        onCheckedChange={setCustomerResearchEnabled}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3">
+                    <div className="grid gap-3">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid gap-2">
+                          <Label htmlFor="seller-domain">Your company domain</Label>
+                          <Input
+                            id="seller-domain"
+                            value={sellerDomain}
+                            disabled={!customerResearchEnabled}
+                            placeholder="e.g. salesframe.ai"
+                            onChange={(event) => handleSellerDomainChange(event.currentTarget.value)}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="seller-company">Your company</Label>
+                          <Input
+                            id="seller-company"
+                            value={sellerCompany}
+                            disabled={!customerResearchEnabled}
+                            placeholder="e.g. SalesFrame"
+                            onChange={(event) => setSellerCompany(event.currentTarget.value)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid gap-2">
+                          <Label htmlFor="customer-contact">Customer contact</Label>
+                          <Input
+                            id="customer-contact"
+                            value={customerContact}
+                            disabled={!customerResearchEnabled}
+                            placeholder="Optional"
+                            onChange={(event) => setCustomerContact(event.currentTarget.value)}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="customer-role">Customer role</Label>
+                          <Input
+                            id="customer-role"
+                            value={customerRole}
+                            disabled={!customerResearchEnabled}
+                            placeholder="Optional"
+                            onChange={(event) => setCustomerRole(event.currentTarget.value)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid gap-2">
+                        <Label htmlFor="product-context">What you sell</Label>
+                        <Textarea
+                          id="product-context"
+                          value={productContext}
+                          disabled={!customerResearchEnabled || researchProfileStatus === "loading"}
+                          className="min-h-20 resize-none"
+                          placeholder={
+                            researchProfileStatus === "loading"
+                              ? "Fetching information..."
+                              : "Describe the product or offer the AI should connect to customer research."
+                          }
+                          onChange={(event) => setProductContext(event.currentTarget.value)}
+                        />
+                        <p
+                          className={cn(
+                            "text-xs text-muted-foreground",
+                            researchProfileStatus === "loading" && "text-primary",
+                            researchProfileStatus === "error" && "text-destructive",
+                            researchProfileStatus === "success" && "text-emerald-600"
+                          )}
+                          aria-live={researchProfileStatus === "error" ? "assertive" : "polite"}
+                          role={researchProfileStatus === "error" ? "alert" : "status"}
+                        >
+                          {researchProfileMessage ||
+                            "Auto-filled from the domain and saved for this workspace once the call starts."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {startError ? (
+                <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+                  {startError}
+                </div>
+              ) : null}
+            </div>
 
         <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
           <div className="grid gap-2 sm:flex sm:flex-row">
@@ -11858,6 +11863,7 @@ function LiveRail({
     !isCaptureActive &&
     ["idle", "error", "permission-denied", "stopped", "upload-failed"].includes(captureStatus)
   const canStopFromRail = isCaptureActive && displayCaptureStatus !== "stopping"
+  const canDeleteFromRail = Boolean(activeCallId) && !isCaptureActive
   const recordingActionLabel =
     displayCaptureStatus === "requesting-permission" || displayCaptureStatus === "connecting"
       ? "Cancel call"
@@ -11932,7 +11938,7 @@ function LiveRail({
               {audioPreflight.statusMessage}
             </div>
           ) : null}
-          {activeCallId ? (
+          {canDeleteFromRail ? (
             <Button
               size="sm"
               variant="outline"
@@ -13118,7 +13124,7 @@ function PostCallPanel({
           </CardHeader>
           <CardContent>
             <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-              SalesFrame could not finish the notes and next-call brief yet. You can keep using the recording and transcript while AI processing catches up.
+              SalesFrame is still preparing the notes and next-call brief. You can keep using the recording and transcript while it catches up.
             </div>
           </CardContent>
         </Card>
