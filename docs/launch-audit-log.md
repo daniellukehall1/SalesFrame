@@ -58,3 +58,47 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 - Before impact: The feature felt slightly like an admin setup object instead of a flexible sales-coaching playbook.
 - After impact: Custom frameworks now read as part of the seller workflow while preserving the same functionality.
 - Verification: Added a production-contract assertion for the new wording and old-copy rejection.
+
+### Transcript partial state added visual noise
+
+- Severity: Low
+- Description: Partial live transcript messages showed a tiny `Live` pill beside the speaker and timestamp.
+- Root cause: The transcript kept a status badge from the earlier card-style transcript UI after moving to a cleaner message layout.
+- Recommended improvement: Keep partial transcript lines visually distinct through the message treatment, not extra labels.
+- Fix applied: Removed the `Live` pill from transcript message headers and kept partial lines differentiated by the existing outline bubble style.
+- Before impact: The transcript felt a little more system-like during live calls, adding noise to an already time-sensitive surface.
+- After impact: The transcript reads more like a calm conversation while still distinguishing in-progress speech.
+- Verification: Added a production-contract assertion that the transcript tab does not render the `Live` pill label.
+
+### Dashboard repeated the breadcrumb as a header eyebrow
+
+- Severity: Low
+- Description: The home dashboard showed a small `Home` label directly above `Seller dashboard`, even though the breadcrumb already establishes the page location.
+- Root cause: The dashboard retained an older page-eyebrow pattern after broader pages were simplified.
+- Recommended improvement: Let the primary heading carry the page identity and remove repeated navigation labels from the content area.
+- Fix applied: Removed the dashboard `Home` eyebrow and added a production-contract assertion.
+- Before impact: The dashboard had one extra line of low-value text at the top of the main workflow.
+- After impact: The dashboard opens more directly on the seller's actual work.
+- Verification: Added a production-contract assertion that the dashboard header starts with `Seller dashboard` and does not re-render the `Home` eyebrow.
+
+### Speaker map appeared before transcript context existed
+
+- Severity: Low
+- Description: The call cockpit transcript tab showed a collapsed `Speaker map` even when no transcript lines were present.
+- Root cause: The speaker map always seeded Seller and Customer rows, so the component rendered before there was anything useful to edit.
+- Recommended improvement: Show speaker mapping only after there are real transcript turns, saved identities, or an explicitly added speaker.
+- Fix applied: The speaker map now ignores blank transcript rows and stays hidden until speaker context exists.
+- Before impact: The empty transcript state felt more configurable and technical than it needed to.
+- After impact: The empty transcript state stays focused on what will happen next: transcript lines appearing as people speak.
+- Verification: Added a production-contract assertion for the contextual speaker-map guard.
+
+### Empty live coach card showed inactive feedback controls
+
+- Severity: Low
+- Description: The call cockpit showed `Asked`, `Too soon`, `Softer`, and `Skip` controls before any AI recommendation existed.
+- Root cause: The live coach card rendered the feedback controls unconditionally and relied on disabled states when there was no displayed question.
+- Recommended improvement: Empty states should explain what happens next, not show controls that cannot be used yet.
+- Fix applied: Feedback controls now render only when a real question is displayed.
+- Before impact: Sellers saw actions they could not take, which made the empty call cockpit feel less confident.
+- After impact: The empty live coach state stays focused on readiness; feedback controls appear only when the seller has a recommendation to act on.
+- Verification: Added a production-contract assertion that feedback controls are gated by `displayedQuestion` and are not disabled because no question exists.

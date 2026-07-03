@@ -9192,7 +9192,6 @@ function HomeDashboard({
     <div className="grid gap-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="text-sm text-muted-foreground">Home</p>
           <h1 className="text-2xl font-semibold tracking-tight">Seller dashboard</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
             Pipeline health, methodology coverage, and the next records to tighten.
@@ -10944,59 +10943,57 @@ function NextQuestionCard({
             <span className="text-muted-foreground">{manualCoach.lastAction}</span>
           </div>
         ) : null}
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            className="gap-2"
-            disabled={!displayedQuestion || isAsked}
-            onClick={() => displayedQuestion && onMarkQuestionAsked(displayedQuestion)}
-          >
-            <CheckCircle2Icon />
-            Asked
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-2"
-            disabled={!displayedQuestion}
-            onClick={() => displayedQuestion && onCoachFeedback("too_soon", displayedQuestion)}
-          >
-            <Clock3Icon />
-            Too soon
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-2"
-            disabled={!displayedQuestion}
-            onClick={() => {
-              if (!displayedQuestion) return
-              onCoachFeedback("softer", displayedQuestion)
-              if (softerAlternative) {
-                onUseManualQuestion({
-                  ...displayedQuestion,
-                  id: `softer-${displayedQuestion.id}`,
-                  question: softerAlternative,
-                  reason: "Softer version of the current AI recommendation.",
-                  source: "alternative",
-                })
-              }
-            }}
-          >
-            <SparklesIcon />
-            Softer
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-2"
-            disabled={!displayedQuestion}
-            onClick={() => displayedQuestion && onCoachFeedback("skip", displayedQuestion)}
-          >
-            <ArrowRightIcon />
-            Skip
-          </Button>
-        </div>
+        {displayedQuestion ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              className="gap-2"
+              disabled={isAsked}
+              onClick={() => onMarkQuestionAsked(displayedQuestion)}
+            >
+              <CheckCircle2Icon />
+              Asked
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={() => onCoachFeedback("too_soon", displayedQuestion)}
+            >
+              <Clock3Icon />
+              Too soon
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={() => {
+                onCoachFeedback("softer", displayedQuestion)
+                if (softerAlternative) {
+                  onUseManualQuestion({
+                    ...displayedQuestion,
+                    id: `softer-${displayedQuestion.id}`,
+                    question: softerAlternative,
+                    reason: "Softer version of the current AI recommendation.",
+                    source: "alternative",
+                  })
+                }
+              }}
+            >
+              <SparklesIcon />
+              Softer
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={() => onCoachFeedback("skip", displayedQuestion)}
+            >
+              <ArrowRightIcon />
+              Skip
+            </Button>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )
@@ -11612,11 +11609,14 @@ function SpeakerIdentityPanel({
   const [speakerSaveMessage, setSpeakerSaveMessage] = React.useState("")
   const [speakerSaveTone, setSpeakerSaveTone] = React.useState<"saved" | "local" | "error">("saved")
   const touchedSpeakerLabelsRef = React.useRef(new Set<TranscriptSpeaker>())
+  const hasTranscriptText = transcript.some((line) => line.text.trim())
   const speakerRows = React.useMemo(() => {
     const labels = new Map<TranscriptSpeaker, { displayName: string; lineCount: number }>()
     const requiredLabels: TranscriptSpeaker[] = ["Seller", "Customer"]
 
     transcript.forEach((line) => {
+      if (!line.text.trim()) return
+
       const label = getTranscriptSpeakerLabel(line)
       if (label === "Unknown") return
 
@@ -11669,6 +11669,14 @@ function SpeakerIdentityPanel({
     const visibleLabels = new Set(speakerRows.map((speaker) => speaker.label))
     return (["Customer 2", "Customer 3"] as TranscriptSpeaker[]).find((label) => !visibleLabels.has(label)) ?? null
   }, [speakerRows])
+  const hasSpeakerIdentityContext =
+    addedSpeakerLabels.length > 0 ||
+    speakerRows.some((speaker) => {
+      const savedIdentity = identities[speaker.label]
+      const savedName = savedIdentity?.displayName?.trim() ?? ""
+
+      return speaker.lineCount > 0 || Boolean(savedIdentity?.isMe) || Boolean(savedName && savedName !== speaker.label)
+    })
   const saveSpeakerIdentity = React.useCallback(
     async (payload: SpeakerIdentityChangePayload) => {
       const normalizedLabel = getCanonicalTranscriptSpeakerLabel(normalizeTranscriptSpeakerLabel(payload.label))
@@ -11722,7 +11730,7 @@ function SpeakerIdentityPanel({
     })
   }, [speakerRows])
 
-  if (speakerRows.length === 0) return null
+  if (!hasTranscriptText || !hasSpeakerIdentityContext || speakerRows.length === 0) return null
 
   return (
     <details className="group rounded-lg bg-muted/20 px-3 py-2">
@@ -12085,11 +12093,6 @@ function LiveRail({
                             {getTranscriptSpeakerDisplayName(line)}
                           </span>
                           <span className="shrink-0 text-xs text-muted-foreground">{line.time}</span>
-                          {line.isPartial ? (
-                            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                              Live
-                            </span>
-                          ) : null}
                         </MessageHeader>
                         <Bubble align={align} variant={bubbleVariant} className="max-w-[min(82%,34rem)]">
                           <BubbleContent className="whitespace-pre-wrap text-foreground">

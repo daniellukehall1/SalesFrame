@@ -687,6 +687,8 @@ test("call cockpit feedback buttons suppress acted-on questions and force AI ref
   assert.match(cockpitCard, /Getting the next recommendation/)
   assert.match(cockpitCard, /Working on the next move/)
   assert.match(cockpitCard, /checking the conversation flow before it shows another question/)
+  assert.match(cockpitCard, /\{displayedQuestion \? \(\s*<div className="flex flex-wrap gap-2">/)
+  assert.doesNotMatch(cockpitCard, /disabled=\{!displayedQuestion/)
   assert.doesNotMatch(cockpitCard, /The previous recommendation is hidden/)
   assert.match(app, /Why this fits/)
   assert.match(app, /How SalesFrame keeps the next move natural/)
@@ -1770,10 +1772,16 @@ test("browser preferences persist without UI-state cookies", async () => {
 
 test("broad pages do not render an active-opportunity context header under breadcrumbs", async () => {
   const app = await read("src/App.tsx")
+  const dashboardSource = app.slice(
+    app.indexOf("function HomeDashboard("),
+    app.indexOf("function DashboardMetric(")
+  )
 
   assert.doesNotMatch(app, /function QuietContextBar/)
   assert.doesNotMatch(app, /shouldShowQuietContextBar/)
   assert.doesNotMatch(app, /`\$\{account\.name\} \/ \$\{opportunity\.name\}`/)
+  assert.match(dashboardSource, /<h1 className="text-2xl font-semibold tracking-tight">Seller dashboard<\/h1>/)
+  assert.doesNotMatch(dashboardSource, /<p className="text-sm text-muted-foreground">Home<\/p>/)
 })
 
 test("section cards and primary list rows are unframed", async () => {
@@ -2456,6 +2464,11 @@ test("transcript speaker labels are confidence-aware and editable", async () => 
   assert.match(app, /if \(exactLongDuplicate && areTranscriptTimesClose\(currentLine\.time, nextLine\.time, 90\)\) return true/)
   assert.match(speakerMap, /const requiredLabels: TranscriptSpeaker\[\] = \["Seller", "Customer"\]/)
   assert.match(speakerMap, /const \[addedSpeakerLabels, setAddedSpeakerLabels\]/)
+  assert.match(speakerMap, /const hasTranscriptText = transcript\.some\(\(line\) => line\.text\.trim\(\)\)/)
+  assert.match(speakerMap, /if \(!line\.text\.trim\(\)\) return/)
+  assert.match(speakerMap, /const hasSpeakerIdentityContext =/)
+  assert.match(speakerMap, /savedName && savedName !== speaker\.label/)
+  assert.match(speakerMap, /if \(!hasTranscriptText \|\| !hasSpeakerIdentityContext \|\| speakerRows\.length === 0\) return null/)
   assert.match(speakerMap, /Add speaker/)
   assert.match(speakerMap, /<details className="group rounded-lg bg-muted\/20 px-3 py-2">/)
   assert.match(speakerMap, /<summary[\s\S]*Speaker map[\s\S]*<ChevronDownIcon[\s\S]*aria-hidden="true"/)
@@ -2504,6 +2517,7 @@ test("transcript speaker labels are confidence-aware and editable", async () => 
   assert.doesNotMatch(transcriptTab, /speakerSource/)
   assert.match(transcriptTab, /line\.time/)
   assert.match(transcriptTab, /line\.isPartial/)
+  assert.doesNotMatch(transcriptTab, /rounded-full[\s\S]*Live/)
   assert.match(app, /from "@\/components\/ui\/message"/)
   assert.match(app, /from "@\/components\/ui\/bubble"/)
   assert.match(transcriptTab, /<MessageGroup className="mt-3 gap-3">/)
