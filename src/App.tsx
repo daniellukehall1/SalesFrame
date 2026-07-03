@@ -2241,10 +2241,8 @@ function App() {
     if (!supabase) {
       setAuthSession(null)
       setAuthLoading(false)
-      if (getPublicAuthRouteFromPath() !== "landing") {
-        setAuthStatusTone("error")
-        setAuthStatusMessage(authConnectionUnavailableMessage)
-      }
+      setAuthStatusTone("info")
+      setAuthStatusMessage("")
       return
     }
 
@@ -10572,7 +10570,7 @@ function WorkspaceView({
           captureStatus={isStoppingCall ? "stopping" : captureStatus}
           guidance={liveGuidance}
           isRecording={isRecording}
-          notes={notes}
+          notes={isRecording ? notes : []}
           onDeleteCall={onDeleteCall}
           onSpeakerIdentityChange={onSpeakerIdentityChange}
           onTranscriptSpeakerChange={onTranscriptSpeakerChange}
@@ -10597,7 +10595,7 @@ function WorkspaceView({
             ) : null
           }
           onStopRecording={onStopRecording}
-          transcript={transcript}
+          transcript={isRecording ? transcript : []}
         />
       </TabsContent>
 
@@ -13365,19 +13363,19 @@ function OpportunitiesView({
           </CardAction>
         </CardHeader>
         <CardContent className="grid gap-3">
-          <div className="flex flex-col gap-2 md:flex-row">
+          <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-[minmax(22rem,1fr)_11rem_11rem_10rem_auto]">
             <div className="relative flex-1">
               <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 aria-label="Search opportunities, accounts, stakeholders, or gaps"
                 value={query}
                 className="pl-9"
-                placeholder="Search opportunities, accounts, stakeholders, or gaps"
+                placeholder="Search opportunities"
                 onChange={(event) => setQuery(event.currentTarget.value)}
               />
             </div>
             <Select value={stageFilter} onValueChange={setStageFilter}>
-              <SelectTrigger className="w-full md:w-44" aria-label="Filter opportunities by stage">
+              <SelectTrigger className="w-full" aria-label="Filter opportunities by stage">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -13390,7 +13388,7 @@ function OpportunitiesView({
               </SelectContent>
             </Select>
             <Select value={coverageFilter} onValueChange={(value) => setCoverageFilter(value as OpportunityCoverageFilter)}>
-              <SelectTrigger className="w-full md:w-44" aria-label="Filter opportunities by coverage">
+              <SelectTrigger className="w-full" aria-label="Filter opportunities by coverage">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -13402,7 +13400,7 @@ function OpportunitiesView({
               </SelectContent>
             </Select>
             <Select value={sort} onValueChange={(value) => setSort(value as OpportunitySort)}>
-              <SelectTrigger className="w-full md:w-40" aria-label="Sort opportunities">
+              <SelectTrigger className="w-full" aria-label="Sort opportunities">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -13415,7 +13413,7 @@ function OpportunitiesView({
             </Select>
             <Button
               variant="outline"
-              className="gap-2 md:w-auto"
+              className="gap-2 justify-self-start 2xl:justify-self-auto"
               onClick={() => {
                 setQuery("")
                 setStageFilter("all")
@@ -13438,9 +13436,17 @@ function OpportunitiesView({
                   className="grid gap-3 rounded-lg bg-muted/30 p-4 md:grid-cols-[minmax(0,1fr)_160px_120px_120px_128px] md:items-center"
                 >
                   <div className="min-w-0">
-                    <p className="font-medium">{opportunity.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {account?.name ?? "Unknown account"} · {formatCurrencyAmount(opportunity.amount, account?.currency)}
+                    <button
+                      type="button"
+                      className="block text-left font-medium leading-snug underline-offset-4 outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={`Open ${opportunity.name}`}
+                      onClick={() => onOpportunitySelect(opportunity.id)}
+                    >
+                      {opportunity.name}
+                    </button>
+                    <p className="flex flex-wrap gap-x-1 text-sm text-muted-foreground">
+                      <span>{account?.name ?? "Unknown account"}</span>
+                      <span>{formatCurrencyAmount(opportunity.amount, account?.currency)}</span>
                     </p>
                   </div>
                   <div>
@@ -13672,19 +13678,19 @@ function CallsView({
           </CardAction>
         </CardHeader>
         <CardContent className="grid gap-3">
-          <div className="flex flex-col gap-2 md:flex-row">
+          <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-[minmax(22rem,1fr)_11rem_11rem_auto]">
             <div className="relative flex-1">
               <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 aria-label="Search calls, opportunities, accounts, or status"
                 value={query}
                 className="pl-9"
-                placeholder="Search calls, opportunities, accounts, or status"
+                placeholder="Search calls"
                 onChange={(event) => setQuery(event.currentTarget.value)}
               />
             </div>
             <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-full md:w-44" aria-label="Filter calls by type">
+              <SelectTrigger className="w-full" aria-label="Filter calls by type">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -13697,7 +13703,7 @@ function CallsView({
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full md:w-44" aria-label="Filter calls by status">
+              <SelectTrigger className="w-full" aria-label="Filter calls by status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -13711,7 +13717,7 @@ function CallsView({
             </Select>
             <Button
               variant="outline"
-              className="gap-2 md:w-auto"
+              className="gap-2 justify-self-start 2xl:justify-self-auto"
               onClick={() => {
                 setQuery("")
                 setTypeFilter("all")
