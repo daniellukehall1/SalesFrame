@@ -156,6 +156,18 @@ const trustedSourceSet = [
   "Government procurement portals",
 ]
 
+const reviewSentimentSourceSet = [
+  "Official website customer pages: /customers, /case-studies, /testimonials, /reviews",
+  "Newsroom customer announcements and customer proof",
+  "Trustpilot public profile when discoverable",
+  "G2 public profile when discoverable",
+  "Google Maps business presence when discoverable",
+  "Reddit and public forums when relevant",
+  "Product Hunt when relevant",
+  "Apple App Store and Google Play when relevant",
+  "Salesforce AppExchange, Microsoft AppSource, Shopify App Store, and Chrome Web Store when relevant",
+]
+
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
 }
@@ -432,10 +444,11 @@ export default async function handler(request: Request, _context: Context) {
     const apiKey = await getDecryptedOpenAiKey(supabase, user.id, authorizedAccount.workspace_id)
     const openAiResponse = await callOpenAiWebSearchJson<AccountEnrichmentResult>({
       apiKey,
+      blockedDomains: ["quora.com", "wikipedia.org"],
       schema: accountEnrichmentSchema,
       schemaName: "salesframe_account_enrichment",
       system:
-        "You are SalesFrame's account enrichment analyst. Return only schema-valid JSON. Use public web research and trusted sources only. Prioritize the official website, careers page, newsroom, investor or filings pages, business registry, public news including Google or GDELT-style coverage, jobs or ATS pages, review sites, public technographic references, and government procurement portals. Do not invent facts. Leave fields blank when evidence is weak. Make sales signals useful for live B2B discovery questions. For employeeCount, return only workforce headcount or employee range. Never put users, active users, customers, subscribers, creators, members, downloads, revenue, valuation, or market scale into employeeCount; put those facts in sales signals or notes instead.",
+        "You are SalesFrame's account enrichment analyst. Return only schema-valid JSON. Use public web research and trusted sources only. Prioritize the official website, careers page, newsroom, investor or filings pages, business registry, public news including Google or GDELT-style coverage, jobs or ATS pages, review/customer sentiment sites, public technographic references, and government procurement portals. For reviewSentimentSignals, treat Google Maps, Trustpilot, G2, Reddit/forums, Product Hunt, app stores, and software marketplaces as public source signals only: summarize high-level themes, profile presence, broad rating/review indicators when visible, and confidence; do not copy raw review text, do not scrape, do not imply API-level completeness, and leave the field blank or low confidence when sources are thin. Prefer first-party customer proof pages and case studies over unsupported third-party claims. Do not invent facts. Leave fields blank when evidence is weak. Make sales signals useful for live B2B discovery questions. For employeeCount, return only workforce headcount or employee range. Never put users, active users, customers, subscribers, creators, members, downloads, revenue, valuation, or market scale into employeeCount; put those facts in sales signals or notes instead.",
       input: JSON.stringify({
         account: {
           name: accountName,
@@ -451,8 +464,14 @@ export default async function handler(request: Request, _context: Context) {
           },
         },
         trustedSourceSet,
+        reviewSentimentSourceSet,
         requiredBehavior: [
           "Find source-backed account facts that can improve sales discovery.",
+          "For reviewSentimentSignals, actively look for first-party customer proof, public review profiles, community discussions, app marketplaces, and software marketplaces that match the account type.",
+          "Mention whether Trustpilot, G2, Google Maps, Reddit/forums, Product Hunt, app stores, or marketplaces were found only when a public source supports it.",
+          "Treat review/customer sentiment as source signals, not as a scraped review database.",
+          "Summarize review/customer sentiment with confidence and source presence rather than raw review extraction.",
+          "Do not quote raw review text or present private, paywalled, scraped, or unsourced sentiment.",
           "Prefer concise, practical B2B sales language.",
           "Return high confidence only when a source directly supports the field.",
           "employeeCount must be employee/headcount/workforce only; if exact employee evidence is unavailable, return an empty value with low confidence.",

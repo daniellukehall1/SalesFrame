@@ -28,6 +28,7 @@ type LiveGuidancePayload = {
   opportunity?: Record<string, unknown>
   opportunityId?: string
   playbooks?: string[]
+  refreshContext?: Record<string, unknown>
   sellerFeedback?: SellerFeedbackSignal[]
   transcript?: TranscriptLine[]
 }
@@ -1845,6 +1846,7 @@ export default async (request: Request, context: Context) => {
             conversationMaturity,
             openingPlaybookGuidance: getOpeningPlaybookGuidance(selectedPlaybooks),
             playbookConversationSequence: getPlaybookConversationSequence(selectedPlaybooks),
+            refreshContext: payload.refreshContext ?? null,
           },
           latestTranscriptWindow: transcript,
           transcriptState: {
@@ -1866,6 +1868,8 @@ export default async (request: Request, context: Context) => {
             "Enriched account signals are context, not proof: never tick off methodology evidence from enrichment alone.",
             "Never repeat a covered intent just because a framework field is important.",
             "If a prior recommended question has just been asked and the buyer answered, the nextQuestion must move the conversation forward.",
+            "If refreshContext.reason is periodic_30_second_ai_recheck, treat it as a mandatory AI audit of the visible recommendation: hold it only when it still clearly fits, otherwise park or replace it with the best next move using the latest transcript and seller feedback.",
+            "On periodic rechecks, do not repeat the exact visible question when the seller appears to have asked it, the buyer appears to have answered it, the topic has moved on, or the question now has medium or high awkwardness risk.",
             "If sellerFeedback says too_soon, keep the same intent only if the customer has now opened the door.",
             "If sellerFeedback says softer, preserve the intent but lower pressure and shorten the wording.",
             "If sellerFeedback says skip, move to the next best intent unless the transcript makes the skipped topic urgent.",

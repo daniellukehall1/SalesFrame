@@ -138,6 +138,7 @@ Realtime transcription must feel like a clean human conversation, not raw subtit
 - Live guidance is AI-first only:
   - The frontend must not create deterministic fallback questions.
   - The OpenAI live-guidance function receives account context, opportunity context, selected playbooks, customer research, recent transcript, and recent guidance events.
+  - Every visible seller-editable account and opportunity field must be available to live guidance either through `recordContext` or, for methodology/framework selection, through selected playbooks and playbook fields. Adding a new seller-editable field requires updating the live-guidance context contract and tests deliberately.
   - Guidance refreshes from meaningful final turns or explicit seller feedback, not partial transcript fragments. Seller turns can also make the currently displayed recommendation stale if the seller asks a different question or moves the conversation forward.
   - A fast flow-decision lane classifies conversation stage, buyer mood, topic shift, active intent status, and whether the displayed question should refresh before the full polished question is requested.
   - Candidate ranking must consider conversation stage, buyer mood, what was just answered, methodology gap value, naturalness, information gain, and risk of sounding abrupt.
@@ -149,6 +150,7 @@ Realtime transcription must feel like a clean human conversation, not raw subtit
   - Near wrap-up, the coach can recover the top one or two high-value parked intents with soft bridge wording.
   - When a previous recommended question was asked and the buyer answered it, the next AI guidance event must advance the conversation rather than repeating the same question.
   - If two meaningful final turns have passed since the last full guidance event, the app must force a flow-decision or full guidance refresh so the visible question cannot stay stale.
+  - While a call is recording or paused, the browser also forces an OpenAI live-guidance recheck every 30 seconds using the current transcript, current visible question, and seller feedback. This is an AI refresh cadence, not a local fallback question.
   - The initial first-question request must not overwrite newer live guidance once transcript has started.
   - Post-call correction is the transcript source-of-truth cleanup layer and should regenerate evidence, notes, follow-up, and next-call brief from corrected turns.
 
@@ -515,7 +517,9 @@ Behaviour:
 - High-confidence public-source enrichment can fill blank core account fields only.
 - Existing seller-entered account fields are never silently overwritten.
 - Populated or lower-confidence fields appear as review suggestions in the enrichment run audit trail.
-- Enrichment uses OpenAI Responses API web search with public/trusted source categories: official website, careers page, newsroom/blog, investor/filings where relevant, business registry, public news, jobs/ATS pages, review sites, public technographic references, and government procurement portals.
+- Enrichment uses OpenAI Responses API web search with public/trusted source categories: official website, careers page, newsroom/blog, investor/filings where relevant, business registry, public news, jobs/ATS pages, review/customer sentiment sites, public technographic references, and government procurement portals.
+- Review/customer sentiment enrichment is source-aware and no-extra-API in V1: OpenAI web search should check first-party customer proof, Trustpilot/G2/Google Maps public profile presence where discoverable, Reddit/forums, Product Hunt, app stores, and software marketplaces when relevant. These are treated as high-level source signals, not scraped review databases.
+- Review/customer sentiment outputs must summarize broad themes, source presence, confidence, and source URLs where available. They must not quote raw review text, imply API-level completeness, or rely on private, paywalled, scraped, or unsourced sentiment.
 - Each enrichment run is recorded in `account_enrichment_runs`; the latest editable sales signals live in `account_enrichment_profiles`.
 - Enriched sales signals are editable free-text fields: business summary, buying triggers, strategic priorities, tech stack, hiring/growth signals, recent news, procurement/government signals, review/customer sentiment, likely stakeholders, discovery angles, risk flags, source notes, confidence, and last enriched date.
 - Live guidance receives `accountEnrichmentProfile` inside account record context. These signals shape wording, timing, specificity, and flow, but they do not complete methodology evidence by themselves.

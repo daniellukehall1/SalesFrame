@@ -798,6 +798,10 @@ function jsonStringArray(value: unknown): string[] {
 type LiveCoachStatus = "idle" | "checking" | "thinking" | "ready" | "error"
 type RecordSaveStatus = "idle" | "saving" | "saved" | "error"
 
+const LIVE_COACH_AI_RECHECK_SECONDS = 30
+const LIVE_COACH_AI_RECHECK_MS = LIVE_COACH_AI_RECHECK_SECONDS * 1000
+const RECORDING_LINK_SILENT_REFRESH_LIMIT = 2
+
 function mapAiLiveGuidanceResponse(value: unknown): LiveGuidance | null {
   const root = asRecord(value)
   const guidance = asRecord(root.guidance ?? value)
@@ -10355,11 +10359,14 @@ function WorkspaceView({
   const [aiLiveGuidance, setAiLiveGuidance] = React.useState<LiveGuidance | null>(null)
   const [liveCoachError, setLiveCoachError] = React.useState("")
   const [liveCoachStatus, setLiveCoachStatus] = React.useState<LiveCoachStatus>("idle")
+  const [liveCoachHeartbeatTick, setLiveCoachHeartbeatTick] = React.useState(0)
   const liveCoachRequestRef = React.useRef(0)
   const liveCoachSignatureRef = React.useRef("")
   const liveCoachFeedbackCountRef = React.useRef(0)
   const liveCoachGuidanceTurnCountRef = React.useRef(0)
   const liveCoachHasGuidanceRef = React.useRef(false)
+  const liveCoachHeartbeatHandledRef = React.useRef(0)
+  const liveCoachFullGuidanceInFlightRef = React.useRef(false)
   const aiLiveGuidanceRef = React.useRef<LiveGuidance | null>(null)
   const defaultTab =
     activeView === "post-call"
@@ -10388,6 +10395,9 @@ function WorkspaceView({
     setLiveCoachStatus(initialLiveGuidance ? "ready" : "idle")
     liveCoachSignatureRef.current = ""
     liveCoachFeedbackCountRef.current = 0
+    liveCoachHeartbeatHandledRef.current = 0
+    liveCoachFullGuidanceInFlightRef.current = false
+    setLiveCoachHeartbeatTick(0)
   }, [activeCallId, initialLiveGuidance, opportunity.id])
 
   React.useEffect(() => {
@@ -10396,10 +10406,23 @@ function WorkspaceView({
   }, [aiLiveGuidance])
 
   React.useEffect(() => {
+    if (!activeCallId || !isRecording) return
+    if (!["recording", "paused"].includes(captureStatus)) return
+
+    const intervalId = window.setInterval(() => {
+      setLiveCoachHeartbeatTick((current) => current + 1)
+    }, LIVE_COACH_AI_RECHECK_MS)
+
+    return () => window.clearInterval(intervalId)
+  }, [activeCallId, captureStatus, isRecording])
+
+  React.useEffect(() => {
     const aiTranscript = buildTranscriptForAi(transcript)
     const feedbackCountChanged = manualCoach.feedbackSignals.length !== liveCoachFeedbackCountRef.current
+    const heartbeatTickChanged =
+      liveCoachHeartbeatTick > 0 && liveCoachHeartbeatTick !== liveCoachHeartbeatHandledRef.current
     if (!activeCallId || !isRecording) return
-    if (aiTranscript.length === 0 && !feedbackCountChanged) return
+    if (aiTranscript.length === 0 && !feedbackCountChanged && !heartbeatTickChanged) return
     if (!account.id || !opportunity.id) return
     if (!["recording", "paused"].includes(captureStatus)) return
     liveCoachFeedbackCountRef.current = manualCoach.feedbackSignals.length
@@ -10415,17 +10438,30 @@ function WorkspaceView({
       transcript: aiTranscript,
     })
 
-    if (signature === liveCoachSignatureRef.current) return
+    if (signature === liveCoachSignatureRef.current && !heartbeatTickChanged) return
+    if (heartbeatTickChanged && liveCoachFullGuidanceInFlightRef.current) return
     liveCoachSignatureRef.current = signature
+    if (heartbeatTickChanged) liveCoachHeartbeatHandledRef.current = liveCoachHeartbeatTick
 
     const requestId = liveCoachRequestRef.current + 1
     liveCoachRequestRef.current = requestId
-    const delay = feedbackCountChanged ? 0 : transcript.length <= 1 ? 150 : 350
+    const delay = feedbackCountChanged || heartbeatTickChanged ? 0 : transcript.length <= 1 ? 150 : 350
 
     const timeoutId = window.setTimeout(() => {
       setLiveCoachStatus("checking")
       setLiveCoachError("")
       let fullGuidanceRequested = false
+      const turnsSinceLastFullGuidance = Math.max(0, aiTranscript.length - liveCoachGuidanceTurnCountRef.current)
+      const currentGuidanceSnapshot = aiLiveGuidanceRef.current
+      const visibleQuestion = currentGuidanceSnapshot
+        ? {
+            question: currentGuidanceSnapshot.displayRecommendation?.question ?? currentGuidanceSnapshot.nextQuestion,
+            reason: currentGuidanceSnapshot.displayRecommendation?.reason ?? currentGuidanceSnapshot.questionReason,
+            target: currentGuidanceSnapshot.displayRecommendation?.primaryIntentLabel ?? currentGuidanceSnapshot.target,
+            questionLifecycle: currentGuidanceSnapshot.questionLifecycle,
+            uiMode: currentGuidanceSnapshot.uiMode,
+          }
+        : null
 
       const guidancePayload = {
         account: {
@@ -10460,14 +10496,18 @@ function WorkspaceView({
         },
         opportunityId: opportunity.id,
         playbooks: callPlaybooks,
-        currentGuidance: aiLiveGuidanceRef.current
-          ? {
-              question: aiLiveGuidanceRef.current.displayRecommendation?.question ?? aiLiveGuidanceRef.current.nextQuestion,
-              target: aiLiveGuidanceRef.current.displayRecommendation?.primaryIntentLabel ?? aiLiveGuidanceRef.current.target,
-              questionLifecycle: aiLiveGuidanceRef.current.questionLifecycle,
-              uiMode: aiLiveGuidanceRef.current.uiMode,
-            }
-          : null,
+        currentGuidance: visibleQuestion,
+        refreshContext: {
+          reason: heartbeatTickChanged
+            ? "periodic_30_second_ai_recheck"
+            : feedbackCountChanged
+              ? "seller_feedback"
+              : "transcript_or_flow_change",
+          cadenceSeconds: LIVE_COACH_AI_RECHECK_SECONDS,
+          transcriptTurnCount: aiTranscript.length,
+          turnsSinceLastFullGuidance,
+          lastDisplayedQuestion: visibleQuestion,
+        },
         sellerFeedback: manualCoach.feedbackSignals,
         transcript: aiTranscript,
       }
@@ -10475,6 +10515,7 @@ function WorkspaceView({
       const requestFullGuidance = () => {
         if (fullGuidanceRequested) return
         fullGuidanceRequested = true
+        liveCoachFullGuidanceInFlightRef.current = true
         setLiveCoachStatus("thinking")
 
         requestLiveGuidance(guidancePayload)
@@ -10512,11 +10553,16 @@ function WorkspaceView({
             setLiveCoachStatus("error")
             setLiveCoachError(refreshMessage)
           })
+          .finally(() => {
+            if (requestId === liveCoachRequestRef.current) {
+              liveCoachFullGuidanceInFlightRef.current = false
+            }
+          })
       }
 
-      const turnsSinceLastFullGuidance = Math.max(0, aiTranscript.length - liveCoachGuidanceTurnCountRef.current)
       const forceFullGuidanceRefresh =
         feedbackCountChanged ||
+        heartbeatTickChanged ||
         !liveCoachHasGuidanceRef.current ||
         aiTranscript.length <= 1 ||
         turnsSinceLastFullGuidance >= 2
@@ -10571,6 +10617,7 @@ function WorkspaceView({
     captureStatus,
     customerResearch,
     isRecording,
+    liveCoachHeartbeatTick,
     manualCoach.feedbackSignals,
     opportunity,
     transcript,
@@ -12309,7 +12356,9 @@ function CallReplayContent({
   const [replaySeconds, setReplaySeconds] = React.useState(0)
   const [replayVolume, setReplayVolume] = React.useState(0.85)
   const [isReplayPlaying, setIsReplayPlaying] = React.useState(false)
-  const [lastReplayAction, setLastReplayAction] = React.useState("Replay ready")
+  const [lastReplayAction, setLastReplayAction] = React.useState(
+    call.recordingStoragePath ? "Recording saved. Replay is getting ready." : "Replay ready"
+  )
   const recordingLinkRequestRef = React.useRef(0)
   const recordingAutoRefreshAttemptRef = React.useRef(0)
   const replayPlayIntentRef = React.useRef(false)
@@ -12320,7 +12369,7 @@ function CallReplayContent({
   const isRecordingLinkLoading = recordingLinkStatus === "loading"
 
   const loadRecordingUrl = React.useCallback(
-    async ({ announce = false }: { announce?: boolean } = {}) => {
+    async ({ announce = false, silentError = false }: { announce?: boolean; silentError?: boolean } = {}) => {
       const requestId = recordingLinkRequestRef.current + 1
       recordingLinkRequestRef.current = requestId
 
@@ -12334,7 +12383,13 @@ function CallReplayContent({
 
       setRecordingLinkStatus("loading")
       setRecordingLinkError("")
-      setLastReplayAction(announce ? "Refreshing recording link" : "Preparing recording link")
+      setLastReplayAction(
+        silentError
+          ? "Recording saved. Replay is getting ready."
+          : announce
+            ? "Refreshing recording link"
+            : "Preparing recording link"
+      )
 
       try {
         const nextUrl = call.recordingStoragePath
@@ -12354,9 +12409,15 @@ function CallReplayContent({
 
         const message = getUserFacingErrorMessage(caughtError, "Recording link could not be prepared.")
         setRecordingUrl("")
-        setRecordingLinkStatus("error")
-        setRecordingLinkError(message)
-        setLastReplayAction(message)
+        if (silentError) {
+          setRecordingLinkStatus("idle")
+          setRecordingLinkError("")
+          setLastReplayAction("Recording saved. Press Play when you are ready.")
+        } else {
+          setRecordingLinkStatus("error")
+          setRecordingLinkError(message)
+          setLastReplayAction(message)
+        }
         return ""
       }
     },
@@ -12372,9 +12433,15 @@ function CallReplayContent({
     setIsReplayPlaying(false)
     recordingAutoRefreshAttemptRef.current = 0
     replayPlayIntentRef.current = false
-    setLastReplayAction(call.recordingStoragePath || call.recordingUrl ? "Preparing recording link" : "No recording is available for this call.")
+    setLastReplayAction(
+      call.recordingStoragePath
+        ? "Recording saved. Replay is getting ready."
+        : call.recordingUrl
+          ? "Preparing recording link"
+          : "No recording is available for this call."
+    )
     if (call.recordingStoragePath || call.recordingUrl) {
-      void loadRecordingUrl()
+      void loadRecordingUrl({ silentError: Boolean(call.recordingStoragePath) })
     }
 
     return () => {
@@ -12438,9 +12505,10 @@ function CallReplayContent({
       } catch (caughtError: unknown) {
         replayPlayIntentRef.current = false
         setIsReplayPlaying(false)
-        setLastReplayAction(
-          getUserFacingErrorMessage(caughtError, "Replay could not start. Refresh the recording link and try again.")
-        )
+        setRecordingLinkStatus("error")
+        const message = getUserFacingErrorMessage(caughtError, "Replay could not start. Refresh the recording link and try again.")
+        setRecordingLinkError(message)
+        setLastReplayAction(message)
       }
       return
     }
@@ -12498,16 +12566,23 @@ function CallReplayContent({
             onPlay={() => setIsReplayPlaying(true)}
             onError={() => {
               setIsReplayPlaying(false)
-              const shouldRefresh = Boolean(call.recordingStoragePath) && recordingAutoRefreshAttemptRef.current < 1
+              const shouldResumePlayback = replayPlayIntentRef.current
+              const shouldRefresh =
+                Boolean(call.recordingStoragePath) &&
+                recordingAutoRefreshAttemptRef.current < RECORDING_LINK_SILENT_REFRESH_LIMIT
 
               if (shouldRefresh) {
-                const shouldResumePlayback = replayPlayIntentRef.current
                 recordingAutoRefreshAttemptRef.current += 1
                 setRecordingLinkStatus("loading")
                 setRecordingLinkError("")
                 setRecordingUrl("")
-                setLastReplayAction("Refreshing recording link")
-                void loadRecordingUrl({ announce: true }).then(async (nextUrl) => {
+                setLastReplayAction(
+                  shouldResumePlayback ? "Refreshing recording link" : "Recording saved. Replay is getting ready."
+                )
+                void loadRecordingUrl({
+                  announce: shouldResumePlayback,
+                  silentError: !shouldResumePlayback,
+                }).then(async (nextUrl) => {
                   if (!nextUrl || !audioRef.current) return
 
                   setLastReplayAction(shouldResumePlayback ? "Recording link refreshed. Resuming replay" : "Recording link refreshed")
@@ -12533,9 +12608,16 @@ function CallReplayContent({
               }
 
               replayPlayIntentRef.current = false
+              setRecordingUrl("")
+              if (!shouldResumePlayback) {
+                setRecordingLinkStatus("idle")
+                setRecordingLinkError("")
+                setLastReplayAction("Recording saved. Press Play when you are ready.")
+                return
+              }
+
               setRecordingLinkStatus("error")
               setRecordingLinkError("Recording link needs a refresh. Press Retry playback, or open the recording in a new tab.")
-              setRecordingUrl("")
               setLastReplayAction("Recording link needs a refresh.")
             }}
             onTimeUpdate={(event) => setReplaySeconds(event.currentTarget.currentTime)}
