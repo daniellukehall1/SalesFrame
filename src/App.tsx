@@ -86,6 +86,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { DialogActions } from "@/components/ui/dialog-actions"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -3000,6 +3001,7 @@ function App() {
       setPostCallError("")
       const stoppedCall = await callCapture.stopCall()
       stoppedCallId = stoppedCall?.callId ?? stoppingCallId
+      setPostCallFocusCallId(stoppedCallId)
       if (stoppedCall) {
         setWorkspaceCalls((items) =>
           items.map((call) =>
@@ -3009,7 +3011,7 @@ function App() {
                   duration: formatTime(stoppedCall.durationSeconds),
                   durationSeconds: stoppedCall.durationSeconds,
                   recordingStoragePath: stoppedCall.recordingStoragePath ?? call.recordingStoragePath,
-                  recordingUrl: null,
+                  recordingUrl: stoppedCall.recordingUrl ?? call.recordingUrl,
                   status: "Processing",
                 }
               : call
@@ -3022,6 +3024,7 @@ function App() {
       setActiveCallStartedAt("")
       handleNavigate("post-call")
     } catch (caughtError: unknown) {
+      setPostCallFocusCallId(stoppedCallId)
       setIsRecording(false)
       setActiveCallId("")
       activeCallIdRef.current = ""
@@ -5153,6 +5156,8 @@ function App() {
                 playbookFields={workspacePlaybookFields}
                 playbookRows={workspacePlaybooks}
                 postCallFocusCallId={postCallFocusCallId}
+                postCallGenerating={postCallGenerating}
+                postCallError={postCallError}
                 postCallOutput={activePostCallOutput}
                 postCallTranscript={activePostCallTranscript}
                 savedOpenAiKeyState={savedOpenAiKeyState}
@@ -5794,22 +5799,12 @@ function WorkspaceOnboardingDialog({
           ) : null}
         </div>
 
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <Button variant="ghost" className="justify-start" disabled={isSaving} onClick={() => void onBackToLogin()}>
-            <ArrowLeftIcon />
-            {backActionLabel}
-          </Button>
-          <div className="grid gap-2 sm:flex sm:flex-row sm:justify-end">
-            {step > 1 ? (
-              <Button
-                variant="outline"
-                disabled={isSaving}
-                onClick={() => setStep((currentStep) => (currentStep === 4 ? 3 : currentStep === 3 ? 2 : 1))}
-              >
-                Back
-              </Button>
-            ) : null}
-            {step < 4 ? (
+        <DialogActions
+          cancelDisabled={isSaving}
+          cancelLabel={backActionLabel}
+          onCancel={() => void onBackToLogin()}
+          primaryAction={
+            step < 4 ? (
               <Button
                 className="gap-2"
                 disabled={!canContinue || isSaving}
@@ -5823,9 +5818,19 @@ function WorkspaceOnboardingDialog({
                 <CheckCircle2Icon />
                 {isSaving ? "Saving..." : "Finish setup"}
               </Button>
-            )}
-          </div>
-        </DialogFooter>
+            )
+          }
+        >
+          {step > 1 ? (
+            <Button
+              variant="outline"
+              disabled={isSaving}
+              onClick={() => setStep((currentStep) => (currentStep === 4 ? 3 : currentStep === 3 ? 2 : 1))}
+            >
+              Back
+            </Button>
+          ) : null}
+        </DialogActions>
       </DialogContent>
     </Dialog>
   )
@@ -10205,6 +10210,8 @@ function WorkspaceView({
   playbookFields,
   playbookRows,
   postCallFocusCallId,
+  postCallGenerating,
+  postCallError,
   postCallOutput,
   postCallTranscript,
   savedOpenAiKeyState,
@@ -10254,6 +10261,8 @@ function WorkspaceView({
   playbookFields: PlaybookFieldRow[]
   playbookRows: PlaybookRow[]
   postCallFocusCallId: string
+  postCallGenerating: boolean
+  postCallError: string
   postCallOutput: PostCallOutputView | null
   postCallTranscript: Opportunity["transcript"]
   savedOpenAiKeyState: SavedOpenAiKeyState | null
@@ -10424,10 +10433,19 @@ function WorkspaceView({
           .catch((caughtError: unknown) => {
             if (requestId !== liveCoachRequestRef.current) return
 
+            const existingGuidance = aiLiveGuidanceRef.current
+            const refreshMessage = getUserFacingErrorMessage(caughtError, "AI coach could not refresh.")
+            if (existingGuidance) {
+              liveCoachHasGuidanceRef.current = true
+              setLiveCoachStatus("ready")
+              setLiveCoachError(`SalesFrame could not refresh the next question yet. Keeping the last AI question while it reconnects. ${refreshMessage}`)
+              return
+            }
+
             setAiLiveGuidance(null)
             liveCoachHasGuidanceRef.current = false
             setLiveCoachStatus("error")
-            setLiveCoachError(getUserFacingErrorMessage(caughtError, "AI coach could not refresh."))
+            setLiveCoachError(refreshMessage)
           })
       }
 
@@ -10613,8 +10631,10 @@ function WorkspaceView({
 
       <TabsContent value="post-call" className="m-0 w-full min-w-0">
         <PostCallPanel
+          isProcessing={postCallGenerating}
           opportunity={opportunity}
           output={postCallOutput}
+          processingError={postCallError}
           replayCall={postCallReplayCall}
           transcript={postCallTranscript}
           transcriptCall={postCallTranscriptCall}
@@ -12175,6 +12195,7 @@ function CallReplayContent({
       call.recordingUrl ? "ready" : call.recordingStoragePath ? "loading" : "idle"
     )
   const [recordingLinkError, setRecordingLinkError] = React.useState("")
+  const [openError, setOpenError] = React.useState("")
   const [replaySeconds, setReplaySeconds] = React.useState(0)
   const [replayVolume, setReplayVolume] = React.useState(0.85)
   const [isReplayPlaying, setIsReplayPlaying] = React.useState(false)
@@ -12317,6 +12338,31 @@ function CallReplayContent({
     setLastReplayAction("Audio player is still loading.")
   }
 
+  const handleOpenRecording = async () => {
+    if (!hasPlayableRecording) {
+      setOpenError("No recording is available for this call.")
+      return
+    }
+
+    setOpenError("")
+    const targetWindow = window.open("about:blank", "_blank", "noopener,noreferrer")
+    if (targetWindow) targetWindow.opener = null
+
+    try {
+      const nextUrl = recordingUrl || (await loadRecordingUrl({ announce: true }))
+      if (!nextUrl) throw new Error("No recording is available for this call.")
+
+      if (targetWindow) {
+        targetWindow.location.href = nextUrl
+      } else {
+        window.open(nextUrl, "_blank", "noopener,noreferrer")
+      }
+    } catch (caughtError: unknown) {
+      targetWindow?.close()
+      setOpenError(getUserFacingErrorMessage(caughtError, "Recording could not be opened."))
+    }
+  }
+
   return (
     <div className="grid gap-4">
         {hasPlayableRecording ? (
@@ -12378,9 +12424,9 @@ function CallReplayContent({
 
               replayPlayIntentRef.current = false
               setRecordingLinkStatus("error")
-              setRecordingLinkError("Recording could not be played. Press Play to refresh it.")
+              setRecordingLinkError("Recording link needs a refresh. Press Retry playback, or open the recording in a new tab.")
               setRecordingUrl("")
-              setLastReplayAction("Recording could not be played. Press Play to refresh it.")
+              setLastReplayAction("Recording link needs a refresh.")
             }}
             onTimeUpdate={(event) => setReplaySeconds(event.currentTarget.currentTime)}
           />
@@ -12446,7 +12492,7 @@ function CallReplayContent({
             </div>
           )}
         </div>
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -12464,7 +12510,17 @@ function CallReplayContent({
                   ? "Retry"
                   : "Play"}
           </Button>
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            disabled={!hasPlayableRecording || isRecordingLinkLoading}
+            onClick={() => void handleOpenRecording()}
+          >
+            <ExternalLinkIcon />
+            Open recording
+          </Button>
+          <div className="flex min-w-36 flex-1 items-center justify-end gap-2">
             <Volume2Icon className="size-4 shrink-0 text-muted-foreground" />
             <input
               aria-label="Recording volume"
@@ -12485,6 +12541,11 @@ function CallReplayContent({
         {recordingLinkError ? (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
             {recordingLinkError}
+          </div>
+        ) : null}
+        {openError ? (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+            {openError}
           </div>
         ) : null}
         <div className="grid gap-2">
@@ -12996,16 +13057,20 @@ function OpportunityRecordingHistory({
 }
 
 function PostCallPanel({
+  isProcessing,
   opportunity,
   output,
+  processingError,
   replayCall,
   transcript,
   transcriptCall,
   onDeleteCall,
   onViewNextCallBrief,
 }: {
+  isProcessing: boolean
   opportunity: Opportunity
   output: PostCallOutputView | null
+  processingError: string
   replayCall: CallSummary | null
   transcript: Opportunity["transcript"]
   transcriptCall: CallSummary | null
@@ -13028,6 +13093,32 @@ function PostCallPanel({
           onDeleteCall={onDeleteCall}
           transcript={transcript}
         />
+      ) : null}
+      {processingError ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Post-call AI needs another pass</CardTitle>
+            <CardDescription>Your recording and transcript are still saved.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
+              SalesFrame could not finish the notes and next-call brief yet. You can keep using the recording and transcript while AI processing catches up.
+            </div>
+          </CardContent>
+        </Card>
+      ) : isProcessing ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Building the post-call brief</CardTitle>
+            <CardDescription>SalesFrame is turning the transcript into notes, evidence, and next steps.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-2">
+              <Skeleton className="h-10 rounded-lg" />
+              <Skeleton className="h-10 rounded-lg" />
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
       {!replayCall && transcriptCall && hasTranscriptLines ? (
         <Card>
@@ -13564,7 +13655,6 @@ function CallsView({
       <Card>
         <CardHeader>
           <div>
-            <CardDescription>Call library</CardDescription>
             <CardTitle>{activeView === "transcripts" ? "Transcripts" : activeView === "recordings" ? "Recordings" : "Calls"}</CardTitle>
           </div>
           <CardAction>
@@ -13582,8 +13672,8 @@ function CallsView({
           </CardAction>
         </CardHeader>
         <CardContent className="grid gap-3">
-          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_160px_190px_auto]">
-            <div className="relative">
+          <div className="flex flex-col gap-2 md:flex-row">
+            <div className="relative flex-1">
               <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 aria-label="Search calls, opportunities, accounts, or status"
@@ -13594,7 +13684,7 @@ function CallsView({
               />
             </div>
             <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-full" aria-label="Filter calls by type">
+              <SelectTrigger className="w-full md:w-44" aria-label="Filter calls by type">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -13607,7 +13697,7 @@ function CallsView({
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full" aria-label="Filter calls by status">
+              <SelectTrigger className="w-full md:w-44" aria-label="Filter calls by status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -13621,7 +13711,7 @@ function CallsView({
             </Select>
             <Button
               variant="outline"
-              className="gap-2"
+              className="gap-2 md:w-auto"
               onClick={() => {
                 setQuery("")
                 setTypeFilter("all")
@@ -13633,56 +13723,75 @@ function CallsView({
               Reset
             </Button>
           </div>
-          {paginatedCalls.map((call) => {
-            const displayStatus = getCallDisplayStatus(call, activeCallId)
-            const displayDuration = getCallDisplayDuration(call, activeCallId)
+          <div className="grid gap-3">
+            {paginatedCalls.map((call) => {
+              const displayStatus = getCallDisplayStatus(call, activeCallId)
+              const displayDuration = getCallDisplayDuration(call, activeCallId)
+              const relatedOpportunity = opportunityById.get(call.opportunityId)
+              const relatedAccount = relatedOpportunity ? accountById.get(relatedOpportunity.accountId) : undefined
 
-            return (
-            <div
-              key={call.id}
-              className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-colors hover:bg-muted/50 md:grid-cols-[1fr_120px_220px] md:items-center"
-              onClick={() => onCallSelect(call.id)}
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex size-10 items-center justify-center rounded-lg bg-muted">
-                  <FileAudioIcon className="size-5" />
-                </div>
-                <div>
-                  <p className="font-medium">{call.title}</p>
-                  <p className="text-sm text-muted-foreground">{call.date} · {call.type} · {displayDuration}</p>
-                </div>
-              </div>
-              <span className={cn("text-sm font-medium", getCallStatusTextClassName(displayStatus))}>{displayStatus}</span>
-              <div className="flex gap-2 md:justify-end" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  aria-label={`Open ${call.title}`}
-                  onClick={() => onCallSelect(call.id)}
+              return (
+                <div
+                  key={call.id}
+                  className="grid gap-3 rounded-lg bg-muted/30 p-4 md:grid-cols-[minmax(0,1fr)_160px_120px_120px_128px] md:items-center"
                 >
-                  Open
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  aria-label={`Delete ${call.title}`}
-                  onClick={() => onDeleteCall(call.id)}
-                >
-                  Delete
-                </Button>
+                  <div className="min-w-0">
+                    <p className="font-medium">{call.title}</p>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {relatedAccount?.name ?? "Unknown account"} · {relatedOpportunity?.name ?? "Unknown opportunity"} · {call.type}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Status</p>
+                    <p className={cn("text-sm font-medium", getCallStatusTextClassName(displayStatus))}>{displayStatus}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Duration</p>
+                    <p className="text-sm font-medium">{displayDuration}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Date</p>
+                    <p className="truncate text-sm font-medium">{call.date}</p>
+                  </div>
+                  <div className="flex md:justify-end">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="min-w-[104px] justify-center gap-1.5"
+                          aria-label={`Actions for ${call.title}`}
+                        >
+                          Actions
+                          <ChevronDownIcon className="size-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onSelect={() => onCallSelect(call.id)}>
+                          <ExternalLinkIcon />
+                          Open
+                        </DropdownMenuItem>
+                        <DropdownMenuItem variant="destructive" onSelect={() => onDeleteCall(call.id)}>
+                          <Trash2Icon />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+              )
+            })}
+            {visibleCalls.length === 0 ? (
+              <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+                {activeView === "recordings"
+                  ? "No recordings match this search and filter."
+                  : "No calls match this search and filter."}
               </div>
-            </div>
-            )
-          })}
-          {visibleCalls.length === 0 ? (
-            <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              {activeView === "recordings"
-                ? "No recordings match this search and filter."
-                : "No calls match this search and filter."}
-            </div>
-          ) : null}
+            ) : null}
+          </div>
           {visibleCalls.length > callsPageSize ? (
-            <div className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 pt-1 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
               <span className="text-muted-foreground">
                 Showing {(safeCallsPage - 1) * callsPageSize + 1}-{Math.min(safeCallsPage * callsPageSize, visibleCalls.length)} of {visibleCalls.length}
               </span>
@@ -13934,20 +14043,22 @@ function PlaybooksView({
   const [customSaving, setCustomSaving] = React.useState(false)
   const playbookCatalog = React.useMemo(
     () =>
-      playbooks.map((playbook) =>
-        playbook.id === "custom"
-          ? {
-              ...playbook,
-              bestFor: customDraft.bestFor,
-              description: customDraft.description,
-              evidenceStandard: customDraft.evidenceStandard,
-              fields: customDraft.fields.map((field) => [field.label, field.detail] as [string, string]),
-              liveGuidance: customDraft.liveGuidance,
-              name: customDraft.frameworkName,
-              exitCriteria: customDraft.exitCriteria.map((criterion) => criterion.text),
-            }
-          : playbook
-      ),
+      playbooks
+        .map((playbook) =>
+          playbook.id === "custom"
+            ? {
+                ...playbook,
+                bestFor: customDraft.bestFor,
+                description: customDraft.description,
+                evidenceStandard: customDraft.evidenceStandard,
+                fields: customDraft.fields.map((field) => [field.label, field.detail] as [string, string]),
+                liveGuidance: customDraft.liveGuidance,
+                name: customDraft.frameworkName,
+                exitCriteria: customDraft.exitCriteria.map((criterion) => criterion.text),
+              }
+            : playbook
+        )
+        .sort((firstPlaybook, secondPlaybook) => firstPlaybook.name.localeCompare(secondPlaybook.name)),
     [customDraft]
   )
   const selectedPlaybook = playbookCatalog.find((playbook) => playbook.id === activeView)

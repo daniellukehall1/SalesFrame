@@ -20,6 +20,7 @@ import {
   type RealtimeTranscriptEvent,
 } from "@/lib/realtime-transcription"
 import {
+  createCallRecordingSignedUrl,
   ensureCallSpeaker,
   insertCallNote,
   insertTranscriptSegment,
@@ -84,6 +85,14 @@ type StartCallCaptureConfig = {
   onNote?: (note: string) => void
   onTranscript?: (line: CallCaptureTranscriptLine) => void
   onTranscriptUpdate?: (line: CallCaptureTranscriptLine) => void
+}
+
+export type CallCaptureStopResult = {
+  callId: string
+  durationSeconds: number
+  endedAt: string
+  recordingStoragePath: string | null
+  recordingUrl: string | null
 }
 
 type SpeakerAttribution = {
@@ -493,7 +502,7 @@ export function useCallCapture() {
     [cleanup]
   )
 
-  const stopCall = React.useCallback(async () => {
+  const stopCall = React.useCallback(async (): Promise<CallCaptureStopResult | null> => {
     if (stopInFlightRef.current) return null
     stopInFlightRef.current = true
 
@@ -557,6 +566,7 @@ export function useCallCapture() {
 
     let uploadFailed = false
     let recordingStoragePath: string | null = null
+    let recordingUrl: string | null = null
     if (blob.size > 0) {
       try {
         const upload = await uploadCallRecording({
@@ -565,6 +575,12 @@ export function useCallCapture() {
           workspaceId: config.workspaceId,
         })
         recordingStoragePath = upload.path
+
+        try {
+          recordingUrl = await createCallRecordingSignedUrl(upload.path)
+        } catch (caughtError: unknown) {
+          setError(getUserFacingErrorMessage(caughtError, "Recording was saved, but the replay link needs to be refreshed."))
+        }
       } catch (caughtError: unknown) {
         uploadFailed = true
         setError(getUserFacingErrorMessage(caughtError, "Recording upload failed."))
@@ -579,6 +595,7 @@ export function useCallCapture() {
       durationSeconds,
       endedAt,
       recordingStoragePath,
+      recordingUrl,
     }
   }, [cleanup])
 

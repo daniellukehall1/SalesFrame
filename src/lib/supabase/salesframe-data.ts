@@ -998,7 +998,7 @@ export async function uploadCallRecording({
     .upload(path, file, {
       cacheControl: "3600",
       contentType,
-      upsert: false,
+      upsert: true,
     })
 
   if (uploadResponse.error) throw new Error(uploadResponse.error.message)
