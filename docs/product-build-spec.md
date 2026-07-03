@@ -164,7 +164,7 @@ The seller's saved selling context is managed from the personal Account page:
 - Your company.
 - What you sell.
 - Changing the company domain clears "What you sell", waits for typing to stop, then uses OpenAI seller-domain research to refresh the company and product context.
-- These saved fields prefill customer research steps in account creation, opportunity setup where research context is shown, and Start Call setup.
+- These saved fields prefill Seller Research steps in account creation, opportunity setup where research context is shown, and Start Call setup.
 
 Steps:
 

@@ -10,7 +10,18 @@ export class AppError extends Error {
   }
 }
 
-export function jsonResponse(data: unknown, status = 200) {
+type ErrorResponseOptions = {
+  context?: {
+    requestId?: string
+  }
+  functionName?: string
+  metadata?: Record<string, unknown>
+  request?: Request
+}
+
+type LogLevel = "error" | "info" | "warn"
+
+export function jsonResponse(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -21,6 +32,7 @@ export function jsonResponse(data: unknown, status = 200) {
       "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
+      ...headers,
     },
   })
 }
@@ -29,19 +41,68 @@ export function dataResponse(data: unknown, status = 200) {
   return jsonResponse({ data }, status)
 }
 
-export function errorResponse(error: unknown, defaultMessage = "SalesFrame could not finish that request. Try again in a moment.") {
+export function errorResponse(
+  error: unknown,
+  defaultMessage = "SalesFrame could not finish that request. Try again in a moment.",
+  options: ErrorResponseOptions = {}
+) {
   const appError = toAppError(error, defaultMessage)
   const publicMessage = getPublicAppErrorMessage(appError, defaultMessage)
+  const traceId = createTraceId()
+  const requestId = options.context?.requestId
+  const clientRequestId = options.request?.headers.get("x-salesframe-client-request-id") || undefined
+
+  logSafeEvent("error", "salesframe_function_error", {
+    clientRequestId,
+    code: appError.code,
+    functionName: options.functionName ?? getFunctionNameFromRequest(options.request),
+    message: getDiagnosticErrorMessage(error),
+    metadata: options.metadata ?? {},
+    publicMessage,
+    requestId,
+    stack: getDiagnosticErrorStack(error),
+    status: appError.status,
+    traceId,
+  })
 
   return jsonResponse(
     {
       error: {
         code: appError.code,
+        clientRequestId,
         message: publicMessage,
+        requestId,
+        traceId,
       },
     },
-    appError.status
+    appError.status,
+    {
+      "X-SalesFrame-Trace-Id": traceId,
+      ...(clientRequestId ? { "X-SalesFrame-Client-Request-Id": clientRequestId } : {}),
+      ...(requestId ? { "X-Netlify-Request-Id": requestId } : {}),
+    }
   )
+}
+
+export function logSafeEvent(level: LogLevel, event: string, payload: Record<string, unknown> = {}) {
+  const logEntry = sanitizeLogValue({
+    event,
+    payload,
+    timestamp: new Date().toISOString(),
+  })
+  const line = JSON.stringify(logEntry)
+
+  if (level === "info") {
+    console.info(line)
+    return
+  }
+
+  if (level === "warn") {
+    console.warn(line)
+    return
+  }
+
+  console.error(line)
 }
 
 export function getPublicErrorMessageForError(error: unknown, defaultMessage = "SalesFrame could not finish that request. Try again in a moment.") {
@@ -188,3 +249,67 @@ const technicalErrorPatterns = [
   /cannot read properties/i,
   /is not a function/i,
 ]
+
+function createTraceId() {
+  return `sf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function getFunctionNameFromRequest(request: Request | undefined) {
+  if (!request) return "unknown"
+
+  try {
+    const pathname = new URL(request.url).pathname
+    return pathname.split("/").filter(Boolean).at(-1) ?? "unknown"
+  } catch {
+    return "unknown"
+  }
+}
+
+function getDiagnosticErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+
+  return "Unknown error"
+}
+
+function getDiagnosticErrorStack(error: unknown) {
+  if (!(error instanceof Error) || !error.stack) return ""
+
+  return error.stack
+    .split("\n")
+    .slice(0, 8)
+    .map((line) => line.replace(/data:text\/javascript;base64,[A-Za-z0-9+/=]+/g, "data:text/javascript;base64,[redacted]"))
+    .join("\n")
+}
+
+function sanitizeLogValue(value: unknown, depth = 0): unknown {
+  if (depth > 5) return "[depth-limit]"
+  if (typeof value === "undefined") return undefined
+  if (value === null || typeof value === "number" || typeof value === "boolean") return value
+  if (typeof value === "string") return redactSensitiveText(value).slice(0, 1200)
+  if (Array.isArray(value)) return value.slice(0, 30).map((item) => sanitizeLogValue(item, depth + 1))
+
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .slice(0, 80)
+        .map(([key, item]) => [
+          key,
+          sensitiveKeyPattern.test(key) ? "[redacted]" : sanitizeLogValue(item, depth + 1),
+        ])
+    )
+  }
+
+  return String(value)
+}
+
+function redactSensitiveText(value: string) {
+  return value
+    .replace(/sk-(proj-)?[A-Za-z0-9_-]{16,}/g, "[redacted-openai-key]")
+    .replace(/sb_secret_[A-Za-z0-9_-]+/g, "[redacted-supabase-secret]")
+    .replace(/sb_publishable_[A-Za-z0-9_-]+/g, "[redacted-supabase-publishable]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted-token]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted-jwt]")
+}
+
+const sensitiveKeyPattern = /(apiKey|authorization|password|secret|serviceRole|token|openAiKey|supabaseKey)/i

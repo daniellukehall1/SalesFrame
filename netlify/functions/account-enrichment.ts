@@ -185,7 +185,7 @@ function isMissingRelationError(error: { code?: string; message?: string } | nul
 function missingEnrichmentStorageError() {
   return new AppError(
     "account_enrichment_storage_missing",
-    "Customer research is still getting ready for this workspace. Your account is saved, and you can try research again in a moment.",
+    "Account enrichment is still getting ready for this workspace. Your account is saved, and you can try Enrich account again in a moment.",
     503
   )
 }

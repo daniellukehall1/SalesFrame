@@ -32,7 +32,7 @@ export type OpenAiDiarizedSegment = {
 export async function callOpenAiJson<T>({
   apiKey,
   input,
-  model = getEnv("OPENAI_TEXT_MODEL", "gpt-4.1-mini"),
+  model = getEnv("OPENAI_TEXT_MODEL", "gpt-5.4-mini"),
   schema,
   schemaName = "response",
   strictSchema = true,

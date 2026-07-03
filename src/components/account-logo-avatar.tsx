@@ -30,7 +30,9 @@ export function AccountLogoAvatar({
   size?: keyof typeof accountLogoSizeClasses
 }) {
   const [failedLogoUrls, setFailedLogoUrls] = React.useState<Set<string>>(() => new Set())
+  const [loadedLogoUrl, setLoadedLogoUrl] = React.useState("")
   const normalizedDomain = normalizeAccountLogoDomain(domain)
+  const initials = getAccountLogoInitials(name)
   const logoSize = size === "lg" ? 96 : 64
   const candidateLogoUrls = React.useMemo(
     () => [
@@ -45,21 +47,33 @@ export function AccountLogoAvatar({
 
   React.useEffect(() => {
     setFailedLogoUrls(new Set())
+    setLoadedLogoUrl("")
   }, [candidateLogoUrls, retryKey])
 
   return (
     <span
       aria-hidden="true"
       className={cn(
-        "inline-flex shrink-0 items-center justify-center border border-border bg-muted text-muted-foreground shadow-xs",
+        "relative inline-flex shrink-0 items-center justify-center overflow-hidden border border-border bg-muted text-muted-foreground shadow-xs",
         accountLogoSizeClasses[size],
         className
       )}
     >
+      <span
+        className={cn(
+          "font-medium tracking-normal transition-opacity",
+          shouldShowImage && loadedLogoUrl === resolvedLogoUrl ? "opacity-0" : "opacity-100"
+        )}
+      >
+        {initials}
+      </span>
       {shouldShowImage ? (
         <img
           alt=""
-          className="size-full rounded-[inherit] object-contain p-1"
+          className={cn(
+            "absolute inset-0 size-full rounded-[inherit] bg-background object-contain p-1 transition-opacity",
+            loadedLogoUrl === resolvedLogoUrl ? "opacity-100" : "opacity-0"
+          )}
           decoding="async"
           draggable={false}
           height={size === "lg" ? 48 : size === "md" ? 40 : 28}
@@ -67,7 +81,11 @@ export function AccountLogoAvatar({
           referrerPolicy="origin"
           src={resolvedLogoUrl}
           width={size === "lg" ? 48 : size === "md" ? 40 : 28}
+          onLoad={() => {
+            setLoadedLogoUrl(resolvedLogoUrl)
+          }}
           onError={() => {
+            setLoadedLogoUrl("")
             setFailedLogoUrls((urls) => {
               const nextUrls = new Set(urls)
               nextUrls.add(resolvedLogoUrl)
@@ -75,9 +93,7 @@ export function AccountLogoAvatar({
             })
           }}
         />
-      ) : (
-        <span className="font-medium tracking-normal">{getAccountLogoInitials(name)}</span>
-      )}
+      ) : null}
     </span>
   )
 }

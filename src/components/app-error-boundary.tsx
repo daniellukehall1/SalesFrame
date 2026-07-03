@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { reportClientError } from "@/lib/client-error-reporting"
 
 type AppErrorBoundaryState = {
   error: Error | null
@@ -29,6 +30,14 @@ export class AppErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
+    void reportClientError({
+      error,
+      eventName: "render_error",
+      metadata: {
+        componentStack: info.componentStack,
+      },
+    })
+
     if (import.meta.env.DEV) {
       console.error("SalesFrame render error", error, info)
     }

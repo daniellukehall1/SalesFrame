@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client"
 import "./index.css"
 import App from "./App"
 import { AppErrorBoundary } from "@/components/app-error-boundary"
+import { installGlobalClientErrorReporting } from "@/lib/client-error-reporting"
+
+installGlobalClientErrorReporting()
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

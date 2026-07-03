@@ -59,6 +59,24 @@ export type AccountEnrichmentResponse = {
 type FunctionRequestOptions = {
   body?: unknown
   method?: "DELETE" | "GET" | "POST"
+  signal?: AbortSignal
+  timeoutMs?: number
+}
+
+export class SalesFrameFunctionError extends Error {
+  code?: string
+  requestId?: string
+  status: number
+  traceId?: string
+
+  constructor(message: string, options: { code?: string; requestId?: string; status: number; traceId?: string }) {
+    super(message)
+    this.name = "SalesFrameFunctionError"
+    this.code = options.code
+    this.requestId = options.requestId
+    this.status = options.status
+    this.traceId = options.traceId
+  }
 }
 
 export type CsvImportRequestPayload = {
@@ -73,8 +91,11 @@ type FunctionEnvelope<T> =
   | { data: T }
   | {
       error: {
+        clientRequestId?: string
         code?: string
         message?: string
+        requestId?: string
+        traceId?: string
       }
     }
 
@@ -109,7 +130,7 @@ function getFunctionErrorMessage(payload: unknown) {
   ) {
     const code = (payload.error as { code?: unknown }).code
     if (code === "account_enrichment_storage_missing") {
-      return "Customer research is still getting ready for this workspace. Your account is saved, and you can try research again in a moment."
+      return "Account enrichment is still getting ready for this workspace. Your account is saved, and you can try Enrich account again in a moment."
     }
 
     const message = (payload.error as { message?: unknown }).message
@@ -122,6 +143,45 @@ function getFunctionErrorMessage(payload: unknown) {
   return fallback
 }
 
+function getFunctionErrorDetails(payload: unknown) {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "error" in payload &&
+    payload.error &&
+    typeof payload.error === "object"
+  ) {
+    const error = payload.error as { clientRequestId?: unknown; code?: unknown; requestId?: unknown; traceId?: unknown }
+
+    return {
+      code: typeof error.code === "string" ? error.code : undefined,
+      requestId:
+        typeof error.requestId === "string"
+          ? error.requestId
+          : typeof error.clientRequestId === "string"
+            ? error.clientRequestId
+            : undefined,
+      traceId: typeof error.traceId === "string" ? error.traceId : undefined,
+    }
+  }
+
+  return {}
+}
+
+export function getErrorReference(error: unknown) {
+  if (error instanceof SalesFrameFunctionError) {
+    return error.traceId || error.requestId || ""
+  }
+
+  return ""
+}
+
+export function appendErrorReference(message: string, error: unknown) {
+  const reference = getErrorReference(error)
+
+  return reference ? `${message} Reference: ${reference}.` : message
+}
+
 async function callFunction<T>(path: string, options: FunctionRequestOptions = {}): Promise<T> {
   const supabase = createClient()
   const {
@@ -132,18 +192,61 @@ async function callFunction<T>(path: string, options: FunctionRequestOptions = {
   if (error) throw new Error(error.message)
   if (!session?.access_token) throw new Error("Sign in before using this feature.")
 
-  const response = await fetch(path, {
-    method: options.method ?? "GET",
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      "Content-Type": "application/json",
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  })
-  const payload = await readFunctionPayload<T>(response)
+  const controller = new AbortController()
+  const clientRequestId = createClientRequestId()
+  let timedOut = false
+  let timeoutId: number | undefined
+
+  const abortFromCaller = () => controller.abort()
+
+  if (options.signal?.aborted) {
+    controller.abort()
+  } else if (options.signal) {
+    options.signal.addEventListener("abort", abortFromCaller, { once: true })
+  }
+
+  if (options.timeoutMs && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0) {
+    timeoutId = window.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, options.timeoutMs)
+  }
+
+  let response: Response
+  let payload: FunctionEnvelope<T> | T | null
+
+  try {
+    response = await fetch(path, {
+      method: options.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+        "X-SalesFrame-Client-Request-Id": clientRequestId,
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    })
+    payload = await readFunctionPayload<T>(response)
+  } catch (caughtError) {
+    if (timedOut) {
+      throw new SalesFrameFunctionError("SalesFrame timed out while waiting for this request.", {
+        code: "client_request_timeout",
+        requestId: clientRequestId,
+        status: 408,
+      })
+    }
+
+    throw caughtError
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId)
+    options.signal?.removeEventListener("abort", abortFromCaller)
+  }
 
   if (!response.ok) {
-    throw new Error(getFunctionErrorMessage(payload))
+    throw new SalesFrameFunctionError(getFunctionErrorMessage(payload), {
+      ...getFunctionErrorDetails(payload),
+      status: response.status,
+    })
   }
 
   if (payload && typeof payload === "object" && "data" in payload) {
@@ -151,6 +254,15 @@ async function callFunction<T>(path: string, options: FunctionRequestOptions = {
   }
 
   return payload as T
+}
+
+function createClientRequestId() {
+  const randomPart =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2, 12)
+
+  return `sf_${Date.now().toString(36)}_${randomPart}`
 }
 
 async function callMultipartFunction<T>(path: string, formData: FormData): Promise<T> {
@@ -173,7 +285,10 @@ async function callMultipartFunction<T>(path: string, formData: FormData): Promi
   const payload = await readFunctionPayload<T>(response)
 
   if (!response.ok) {
-    throw new Error(getFunctionErrorMessage(payload))
+    throw new SalesFrameFunctionError(getFunctionErrorMessage(payload), {
+      ...getFunctionErrorDetails(payload),
+      status: response.status,
+    })
   }
 
   if (payload && typeof payload === "object" && "data" in payload) {
@@ -242,10 +357,15 @@ export function requestPostCallOutputs(callId: string) {
   })
 }
 
-export function requestLiveGuidance(body: Record<string, unknown>) {
+export function requestLiveGuidance(
+  body: Record<string, unknown>,
+  options: Pick<FunctionRequestOptions, "signal" | "timeoutMs"> = {}
+) {
   return callFunction<LiveGuidanceFunctionResponse>("/api/openai/live-guidance", {
     method: "POST",
     body,
+    signal: options.signal,
+    timeoutMs: options.timeoutMs ?? 25000,
   })
 }
 

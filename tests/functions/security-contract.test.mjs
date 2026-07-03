@@ -72,7 +72,8 @@ test("protected OpenAI functions use typed envelopes and authorization helpers",
   assert.match(accountEnrichment, /account_enrichment_profiles/)
   assert.match(accountEnrichment, /account_enrichment_runs/)
   assert.match(accountEnrichment, /account_enrichment_storage_missing/)
-  assert.match(accountEnrichment, /Customer research is still getting ready for this workspace/)
+  assert.match(accountEnrichment, /Account enrichment is still getting ready for this workspace/)
+  assert.doesNotMatch(accountEnrichment, /Customer research is still getting ready/)
   assert.doesNotMatch(accountEnrichment, /Apply the latest Supabase migration/)
   assert.doesNotMatch(accountEnrichment, /being prepared/)
   assert.match(accountEnrichment, /function normalizeEmployeeCountCoreField/)
@@ -158,6 +159,8 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
   assert.equal(databaseResponse.status, 500)
   assert.equal(databasePayload.error.code, "server_error")
   assert.equal(databasePayload.error.message, "SalesFrame could not finish that request. Try again in a moment.")
+  assert.match(databasePayload.error.traceId, /^sf_/)
+  assert.equal(databaseResponse.headers.get("X-SalesFrame-Trace-Id"), databasePayload.error.traceId)
 
   const providerResponse = errorResponse(
     upstreamFailure("The 'delay' parameter is not supported for this model.", "openai_request_failed")
@@ -220,6 +223,7 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
   assert.equal(validationResponse.status, 400)
   assert.equal(validationPayload.error.code, "workspace_id_required")
   assert.equal(validationPayload.error.message, "workspaceId is required.")
+  assert.match(validationPayload.error.traceId, /^sf_/)
 
   assert.equal(
     getPublicErrorMessageForError(

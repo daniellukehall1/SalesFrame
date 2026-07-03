@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react"
 import { defineConfig, loadEnv, type Plugin } from "vite"
 
 const localFunctionRoutes: Record<string, string> = {
+  "/api/client-error": "client-error",
   "/api/import/accounts": "import-accounts",
   "/api/import/opportunities": "import-opportunities",
   "/api/openai/account-enrichment": "account-enrichment",

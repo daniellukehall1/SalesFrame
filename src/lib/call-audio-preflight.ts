@@ -179,7 +179,13 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
 
   const sources: CapturedAudioSource[] = []
 
-  if (mode === "meeting_audio" && "getDisplayMedia" in mediaDevices) {
+  if (mode === "meeting_audio") {
+    if (!("getDisplayMedia" in mediaDevices)) {
+      throw new Error(
+        "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, in-person mic mode, or install SalesFrame Audio Connector."
+      )
+    }
+
     try {
       const displayStream = await mediaDevices.getDisplayMedia(getMeetingAudioDisplayOptions())
       const displaySurface = displayStream.getVideoTracks()[0]?.getSettings?.().displaySurface
@@ -197,9 +203,24 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
         })
       } else {
         displayStream.getTracks().forEach((track) => track.stop())
+        throw new Error(
+          "SalesFrame cannot hear customer audio from that share. Choose a browser tab or Entire Screen with Share audio/System audio turned on, or switch to in-person microphone mode."
+        )
       }
-    } catch {
-      // Microphone capture below gives the user a clearer fallback error.
+    } catch (caughtError: unknown) {
+      stopCapturedSources(sources)
+      if (caughtError instanceof Error && caughtError.message.includes("SalesFrame cannot hear customer audio")) {
+        throw caughtError
+      }
+      if (isDisplayCapturePermissionError(caughtError)) {
+        throw new Error(
+          "SalesFrame needs customer-side audio before this call can start. Share a meeting tab or Entire Screen with Share audio/System audio turned on, or switch to in-person microphone mode."
+        )
+      }
+
+      throw new Error(
+        "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, in-person mic mode, or install SalesFrame Audio Connector."
+      )
     }
   }
 
@@ -238,12 +259,12 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
       stream: microphoneStream,
     })
   } catch (caughtError: unknown) {
-    if (sources.length === 0) throw caughtError
-
-    sources[0] = {
-      ...sources[0],
-      note: "Seller microphone was not available. Customer-side audio will still be transcribed, and seller turns may need manual review.",
+    if (mode === "meeting_audio") {
+      stopCapturedSources(sources)
+      throw new Error("SalesFrame can hear customer audio, but still needs your microphone before the call can start.")
     }
+
+    throw caughtError
   }
 
   if (sources.length === 0) {
@@ -251,6 +272,19 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
   }
 
   return sources
+}
+
+function stopCapturedSources(sources: CapturedAudioSource[]) {
+  sources.forEach((source) => {
+    source.stream.getTracks().forEach((track) => track.stop())
+  })
+}
+
+function isDisplayCapturePermissionError(error: unknown) {
+  return (
+    error instanceof DOMException &&
+    ["AbortError", "NotAllowedError", "PermissionDeniedError"].includes(error.name)
+  )
 }
 
 function getMeetingAudioDisplayOptions(): DisplayMediaStreamOptions {

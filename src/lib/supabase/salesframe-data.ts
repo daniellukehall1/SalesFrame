@@ -68,7 +68,7 @@ function isMissingRelationError(error: SupabaseResponse<unknown>["error"]) {
 }
 
 function missingAccountEnrichmentStorageMessage() {
-  return "Customer research is still getting ready for this workspace. Your account is saved, and you can try research again in a moment."
+  return "Account enrichment is still getting ready for this workspace. Your account is saved, and you can try Enrich account again in a moment."
 }
 
 export async function getCurrentUserProfile(client?: SalesFrameClient) {
@@ -662,7 +662,7 @@ export async function ensureCallSpeaker(values: TablesInsert<"call_speakers">, c
 
   const response = await getSupabase(client)
     .from("call_speakers")
-    .insert(values)
+    .upsert(values, { onConflict: "call_id,label" })
     .select("*")
     .single()
 

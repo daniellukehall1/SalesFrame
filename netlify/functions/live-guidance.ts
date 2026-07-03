@@ -3,7 +3,7 @@ import type { Config, Context } from "@netlify/functions"
 import type { Json } from "../../src/lib/supabase/database.types"
 import { buildPlaybookIntentClusters, type PlaybookIntentCluster } from "../../src/lib/salesframe-intent-clusters"
 import { getEnv } from "./_shared/env"
-import { badRequest, dataResponse, errorResponse, forbidden, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
+import { badRequest, dataResponse, errorResponse, forbidden, logSafeEvent, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { assertRateLimit } from "./_shared/rate-limit"
@@ -227,6 +227,27 @@ type LiveGuidanceResult = {
     field: string
     influence: string
   }[]
+}
+
+type PreCallLiveGuidanceResult = {
+  displayRecommendation: LiveGuidanceResult["displayRecommendation"]
+  candidateScores: LiveGuidanceResult["candidateScores"]
+  conversationState: Pick<
+    LiveGuidanceResult["conversationState"],
+    | "sellerMove"
+    | "customerSignal"
+    | "shouldAskNow"
+    | "naturalnessGuidance"
+    | "activeIntent"
+    | "intentStatus"
+    | "questionTiming"
+    | "riskLevel"
+    | "confidence"
+  >
+  questionLifecycle: LiveGuidanceResult["questionLifecycle"]
+  sellerFeedbackRequest: LiveGuidanceResult["sellerFeedbackRequest"]
+  uiMode: LiveUiMode
+  contextUsed: LiveGuidanceResult["contextUsed"]
 }
 
 const liveGuidanceSchema = {
@@ -560,6 +581,54 @@ const liveGuidanceSchema = {
         },
       },
     },
+  },
+}
+
+const preCallLiveGuidanceSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "displayRecommendation",
+    "candidateScores",
+    "conversationState",
+    "questionLifecycle",
+    "sellerFeedbackRequest",
+    "uiMode",
+    "contextUsed",
+  ],
+  properties: {
+    displayRecommendation: liveGuidanceSchema.properties.displayRecommendation,
+    candidateScores: liveGuidanceSchema.properties.candidateScores,
+    conversationState: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "sellerMove",
+        "customerSignal",
+        "shouldAskNow",
+        "naturalnessGuidance",
+        "activeIntent",
+        "intentStatus",
+        "questionTiming",
+        "riskLevel",
+        "confidence",
+      ],
+      properties: {
+        sellerMove: { type: "string", enum: ["ask", "listen", "acknowledge", "clarify", "soften", "go_deeper", "close_next_step"] },
+        customerSignal: { type: "string" },
+        shouldAskNow: { type: "boolean" },
+        naturalnessGuidance: { type: "string" },
+        activeIntent: { type: "string" },
+        intentStatus: { type: "string", enum: ["confirmed", "answered", "asked", "weak", "missing"] },
+        questionTiming: { type: "string", enum: ["now", "wait", "too_early", "follow_up_only"] },
+        riskLevel: { type: "string", enum: ["low", "medium", "high"] },
+        confidence: { type: "number", minimum: 0, maximum: 1 },
+      },
+    },
+    questionLifecycle: liveGuidanceSchema.properties.questionLifecycle,
+    sellerFeedbackRequest: liveGuidanceSchema.properties.sellerFeedbackRequest,
+    uiMode: liveGuidanceSchema.properties.uiMode,
+    contextUsed: liveGuidanceSchema.properties.contextUsed,
   },
 }
 
@@ -945,6 +1014,221 @@ function requiredQuestionReplacementReason(
   throw upstreamFailure(message, code)
 }
 
+function cloneRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : null
+}
+
+function keepRecordWithTextFields(value: unknown, fields: string[]) {
+  const record = cloneRecord(value)
+  if (!record) return null
+
+  return fields.every((field) => cleanText(record[field])) ? record : null
+}
+
+function normalizeTextArrayRecords(value: unknown, fields: string[]) {
+  return Array.isArray(value)
+    ? value
+        .map((item) => keepRecordWithTextFields(item, fields))
+        .filter((item): item is Record<string, unknown> => Boolean(item))
+    : []
+}
+
+function hydratePreCallGuidanceResult(value: unknown): unknown {
+  const record = cloneRecord(value)
+  if (!record) return value
+
+  const displayRecommendation = cloneRecord(record.displayRecommendation) ?? {}
+  const conversationState = cloneRecord(record.conversationState) ?? {}
+  const questionLifecycle = cloneRecord(record.questionLifecycle) ?? {}
+  const sellerFeedbackRequest = cloneRecord(record.sellerFeedbackRequest) ?? {}
+  const target = cleanText(displayRecommendation.target, cleanText(displayRecommendation.primaryIntentLabel, "Opening"))
+  const playbookLabel = cleanText(displayRecommendation.playbookLabel, "Selected playbooks")
+  const question = cleanText(displayRecommendation.question)
+  const reason = cleanText(displayRecommendation.reason)
+  const softerAlternative = cleanText(displayRecommendation.softerAlternative)
+
+  return {
+    nextQuestion: question,
+    questionReason: reason,
+    target,
+    playbookLabel,
+    displayRecommendation: {
+      question,
+      reason,
+      target,
+      playbookLabel,
+      primaryIntentClusterId: cleanText(displayRecommendation.primaryIntentClusterId),
+      primaryIntentLabel: cleanText(displayRecommendation.primaryIntentLabel, target),
+      alsoCovers: Array.isArray(displayRecommendation.alsoCovers) ? displayRecommendation.alsoCovers : [],
+      uiMode: cleanText(displayRecommendation.uiMode, cleanText(record.uiMode, "ask_now")),
+      confidence: typeof displayRecommendation.confidence === "number" ? displayRecommendation.confidence : 0.72,
+      softerAlternative,
+    },
+    coveredCount: 0,
+    activeIntentStatus: cleanText(conversationState.intentStatus, "missing"),
+    conversationState: {
+      conversationStage: "opening",
+      buyerMood: "neutral",
+      flowStage: "opening",
+      mood: "neutral",
+      sentiment: "neutral before live customer speech",
+      pace: "not established before live customer speech",
+      sellerMove: cleanText(conversationState.sellerMove, "ask"),
+      customerSignal: cleanText(
+        conversationState.customerSignal,
+        "No customer speech has been captured yet; use the first question to open naturally."
+      ),
+      shouldAskNow: typeof conversationState.shouldAskNow === "boolean" ? conversationState.shouldAskNow : true,
+      naturalnessGuidance: cleanText(
+        conversationState.naturalnessGuidance,
+        "Start with a low-pressure opening question and then listen for the buyer's first signal."
+      ),
+      activeIntent: cleanText(conversationState.activeIntent, target),
+      intentStatus: cleanText(conversationState.intentStatus, "missing"),
+      questionTiming: cleanText(conversationState.questionTiming, "now"),
+      riskLevel: cleanText(conversationState.riskLevel, "low"),
+      confidence: typeof conversationState.confidence === "number" ? conversationState.confidence : 0.72,
+    },
+    coveredIntents: [],
+    gaps: [],
+    evidence: [],
+    candidateScores: Array.isArray(record.candidateScores) ? record.candidateScores : [],
+    evidenceUpdates: [],
+    sellerFeedbackRequest: {
+      prompt: cleanText(sellerFeedbackRequest.prompt, "Tell SalesFrame what happened with this suggestion."),
+      preferredActions: Array.isArray(sellerFeedbackRequest.preferredActions) && sellerFeedbackRequest.preferredActions.length
+        ? sellerFeedbackRequest.preferredActions
+        : ["asked", "too_soon", "softer", "skip"],
+    },
+    questionLifecycle: {
+      currentQuestionState: cleanText(questionLifecycle.currentQuestionState, "active"),
+      shouldReplaceQuestion: typeof questionLifecycle.shouldReplaceQuestion === "boolean"
+        ? questionLifecycle.shouldReplaceQuestion
+        : true,
+      replacementReason: cleanText(
+        questionLifecycle.replacementReason,
+        "Pre-call readiness selected the best opening recommendation from account context, opportunity history, and selected playbooks."
+      ),
+      awkwardnessRisk: cleanText(questionLifecycle.awkwardnessRisk, "low"),
+      topicShiftConfidence: typeof questionLifecycle.topicShiftConfidence === "number"
+        ? questionLifecycle.topicShiftConfidence
+        : 0,
+      stabilityRecommendation: cleanText(questionLifecycle.stabilityRecommendation, "replace"),
+    },
+    parkedIntents: [],
+    uiMode: cleanText(record.uiMode, cleanText(displayRecommendation.uiMode, "ask_now")),
+    flow: [],
+    alternatives: softerAlternative
+      ? [{
+          question: softerAlternative,
+          target,
+          reason: "Softer wording for the same opening intent.",
+        }]
+      : [],
+    contextUsed: Array.isArray(record.contextUsed) ? record.contextUsed : [],
+  }
+}
+
+function normalizePreCallGuidanceForValidation(value: unknown, options: { hasTranscript: boolean }) {
+  if (options.hasTranscript) return value
+
+  const record = cloneRecord(value)
+  if (!record) return value
+
+  const displayRecommendation = cloneRecord(record.displayRecommendation)
+  if (displayRecommendation) {
+    displayRecommendation.reason = cleanText(
+      displayRecommendation.reason,
+      "Start the call with a low-pressure opener that fits the selected playbooks."
+    )
+    displayRecommendation.target = cleanText(
+      displayRecommendation.target,
+      cleanText(displayRecommendation.primaryIntentLabel, "Opening context")
+    )
+    displayRecommendation.playbookLabel = cleanText(
+      displayRecommendation.playbookLabel,
+      cleanText(record.playbookLabel, "Selected playbooks")
+    )
+    displayRecommendation.softerAlternative = cleanText(
+      displayRecommendation.softerAlternative,
+      cleanText(displayRecommendation.question)
+    )
+    displayRecommendation.alsoCovers = normalizeTextArrayRecords(displayRecommendation.alsoCovers, [
+      "playbookFieldId",
+      "playbookLabel",
+      "fieldLabel",
+      "intentClusterId",
+    ])
+    record.displayRecommendation = displayRecommendation
+  }
+
+  const conversationState = cloneRecord(record.conversationState)
+  if (conversationState) {
+    conversationState.sentiment = cleanText(conversationState.sentiment, "neutral before live customer speech")
+    conversationState.pace = cleanText(conversationState.pace, "not established before live customer speech")
+    conversationState.customerSignal = cleanText(
+      conversationState.customerSignal,
+      "No customer speech has been captured yet; use the first question to open naturally."
+    )
+    conversationState.naturalnessGuidance = cleanText(
+      conversationState.naturalnessGuidance,
+      "Start with a low-pressure opening question and then listen for the buyer's first signal."
+    )
+    record.conversationState = conversationState
+  }
+
+  const questionLifecycle = cloneRecord(record.questionLifecycle)
+  if (questionLifecycle) {
+    questionLifecycle.replacementReason = cleanText(
+      questionLifecycle.replacementReason,
+      "Pre-call readiness selected the best opening recommendation from account context, opportunity history, and selected playbooks."
+    )
+    record.questionLifecycle = questionLifecycle
+  }
+
+  record.coveredIntents = normalizeTextArrayRecords(record.coveredIntents, ["label", "framework", "status", "evidence"])
+  record.gaps = normalizeTextArrayRecords(record.gaps, ["label", "status", "detail"])
+  record.evidence = normalizeTextArrayRecords(record.evidence, ["label", "framework", "status", "detail"])
+  record.evidenceUpdates = normalizeTextArrayRecords(record.evidenceUpdates, [
+    "playbookFieldId",
+    "intentClusterId",
+    "label",
+    "framework",
+    "status",
+    "summary",
+  ])
+  record.parkedIntents = normalizeTextArrayRecords(record.parkedIntents, [
+    "intentClusterId",
+    "intentLabel",
+    "priority",
+    "reasonParked",
+    "reentryCue",
+    "bridgeQuestion",
+    "latestRevisitMoment",
+  ]).map((parkedIntent) => ({
+    ...parkedIntent,
+    relatedPlaybookFields: Array.isArray(parkedIntent.relatedPlaybookFields)
+      ? parkedIntent.relatedPlaybookFields
+      : [],
+  }))
+  record.flow = normalizeTextArrayRecords(record.flow, ["label", "detail"])
+  record.alternatives = normalizeTextArrayRecords(record.alternatives, ["question", "target", "reason"])
+  record.contextUsed = normalizeTextArrayRecords(record.contextUsed, ["source", "field", "influence"])
+
+  const sellerFeedbackRequest = cloneRecord(record.sellerFeedbackRequest)
+  if (sellerFeedbackRequest) {
+    sellerFeedbackRequest.prompt = cleanText(sellerFeedbackRequest.prompt, "Tell SalesFrame what happened with this suggestion.")
+    sellerFeedbackRequest.preferredActions = Array.isArray(sellerFeedbackRequest.preferredActions) && sellerFeedbackRequest.preferredActions.length
+      ? sellerFeedbackRequest.preferredActions
+      : ["asked", "too_soon", "softer", "skip"]
+    record.sellerFeedbackRequest = sellerFeedbackRequest
+  }
+
+  return record
+}
+
 function assertLiveGuidanceResult(value: unknown, options: { hasTranscript: boolean }): LiveGuidanceResult {
   const record = requireRecord(value, "Live guidance returned an invalid shape.", "openai_invalid_live_guidance")
   const displayRecommendation = requireRecord(
@@ -1293,6 +1577,33 @@ function assertGuidanceReferencesSelectedFields({
   })
 }
 
+function sanitizeDisplayAlsoCovers({
+  intentClusters,
+  playbookFields,
+  result,
+}: {
+  intentClusters: PlaybookIntentCluster[]
+  playbookFields: Record<string, unknown>[]
+  result: LiveGuidanceResult
+}) {
+  const validClusterIds = new Set(intentClusters.map((cluster) => cluster.id))
+  const validPlaybookFieldIds = new Set(playbookFields.map((field) => cleanText(field.id)).filter(Boolean))
+  const validClusterFieldPairs = new Set(
+    intentClusters.flatMap((cluster) =>
+      cluster.fields.map((field) => `${cluster.id}:${field.playbookFieldId}`)
+    )
+  )
+
+  const originalCount = result.displayRecommendation.alsoCovers.length
+  result.displayRecommendation.alsoCovers = result.displayRecommendation.alsoCovers.filter((cover) => {
+    if (!validClusterIds.has(cover.intentClusterId)) return false
+    if (!validPlaybookFieldIds.has(cover.playbookFieldId)) return false
+    return validClusterFieldPairs.has(`${cover.intentClusterId}:${cover.playbookFieldId}`)
+  })
+
+  return originalCount - result.displayRecommendation.alsoCovers.length
+}
+
 function requireKnownCluster(value: string, validClusterIds: Set<string>, message: string, code: string) {
   if (!validClusterIds.has(value)) throw upstreamFailure(message, code)
 }
@@ -1351,13 +1662,16 @@ async function persistEvidenceUpdates({
   }
 }
 
-export default async (request: Request, _context: Context) => {
+export default async (request: Request, context: Context) => {
+  let payloadForDiagnostics: LiveGuidancePayload | null = null
+
   try {
     if (request.method !== "POST") {
       throw methodNotAllowed()
     }
 
     const payload = await readJson<LiveGuidancePayload>(request)
+    payloadForDiagnostics = payload
     if (!payload.callId) throw badRequest("callId is required.", "call_id_required")
     if (!payload.accountId) throw badRequest("accountId is required.", "account_id_required")
     if (!payload.opportunityId) throw badRequest("opportunityId is required.", "opportunity_id_required")
@@ -1498,8 +1812,8 @@ export default async (request: Request, _context: Context) => {
     }
 
     const guidanceStartedAt = Date.now()
-    const result = assertLiveGuidanceResult(
-      await callOpenAiJson<LiveGuidanceResult>({
+    const rawGuidanceResult = hasTranscript
+      ? await callOpenAiJson<unknown>({
         apiKey,
         model: getEnv("OPENAI_LIVE_COACH_MODEL", "gpt-5.4-mini"),
         schema: liveGuidanceSchema,
@@ -1507,13 +1821,11 @@ export default async (request: Request, _context: Context) => {
         system:
           "You are SalesFrame's live enterprise sales coach. Your job is to make the seller sound like an elite, trusted, human seller in real time. Use the selected sales methodologies strictly, but never make the wording sound like a checklist. Treat intentClusters as the source of truth for what the call needs to learn: rank overlapping intent clusters, not individual playbook checklists. Account and opportunity record fields are secondary business context: they shape timing, depth, specificity, and wording, but selected playbooks and evidence-led intent coverage decide what must be learned. Account Enriched Sales Signals are public-source account intelligence inside recordContext.account.accountEnrichmentProfile: use them to make live questions more specific, timely, relevant, and commercially useful. AI Enriched Sales Signals shape wording and timing but do not complete methodology fields by themselves. Operate in three lanes: fast lane reads meaningful transcript turns and updates intent coverage, thinking lane ranks three candidate seller moves, and background lane records evidence memory for the opportunity. Return only schema-valid JSON. Generate exactly three candidate questions or seller moves internally, each tied to a valid intentClusterId from intentClusters. Score each for methodologyValue, askNowFit, currentTopicFit, stageFit, naturalness, timingFit, timingRisk, buyerMoodFit, informationGain, reentryPotential, risk, and overallScore, then return the winning displayRecommendation plus one softerAlternative. displayRecommendation.primaryIntentClusterId must be a valid cluster id, primaryIntentLabel must be the human cluster label, and alsoCovers must list selected playbook fields from that same intent cluster that this question can update. evidenceUpdates must use playbookFieldId values from intentClusters; never invent field ids, never write evidence to unselected fields, and mark a stricter field weak when the answer is only partial. Use recordContext to avoid redundant questions, shape natural wording, and choose the right depth for the opportunity stage and call type. Do not mark a framework field complete from account or opportunity record context alone unless the saved field is explicit seller-entered evidence for that methodology intent. Always return contextUsed as the account or opportunity fields that materially influenced the recommendation, including accountEnrichmentProfile fields when they shaped wording or timing, or an empty array if none did. Maintain a formal questionLifecycle: active means still natural now, stale means the conversation moved, parked means still valuable but wrong right now, revisit_before_close means recover gently before the call ends, dropped means not useful enough for this call. questionLifecycle.replacementReason must always be a non-empty sentence explaining why the current question should be held, replaced, parked, recovered, or used as the pre-call opener. Use parkedIntents as intent debt: remember high-value unanswered clusters, why they were parked, what cue would make them natural again, and the bridge question that could recover them. If the right move is to listen, acknowledge, clarify, wrap up, park and follow the customer's thread, or recover before close, set uiMode accordingly and make displayRecommendation.question the concise words the seller could say if needed. Treat account profile notes as seller-provided account intelligence: use them to shape context, priorities, and natural follow-ups, but do not blindly repeat sensitive or irrelevant notes. Pick one next move that fits the current conversation flow. If latestTranscriptWindow is empty, this is pre-call readiness: still return a real opening recommendation, set conversationStage to opening, buyerMood and mood to neutral, sentiment to neutral before live customer speech, pace to not established before live customer speech, customerSignal to No customer speech has been captured yet; use the first question to open naturally, naturalnessGuidance to Start with a low-pressure opening question and then listen for the buyer's first signal, and replacementReason to explain why this opener is the right first move. If the customer has naturally answered the intent, mark it answered or confirmed and do not ask it again. If the seller already asked a question that covers the intent, mark it asked and wait for the buyer answer or advance when answered. Use prior guidance events and sellerFeedback as history: asked means the seller used it, too_soon parks the intent unless the customer opens the door, softer requests lower pressure wording, skip drops or deprioritizes the intent unless the customer returns to it. Read buyer mood, sentiment, pace, resistance, confusion, urgency, topic movement, and openness from the recent transcript. Conversation maturity matters: in opening and early stages, ask easy current-state, relevance, agenda, pain, or desired-outcome questions; do not ask about budget, procurement, economic buyer, champion, paper process, quantified metrics, or hard differentiation unless the customer has already raised that topic. In developing and deep stages, go sharper only when it follows the customer's current words. When the customer sounds rushed, confused, defensive, or skeptical, soften the seller move and ask a lower-pressure clarifying question. When the customer is engaged, go deeper into impact, decision process, power, metrics, risk, or next commitment. Do not ask stacked questions. Keep the primary question concise, natural, and customer-language led.",
         input: JSON.stringify({
-          records: {
-            call: {
-              callType: selectedCallType,
-              status: cleanText(call.status),
-              startedAt: cleanText(call.started_at),
-              endedAt: cleanText(call.ended_at),
-            },
+          callRecordSummary: {
+            callType: selectedCallType,
+            status: cleanText(call.status),
+            startedAt: cleanText(call.started_at),
+            endedAt: cleanText(call.ended_at),
           },
           selectedContext: {
             callType: selectedCallType,
@@ -1584,10 +1896,83 @@ export default async (request: Request, _context: Context) => {
           ],
         }),
       })
-      ,
+      : hydratePreCallGuidanceResult(await callOpenAiJson<PreCallLiveGuidanceResult>({
+        apiKey,
+        model: getEnv("OPENAI_LIVE_COACH_MODEL", "gpt-5.4-mini"),
+        schema: preCallLiveGuidanceSchema,
+        schemaName: "salesframe_pre_call_guidance",
+        system:
+          "You are SalesFrame's live enterprise sales coach. This request is pre-call readiness: no customer transcript exists yet. Return one natural first question that helps the seller open the call calmly and advances the selected playbooks without sounding like a checklist. Rank exactly three internal candidate moves using the provided intentClusters and recordContext. The selected playbooks and intent clusters decide what needs to be learned; account, opportunity, customer research, seller research, and enrichment context only shape timing and wording. Do not ask heavy budget, procurement, economic-buyer, champion, quantified-metrics, or hard decision-process questions in the opener unless the provided opportunity history clearly says the buyer already raised that topic. If Sandler is selected, prefer a natural upfront-contract or ANOT-style opener. Return only schema-valid JSON.",
+        input: JSON.stringify({
+          selectedContext: {
+            callType: selectedCallType,
+            recordContext,
+            accountEnrichmentProfile: accountEnrichmentProfileContext,
+            accountProfile: accountProfileContext,
+            playbooks: selectedPlaybooks,
+            customerResearch: payload.customerResearch,
+            recentResearchRuns: researchRuns.slice(0, 2),
+            priorGuidanceEvents: priorGuidanceEvents.slice(0, 3),
+            priorSellerFeedback: priorFeedbackRows.slice(0, 4),
+            sellerFeedback,
+            opportunityEvidence: (opportunityEvidence as Record<string, unknown>[]).slice(0, 12),
+            intentClusters,
+            conversationMaturity,
+            openingPlaybookGuidance: getOpeningPlaybookGuidance(selectedPlaybooks),
+            playbookConversationSequence: getPlaybookConversationSequence(selectedPlaybooks),
+          },
+          latestTranscriptWindow: [],
+          transcriptState: {
+            hasTranscript: false,
+            mode: "pre_call_readiness",
+          },
+          coachingRules: [
+            "Primary question should usually be 8 to 24 words.",
+            "Ask only one thing.",
+            "Make the first question feel easy to answer.",
+            "Use account and opportunity context to avoid generic wording.",
+            "Use account enrichment and profile notes only to shape wording, not to mark methodology fields complete.",
+            "Return a concrete question or a concise listen/acknowledge move; never return placeholder copy.",
+            "questionLifecycle.replacementReason must be a non-empty sentence explaining why this is the right opener.",
+            "candidateScores must include exactly three ranked candidates tied to valid intentClusterId values.",
+          ],
+        }),
+      }))
+    const result = assertLiveGuidanceResult(
+      normalizePreCallGuidanceForValidation(rawGuidanceResult, { hasTranscript }),
       { hasTranscript }
     )
     const guidanceLatencyMs = Math.max(0, Date.now() - guidanceStartedAt)
+    if (guidanceLatencyMs > 10000) {
+      logSafeEvent("warn", "salesframe_live_guidance_slow", {
+        accountId: payload.accountId,
+        callId: authorizedCall.id,
+        functionName: "live-guidance",
+        guidanceLatencyMs,
+        hasTranscript,
+        opportunityId: authorizedOpportunity.id,
+        playbookCount: selectedPlaybooks.length,
+        requestId: context.requestId,
+      })
+    }
+
+    const droppedAlsoCovers = sanitizeDisplayAlsoCovers({
+      intentClusters,
+      playbookFields: (playbookFieldResponse.data ?? []) as Record<string, unknown>[],
+      result,
+    })
+    if (droppedAlsoCovers > 0) {
+      logSafeEvent("warn", "salesframe_live_guidance_also_covers_sanitized", {
+        accountId: payload.accountId,
+        callId: authorizedCall.id,
+        droppedAlsoCovers,
+        functionName: "live-guidance",
+        hasTranscript,
+        opportunityId: authorizedOpportunity.id,
+        requestId: context.requestId,
+      })
+    }
+
     assertGuidanceReferencesSelectedFields({
       intentClusters,
       playbookFields: (playbookFieldResponse.data ?? []) as Record<string, unknown>[],
@@ -1641,7 +2026,18 @@ export default async (request: Request, _context: Context) => {
 
     return dataResponse({ guidance: result })
   } catch (error) {
-    return errorResponse(error)
+    return errorResponse(error, undefined, {
+      context,
+      functionName: "live-guidance",
+      metadata: {
+        accountId: payloadForDiagnostics?.accountId,
+        callId: payloadForDiagnostics?.callId,
+        hasTranscript: Boolean(payloadForDiagnostics?.transcript?.length),
+        opportunityId: payloadForDiagnostics?.opportunityId,
+        playbookCount: payloadForDiagnostics?.playbooks?.length ?? 0,
+      },
+      request,
+    })
   }
 }
 

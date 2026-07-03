@@ -164,7 +164,7 @@ export default async (request: Request, _context: Context) => {
     const attribution = assertSpeakerAttributionResult(
       await callOpenAiJson<SpeakerAttributionResult>({
         apiKey,
-        model: getEnv("OPENAI_SPEAKER_ATTRIBUTION_MODEL", getEnv("OPENAI_TEXT_MODEL", "gpt-4.1-mini")),
+        model: getEnv("OPENAI_SPEAKER_ATTRIBUTION_MODEL", getEnv("OPENAI_TEXT_MODEL", "gpt-5.4-mini")),
         schema: speakerAttributionSchema,
         schemaName: "salesframe_speaker_attribution",
         system:
