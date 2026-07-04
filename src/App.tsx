@@ -7252,17 +7252,17 @@ function StartRecordingDialog({
                     </div>
                   ) : null}
 
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-2">
                       <SearchIcon className="size-4 text-muted-foreground" />
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-sm font-medium">Seller Research</p>
                         <p className="text-xs text-muted-foreground">
                           Add context that helps SalesFrame make the first question sound like you.
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
                       <Label htmlFor="customer-research-toggle" className="text-sm text-muted-foreground">
                         Use research
                       </Label>
@@ -7991,10 +7991,10 @@ function CreateAccountDialog({
                 aiEnrichmentEnabled && !canUseEnrichment && "bg-destructive/10"
               )}
             >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-start gap-2">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-start gap-2">
                   <SparklesIcon className="mt-0.5 size-4 text-muted-foreground" />
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-medium">Customer Research</p>
                     <p className="text-xs text-muted-foreground">
                       Research this account, fill blank fields, and prepare sales signals from trusted public sources.
@@ -8016,17 +8016,17 @@ function CreateAccountDialog({
             </div>
 
             <div className="grid gap-3 rounded-lg bg-muted/30 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-2">
                   <SearchIcon className="size-4 text-muted-foreground" />
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-medium">Seller Research</p>
                     <p className="text-xs text-muted-foreground">
                       {customerResearchEnabled ? "Used to shape live questions for this account." : "Optional context about what you sell."}
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   <Label htmlFor="create-account-research-toggle" className="text-sm text-muted-foreground">
                     Use research
                   </Label>
@@ -8102,12 +8102,12 @@ function CreateAccountDialog({
 
         {step === 4 ? (
           <div className="grid gap-4 rounded-lg border p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-2">
                 <TargetIcon className="size-4 text-muted-foreground" />
                 <p className="text-sm font-medium">First opportunity</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 <Label htmlFor="create-first-opportunity" className="text-sm text-muted-foreground">
                   Create
                 </Label>
@@ -8659,7 +8659,7 @@ function CreateOpportunityDialog({
         </div>
 
         <div className="grid gap-2 rounded-lg border p-3">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <SquarePenIcon className="size-4 text-muted-foreground" />
               <p className="text-sm font-medium">Optional fields</p>
@@ -8668,7 +8668,7 @@ function CreateOpportunityDialog({
               type="button"
               variant="outline"
               size="sm"
-              className="gap-2"
+              className="w-full gap-2 sm:w-auto"
               disabled={createSubmitting}
               onClick={() => setShowOptionalFields((value) => !value)}
             >
@@ -10041,7 +10041,7 @@ function AccountView({
               {opportunities.length ? opportunities.map((opportunity) => (
                 <div key={`${opportunity.id}-focus`} className="rounded-lg border bg-muted/30 p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium">{opportunity.name}</p>
+                    <p className="min-w-0 truncate text-sm font-medium">{opportunity.name}</p>
                     <span className="text-sm font-medium">{opportunity.coverage}%</span>
                   </div>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -10170,16 +10170,16 @@ function AccountEnrichmentEditor({
 
   return (
     <Card className="min-w-0 xl:col-span-2">
-      <CardHeader>
+      <CardHeader className="gap-3">
         <div>
           <CardTitle>AI Enriched Sales Signals</CardTitle>
           <CardDescription>
             Run enrichment when you want fresh account research; edit and save the signals you want SalesFrame to use.
           </CardDescription>
         </div>
-        <CardAction className="flex flex-wrap items-center gap-2">
+        <CardAction className="col-start-1 row-span-1 row-start-auto mt-1 flex w-full flex-col items-stretch gap-2 justify-self-start sm:col-start-2 sm:row-span-2 sm:row-start-1 sm:mt-0 sm:w-auto sm:flex-row sm:items-center sm:justify-self-end">
           {!hasSavedOpenAiKey ? (
-            <Button type="button" size="sm" variant="outline" className="min-w-40 justify-center gap-2" onClick={onOpenSettings}>
+            <Button type="button" size="sm" variant="outline" className="min-w-40 justify-center gap-2 sm:w-auto" onClick={onOpenSettings}>
               <KeyRoundIcon />
               Open settings
             </Button>
@@ -10188,7 +10188,7 @@ function AccountEnrichmentEditor({
               type="button"
               size="sm"
               variant="outline"
-              className="min-w-40 justify-center gap-2"
+              className="min-w-40 justify-center gap-2 sm:w-auto"
               disabled={runStatus === "saving"}
               onClick={onRunEnrichment}
             >
@@ -10199,7 +10199,7 @@ function AccountEnrichmentEditor({
           <Button
             type="button"
             size="sm"
-            className="min-w-40 justify-center gap-2"
+            className="min-w-40 justify-center gap-2 sm:w-auto"
             disabled={saveStatus === "saving"}
             onClick={() => void onSave(draft)}
           >
@@ -16105,8 +16105,8 @@ function SettingsView({
                 configurable: true,
               },
             ].map((item) => (
-              <div key={item.id} className="flex items-center justify-between gap-4 rounded-lg border p-3">
-                <div>
+              <div key={item.id} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
                   <Label htmlFor={`capture-setting-${item.id}`} className="text-sm font-medium">{item.title}</Label>
                   <p className="mt-1 text-sm text-muted-foreground">{item.body}</p>
                 </div>

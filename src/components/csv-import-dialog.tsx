@@ -584,11 +584,11 @@ export function CsvImportDialog({
                   })}
                 </div>
               </div>
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-muted-foreground">
                   Page {safePage} of {totalPages}
                 </p>
-                <div className="flex gap-2">
+                <div className="grid gap-2 sm:flex">
                   <Button variant="outline" size="sm" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
                     Previous
                   </Button>
