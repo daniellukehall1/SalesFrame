@@ -1,5 +1,17 @@
 import type { Opportunity } from "@/lib/salesframe-core"
 
+export const starterOpportunityGuidance = {
+  nextQuestion: "Ready for your first live question",
+  questionReason: "Start a call and SalesFrame will shape the opener from this account, opportunity, and selected playbooks.",
+}
+
+export function hasStarterOpportunityGuidance(opportunity: Pick<Opportunity, "nextQuestion" | "questionReason">) {
+  return (
+    opportunity.nextQuestion === starterOpportunityGuidance.nextQuestion &&
+    opportunity.questionReason === starterOpportunityGuidance.questionReason
+  )
+}
+
 export function createRecordId(value: string, prefix: string) {
   const slug = value
     .trim()
@@ -32,8 +44,8 @@ export function createStarterOpportunity({
     missing: 11,
     weak: 0,
     callType,
-    nextQuestion: "AI guidance pending",
-    questionReason: "Start a call to generate the next question with OpenAI live guidance.",
+    nextQuestion: starterOpportunityGuidance.nextQuestion,
+    questionReason: starterOpportunityGuidance.questionReason,
     meddicc: [
       { label: "Metrics", status: "missing", detail: "No quantified impact captured yet." },
       { label: "Economic Buyer", status: "missing", detail: "Buyer and approval owner are unknown." },
@@ -50,7 +62,7 @@ export function createStarterOpportunity({
       { label: "Timeline", status: "missing", detail: "Timeline and business trigger are unknown." },
     ],
     stakeholders: [],
-    notes: ["Start a call to generate live guidance, transcript, and post-call outputs with OpenAI."],
+    notes: [],
     transcript: [],
   }
 }

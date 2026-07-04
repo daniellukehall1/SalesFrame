@@ -81,7 +81,6 @@ import {
   DialogClose,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -233,7 +232,10 @@ import {
 } from "@/lib/manual-coach"
 import { formatSavedAt } from "@/lib/openai-key-storage"
 import { formatPlaybooks, normalizePlaybooks, parsePlaybookSelection } from "@/lib/playbook-utils"
-import { createStarterOpportunity } from "@/lib/record-factories"
+import {
+  createStarterOpportunity,
+  hasStarterOpportunityGuidance,
+} from "@/lib/record-factories"
 import {
   areSellerResearchProfilesEqual,
   inferCompanyNameFromDomain,
@@ -566,6 +568,14 @@ const emptyOpportunity: Opportunity = createStarterOpportunity({
   callType: "Discovery",
 })
 
+function getOpportunityGuidancePreview(opportunity: Opportunity) {
+  if (hasStarterOpportunityGuidance(opportunity)) {
+    return "Start a call when you are ready. SalesFrame will prepare the first live question from the account, opportunity, and playbooks."
+  }
+
+  return opportunity.nextQuestion
+}
+
 function getSupabaseUserName(user: User) {
   const fullName = user.user_metadata?.full_name
   const name = user.user_metadata?.name
@@ -800,6 +810,7 @@ type RecordSaveStatus = "idle" | "saving" | "saved" | "error"
 
 const LIVE_COACH_AI_RECHECK_SECONDS = 30
 const LIVE_COACH_AI_RECHECK_MS = LIVE_COACH_AI_RECHECK_SECONDS * 1000
+const LIVE_COACH_FORCE_REFRESH_TURNS = 1
 const RECORDING_LINK_SILENT_REFRESH_LIMIT = 2
 
 function mapAiLiveGuidanceResponse(value: unknown): LiveGuidance | null {
@@ -3579,7 +3590,7 @@ function App() {
           .then((response) => {
             const research = mapCustomerResearchResponse(response)
             if (!research) {
-              throw new Error("Customer research could not be prepared. Try again, or continue without research.")
+              throw new Error("Research context could not be prepared. Try again, or continue without research.")
             }
           })
           .catch(() => undefined)
@@ -3892,7 +3903,7 @@ function App() {
           .then((response) => {
             const research = mapCustomerResearchResponse(response)
             if (!research) {
-              throw new Error("Customer research could not be prepared. Try again from the account page.")
+              throw new Error("Research context could not be prepared. Try again from the account page.")
             }
           })
           .catch(() => undefined)
@@ -3931,7 +3942,7 @@ function App() {
             }))
             setWorkspaceRefreshToken((value) => value + 1)
           } catch (caughtError: unknown) {
-            const message = getUserFacingErrorMessage(caughtError, "Account enrichment could not be completed.")
+            const message = getUserFacingErrorMessage(caughtError, "Enrichment needs another try. The account is still saved.")
 
             setAccountEnrichmentRunStatus("error")
             setAccountEnrichmentRunMessage(message)
@@ -4245,7 +4256,7 @@ function App() {
       setAccountEnrichmentRunStatus("saved")
       setAccountEnrichmentRunMessage("")
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, "Account enrichment could not be completed.")
+      const message = getUserFacingErrorMessage(caughtError, "Enrichment needs another try. The account is still saved.")
 
       setAccountEnrichmentRunStatus("error")
       setAccountEnrichmentRunMessage(message)
@@ -4296,7 +4307,7 @@ function App() {
         ok: true,
       }
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, "Account intelligence could not be saved.")
+      const message = getUserFacingErrorMessage(caughtError, "Account intelligence needs another save attempt.")
 
       setAccountEnrichmentSaveStatus("error")
       setAccountEnrichmentSaveMessage(message)
@@ -4737,7 +4748,7 @@ function App() {
         return nextItems
       })
     } catch {
-      setWorkspaceErrorMessage("Workspace setup was cancelled, but the draft workspace could not be removed.")
+      setWorkspaceErrorMessage("Workspace setup was cancelled. SalesFrame needs another try to remove the draft workspace.")
     }
   }
 
@@ -6302,18 +6313,22 @@ function CallPrepDialog({
             </p>
           </div>
         </div>
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <DialogClose asChild>
-            <Button variant="outline">
-              Cancel
-            </Button>
-          </DialogClose>
-          <DialogClose asChild>
-            <Button onClick={() => onViewChange("methodology")}>
-              Open methodology
-            </Button>
-          </DialogClose>
-        </DialogFooter>
+        <DialogActions
+          cancelAction={
+            <DialogClose asChild>
+              <Button variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+          }
+          primaryAction={
+            <DialogClose asChild>
+              <Button onClick={() => onViewChange("methodology")}>
+                Open methodology
+              </Button>
+            </DialogClose>
+          }
+        />
       </DialogContent>
     </Dialog>
   )
@@ -6804,7 +6819,7 @@ function StartRecordingDialog({
 
           setResearchProfileStatus("error")
           setResearchProfileMessage(
-            getUserFacingErrorMessage(error, "OpenAI could not research this domain. You can type what you sell manually.")
+            getUserFacingErrorMessage(error, "SalesFrame needs another moment to research this domain. You can type what you sell manually.")
           )
         })
     }, sellerDomainLookupDebounceMs)
@@ -6826,27 +6841,27 @@ function StartRecordingDialog({
         ? error
         : getUserFacingErrorMessage(error, "Call could not be started.")
 
-    if (/OpenAI could not use that key|key needs billing|quota attention|Check the key in Settings/i.test(message)) {
+    if (/OpenAI key did not work|key needs billing|quota attention|Check the key in Settings/i.test(message)) {
       return appendErrorReference(
-        "OpenAI could not use this workspace key. Check the key in Settings, then try again.",
+        "This workspace key needs attention. Check the key in Settings, then try again.",
         error
       )
     }
 
     if (/timed out|taking longer|rate.?limit|too many requests/i.test(message)) {
       return appendErrorReference(
-        "OpenAI took too long to write the first live question. Your call has not started yet. Try again in a moment.",
+        "SalesFrame is taking longer than expected to write the first question. Your call has not started yet. Try again in a moment.",
         error
       )
     }
 
     if (
-      /SalesFrame could not finish the AI step/i.test(message) ||
+      /SalesFrame needs another moment to prepare this/i.test(message) ||
       /could not prepare the first question/i.test(message) ||
       /Live guidance did not return/i.test(message)
     ) {
       return appendErrorReference(
-        "SalesFrame got an incomplete AI response while writing the first live question. Your call has not started yet. Try again in a moment.",
+        "SalesFrame needs another moment to write the first question. Your call has not started yet. Try again in a moment.",
         error
       )
     }
@@ -6976,15 +6991,15 @@ function StartRecordingDialog({
                 steps={startPreparationSteps}
               />
             </div>
-            <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-              <Button variant="outline" onClick={handleCancelStart}>
-                Cancel
-              </Button>
-              <Button disabled className="gap-2">
-                <SparklesIcon className="animate-pulse" />
-                Starting call
-              </Button>
-            </DialogFooter>
+            <DialogActions
+              onCancel={handleCancelStart}
+              primaryAction={
+                <Button disabled className="gap-2">
+                  <SparklesIcon className="animate-pulse" />
+                  Starting call
+                </Button>
+              }
+            />
           </>
         ) : (
           <>
@@ -7370,48 +7385,52 @@ function StartRecordingDialog({
               ) : null}
             </div>
 
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <div className="grid gap-2 sm:flex sm:flex-row">
-            <Button variant="outline" onClick={handleCancelStart}>
-              Cancel
-            </Button>
-            {step > 1 ? (
-              <Button variant="outline" className="gap-2" onClick={handleBack}>
-                <ArrowLeftIcon />
-                Back
+        <DialogActions
+          leftActions={
+            <div className="grid gap-2 sm:flex sm:flex-row">
+              <Button variant="outline" onClick={handleCancelStart}>
+                Cancel
               </Button>
-            ) : null}
-          </div>
-          {step === 4 ? (
-            hasSavedOpenAiKey ? (
-              <Button
-                variant="destructive"
-                className="gap-2"
-                disabled={!canStart || startSubmitting}
-                onClick={handleStart}
-              >
-                <Mic2Icon />
-                {startSubmitting ? "Starting..." : "Start call"}
-              </Button>
+              {step > 1 ? (
+                <Button variant="outline" className="gap-2" onClick={handleBack}>
+                  <ArrowLeftIcon />
+                  Back
+                </Button>
+              ) : null}
+            </div>
+          }
+          primaryAction={
+            step === 4 ? (
+              hasSavedOpenAiKey ? (
+                <Button
+                  variant="destructive"
+                  className="gap-2"
+                  disabled={!canStart || startSubmitting}
+                  onClick={handleStart}
+                >
+                  <Mic2Icon />
+                  {startSubmitting ? "Starting..." : "Start call"}
+                </Button>
+              ) : (
+                <Button
+                  className="gap-2"
+                  onClick={() => {
+                    setOpen(false)
+                    onOpenSettings?.()
+                  }}
+                >
+                  <KeyRoundIcon />
+                  Open settings
+                </Button>
+              )
             ) : (
-              <Button
-                className="gap-2"
-                onClick={() => {
-                  setOpen(false)
-                  onOpenSettings?.()
-                }}
-              >
-                <KeyRoundIcon />
-                Open settings
+              <Button className="gap-2" disabled={!canContinue} onClick={handleNext}>
+                Continue
+                <ArrowRightIcon />
               </Button>
             )
-          ) : (
-            <Button className="gap-2" disabled={!canContinue} onClick={handleNext}>
-              Continue
-              <ArrowRightIcon />
-            </Button>
-          )}
-        </DialogFooter>
+          }
+        />
           </>
         )}
       </DialogContent>
@@ -7688,7 +7707,7 @@ function CreateAccountDialog({
 
           setResearchProfileStatus("error")
           setResearchProfileMessage(
-            getUserFacingErrorMessage(error, "OpenAI could not research this domain. You can type what you sell manually.")
+            getUserFacingErrorMessage(error, "SalesFrame needs another moment to research this domain. You can type what you sell manually.")
           )
         })
     }, sellerDomainLookupDebounceMs)
@@ -8247,17 +8266,19 @@ function CreateAccountDialog({
         ) : null}
         </div>
 
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <Button
-            variant="outline"
-            className="gap-2"
-            disabled={createSubmitting}
-            onClick={step === 1 ? () => handleOpenChange(false) : handleBack}
-          >
-            {step === 1 ? null : <ArrowLeftIcon />}
-            {step === 1 ? "Cancel" : "Back"}
-          </Button>
-          {step === 4 ? (
+        <DialogActions
+          cancelAction={
+            <Button
+              variant="outline"
+              className="gap-2"
+              disabled={createSubmitting}
+              onClick={step === 1 ? () => handleOpenChange(false) : handleBack}
+            >
+              {step === 1 ? null : <ArrowLeftIcon />}
+              {step === 1 ? "Cancel" : "Back"}
+            </Button>
+          }
+          primaryAction={step === 4 ? (
             <Button className="gap-2" disabled={!canCreate || createSubmitting} onClick={handleCreate}>
               <Building2Icon />
               {createSubmitting ? "Creating..." : "Create account"}
@@ -8268,7 +8289,7 @@ function CreateAccountDialog({
               <ArrowRightIcon />
             </Button>
           )}
-        </DialogFooter>
+        />
       </DialogContent>
     </Dialog>
   )
@@ -8476,15 +8497,16 @@ function EditAccountDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <Button variant="outline" disabled={editSubmitting} onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button className="gap-2" disabled={!canSave || editSubmitting} onClick={handleSave}>
-            <Building2Icon />
-            {editSubmitting ? "Saving..." : "Save account"}
-          </Button>
-        </DialogFooter>
+        <DialogActions
+          cancelDisabled={editSubmitting}
+          onCancel={() => onOpenChange(false)}
+          primaryAction={
+            <Button className="gap-2" disabled={!canSave || editSubmitting} onClick={handleSave}>
+              <Building2Icon />
+              {editSubmitting ? "Saving..." : "Save account"}
+            </Button>
+          }
+        />
       </DialogContent>
     </Dialog>
   )
@@ -8761,15 +8783,16 @@ function CreateOpportunityDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <Button variant="outline" disabled={createSubmitting} onClick={() => handleOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button className="gap-2" disabled={!canCreate || createSubmitting} onClick={handleCreate}>
-            <TargetIcon />
-            {createSubmitting ? "Creating..." : "Create opportunity"}
-          </Button>
-        </DialogFooter>
+        <DialogActions
+          cancelDisabled={createSubmitting}
+          onCancel={() => handleOpenChange(false)}
+          primaryAction={
+            <Button className="gap-2" disabled={!canCreate || createSubmitting} onClick={handleCreate}>
+              <TargetIcon />
+              {createSubmitting ? "Creating..." : "Create opportunity"}
+            </Button>
+          }
+        />
       </DialogContent>
     </Dialog>
   )
@@ -9019,15 +9042,16 @@ function EditOpportunityDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <Button variant="outline" disabled={editSubmitting} onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button className="gap-2" disabled={!canSave || editSubmitting} onClick={handleSave}>
-            <CheckCircle2Icon />
-            {editSubmitting ? "Saving..." : "Save changes"}
-          </Button>
-        </DialogFooter>
+        <DialogActions
+          cancelDisabled={editSubmitting}
+          onCancel={() => onOpenChange(false)}
+          primaryAction={
+            <Button className="gap-2" disabled={!canSave || editSubmitting} onClick={handleSave}>
+              <CheckCircle2Icon />
+              {editSubmitting ? "Saving..." : "Save changes"}
+            </Button>
+          }
+        />
       </DialogContent>
     </Dialog>
   )
@@ -9094,14 +9118,15 @@ function DeleteRecordDialog({
             {deleteError}
           </div>
         ) : null}
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <Button variant="outline" disabled={deleteSubmitting} onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button variant="destructive" disabled={deleteSubmitting} onClick={handleDelete}>
-            {deleteSubmitting ? "Deleting..." : `Delete ${recordLabel}`}
-          </Button>
-        </DialogFooter>
+        <DialogActions
+          cancelDisabled={deleteSubmitting}
+          onCancel={onCancel}
+          primaryAction={
+            <Button variant="destructive" disabled={deleteSubmitting} onClick={handleDelete}>
+              {deleteSubmitting ? "Deleting..." : `Delete ${recordLabel}`}
+            </Button>
+          }
+        />
       </DialogContent>
     </Dialog>
   )
@@ -9421,7 +9446,7 @@ function HomeDashboard({
                         <p className="truncate font-medium">{opportunity.name}</p>
                         <p className="truncate text-xs text-muted-foreground">{account?.name ?? "Unknown account"}</p>
                         <p className="mt-1 hidden truncate text-xs text-muted-foreground xl:block">
-                          {opportunity.nextQuestion}
+                          {getOpportunityGuidancePreview(opportunity)}
                         </p>
                       </td>
                       <td className="hidden py-3 pr-4 text-muted-foreground lg:table-cell">
@@ -9922,8 +9947,17 @@ function AccountView({
                       {visibleOpportunities.map((opportunity) => (
                         <tr
                           key={opportunity.id}
-                          className="cursor-pointer border-b transition-colors hover:bg-muted/30 last:border-b-0"
+                          className="cursor-pointer border-b transition-colors hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
+                          tabIndex={0}
+                          aria-label={`Open ${opportunity.name}`}
                           onClick={() => onOpportunitySelect(opportunity.id)}
+                          onKeyDown={(event) => {
+                            if (event.target !== event.currentTarget) return
+                            if (event.key !== "Enter" && event.key !== " ") return
+
+                            event.preventDefault()
+                            onOpportunitySelect(opportunity.id)
+                          }}
                         >
                           <td className="min-w-0 px-3 py-3 align-middle">
                             <button
@@ -9938,7 +9972,7 @@ function AccountView({
                               {opportunity.name}
                             </button>
                             <p className="mt-1 hidden truncate text-xs text-muted-foreground sm:block">
-                              {opportunity.nextQuestion}
+                              {getOpportunityGuidancePreview(opportunity)}
                             </p>
                           </td>
                           <td className="hidden px-3 py-3 align-middle text-muted-foreground lg:table-cell">
@@ -10045,7 +10079,7 @@ function AccountView({
                     <span className="text-sm font-medium">{opportunity.coverage}%</span>
                   </div>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    {opportunity.nextQuestion}
+                    {getOpportunityGuidancePreview(opportunity)}
                   </p>
                 </div>
               )) : (
@@ -10527,7 +10561,7 @@ function WorkspaceView({
               setAiLiveGuidance(null)
               liveCoachHasGuidanceRef.current = false
               setLiveCoachStatus("error")
-              setLiveCoachError("SalesFrame could not shape the next question yet. Check Settings if this keeps happening.")
+              setLiveCoachError("SalesFrame is still reading the conversation. Keep listening for a moment, then try again.")
               return
             }
 
@@ -10540,11 +10574,14 @@ function WorkspaceView({
             if (requestId !== liveCoachRequestRef.current) return
 
             const existingGuidance = aiLiveGuidanceRef.current
-            const refreshMessage = getUserFacingErrorMessage(caughtError, "AI coach could not refresh.")
+            const refreshMessage = getUserFacingErrorMessage(
+              caughtError,
+              "SalesFrame is checking the latest turn. Keep the current question for now."
+            )
             if (existingGuidance) {
               liveCoachHasGuidanceRef.current = true
               setLiveCoachStatus("ready")
-              setLiveCoachError(`SalesFrame could not refresh the next question yet. Keeping the last AI question while it reconnects. ${refreshMessage}`)
+              setLiveCoachError(`Keep this question for now. SalesFrame is checking whether the flow has moved. ${refreshMessage}`)
               return
             }
 
@@ -10565,7 +10602,7 @@ function WorkspaceView({
         heartbeatTickChanged ||
         !liveCoachHasGuidanceRef.current ||
         aiTranscript.length <= 1 ||
-        turnsSinceLastFullGuidance >= 2
+        turnsSinceLastFullGuidance >= LIVE_COACH_FORCE_REFRESH_TURNS
 
       void requestLiveState({
         accountId: account.id,
@@ -12829,7 +12866,7 @@ function getCaptureStatusLabel(status: CallCaptureStatus) {
     stopping: "Finalising call",
     stopped: "Call saved",
     "permission-denied": "Audio permission denied",
-    "upload-failed": "Recording upload needs attention",
+    "upload-failed": "Recording needs another upload attempt",
     error: "Capture needs attention",
   }
 
@@ -12844,7 +12881,7 @@ function getCaptureStatusDescription(
   if (status === "requesting-permission") return "Choose the selected audio source and allow microphone access when prompted."
   if (status === "connecting") return "Getting live transcription ready."
   if (status === "permission-denied") return "Allow audio capture to record and transcribe this call."
-  if (status === "upload-failed") return "Transcript is saved, but the audio recording upload failed."
+  if (status === "upload-failed") return "Transcript is saved. The audio recording needs another upload attempt."
   if (status === "stopping") return "Saving the recording and preparing post-call outputs."
   if (status === "stopped") return "The call, transcript, and recording are saved."
   if (permissionState === "capture-unavailable") return "This browser cannot share audio with SalesFrame."
@@ -13039,11 +13076,23 @@ function OpportunityIntelligence({
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="rounded-lg border bg-muted/30 p-3">
-            <p className="text-sm font-medium">Next best question</p>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{opportunity.nextQuestion}</p>
-            <p className="mt-3 text-xs text-muted-foreground">
-              {opportunity.questionReason}
+            <p className="text-sm font-medium">
+              {hasStarterOpportunityGuidance(opportunity) ? "Live question" : "Next best question"}
             </p>
+            {hasStarterOpportunityGuidance(opportunity) ? (
+              <div className="mt-2 rounded-lg bg-background p-3 text-sm leading-relaxed text-muted-foreground">
+                Start a call when you are ready. SalesFrame will prepare the first live question from the account, opportunity, and selected playbooks.
+              </div>
+            ) : (
+              <>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  {getOpportunityGuidancePreview(opportunity)}
+                </p>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  {opportunity.questionReason}
+                </p>
+              </>
+            )}
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             {fieldGroups.map(([label, value]) => (
@@ -13547,6 +13596,8 @@ function OpportunitiesView({
   const pageCount = Math.max(1, Math.ceil(visibleOpportunities.length / pageSize))
   const currentPage = Math.min(page, pageCount)
   const paginatedOpportunities = visibleOpportunities.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  const opportunityRangeStart = visibleOpportunities.length === 0 ? 0 : (currentPage - 1) * pageSize + 1
+  const opportunityRangeEnd = Math.min(currentPage * pageSize, visibleOpportunities.length)
   const hasOpportunityFilters = Boolean(query.trim()) || stageFilter !== "all" || coverageFilter !== "all"
 
   React.useEffect(() => {
@@ -13725,8 +13776,7 @@ function OpportunitiesView({
           {visibleOpportunities.length > pageSize ? (
             <div className="flex flex-col gap-2 pt-1 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
               <span>
-                Showing {(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, visibleOpportunities.length)} of{" "}
-                {visibleOpportunities.length}
+                Showing {opportunityRangeStart}-{opportunityRangeEnd} of {visibleOpportunities.length}
               </span>
               <div className="flex items-center gap-2">
                 <Button
@@ -13867,6 +13917,8 @@ function CallsView({
     (safeCallsPage - 1) * callsPageSize,
     safeCallsPage * callsPageSize
   )
+  const callRangeStart = visibleCalls.length === 0 ? 0 : (safeCallsPage - 1) * callsPageSize + 1
+  const callRangeEnd = Math.min(safeCallsPage * callsPageSize, visibleCalls.length)
   const hasCallFilters = Boolean(query.trim()) || typeFilter !== "all" || statusFilter !== "all" || activeView === "recordings"
   React.useEffect(() => {
     setCallsPage(1)
@@ -14033,7 +14085,7 @@ function CallsView({
           {visibleCalls.length > callsPageSize ? (
             <div className="flex flex-col gap-2 pt-1 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
               <span className="text-muted-foreground">
-                Showing {(safeCallsPage - 1) * callsPageSize + 1}-{Math.min(safeCallsPage * callsPageSize, visibleCalls.length)} of {visibleCalls.length}
+                Showing {callRangeStart}-{callRangeEnd} of {visibleCalls.length}
               </span>
               <div className="flex items-center gap-2">
                 <Button
@@ -15397,7 +15449,7 @@ function SellerResearchProfileCard({
 
           setStatus("error")
           setMessage(
-            getUserFacingErrorMessage(error, "OpenAI could not research this domain. You can type what you sell manually.")
+            getUserFacingErrorMessage(error, "SalesFrame needs another moment to research this domain. You can type what you sell manually.")
           )
         })
     }, sellerDomainLookupDebounceMs)
@@ -16066,22 +16118,19 @@ function SettingsView({
                 {removeKeyError}
               </div>
             ) : null}
-            <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-              <Button
-                variant="outline"
-                disabled={isSavingKey}
-                onClick={() => {
-                  setRemoveKeyDialogOpen(false)
-                  setRemoveKeyError("")
-                }}
-              >
-                Cancel
-              </Button>
-              <Button variant="destructive" className="gap-2" disabled={isSavingKey} onClick={handleRemoveKey}>
-                <Trash2Icon />
-                {isSavingKey ? "Removing..." : "Remove key"}
-              </Button>
-            </DialogFooter>
+            <DialogActions
+              cancelDisabled={isSavingKey}
+              onCancel={() => {
+                setRemoveKeyDialogOpen(false)
+                setRemoveKeyError("")
+              }}
+              primaryAction={
+                <Button variant="destructive" className="gap-2" disabled={isSavingKey} onClick={handleRemoveKey}>
+                  <Trash2Icon />
+                  {isSavingKey ? "Removing..." : "Remove key"}
+                </Button>
+              }
+            />
           </DialogContent>
         </Dialog>
 

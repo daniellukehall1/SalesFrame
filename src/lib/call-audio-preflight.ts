@@ -168,7 +168,7 @@ function getAudioPreflightFailureMessage(preflight: AudioPreflightResult) {
     return "SalesFrame cannot hear the room audio. Keep the browser open, allow microphone access, and try again."
   }
 
-  return "SalesFrame could not verify the call audio before starting."
+  return "SalesFrame needs one more audio check before the call can start."
 }
 
 async function requestAudioSources(mode: CallAudioCaptureMode): Promise<CapturedAudioSource[]> {

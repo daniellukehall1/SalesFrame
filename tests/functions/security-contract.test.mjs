@@ -129,15 +129,17 @@ test("shared HTTP errors use structured codes and expected statuses", async () =
   assert.match(http, /new AppError\("server_error", defaultMessage\)/)
   assert.doesNotMatch(http, /new AppError\("server_error", error instanceof Error \? error\.message/)
   assert.match(http, /getPublicErrorMessage/)
+  assert.match(http, /getMissingContextMessage/)
   assert.match(http, /technicalErrorPatterns/)
   assert.match(http, /duplicate key value violates/)
   assert.match(http, /parameter is not supported/)
-  assert.match(http, /SalesFrame could not finish the AI step\. Try again in a moment\./)
+  assert.match(http, /SalesFrame needs another moment to prepare this\. Try again in a moment\./)
   assert.match(http, /getPublicAiProviderMessage/)
+  assert.match(http, /This OpenAI key did not work/)
   assert.match(http, /workspace key needs billing or quota attention/)
   assert.match(http, /OpenAI is receiving too many requests at once/)
-  assert.match(http, /OpenAI could not use the selected model/)
-  assert.match(http, /OpenAI is taking longer than expected/)
+  assert.match(http, /The selected OpenAI model is not available/)
+  assert.match(http, /SalesFrame is taking longer than expected/)
   assert.match(http, /isMissingServerConfiguration/)
   assert.match(browserSupabaseClient, /SalesFrame could not connect to the workspace service\. Contact support if this keeps happening\./)
   assert.doesNotMatch(browserSupabaseClient, /Missing Supabase environment variables/)
@@ -158,7 +160,7 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
 
   assert.equal(databaseResponse.status, 500)
   assert.equal(databasePayload.error.code, "server_error")
-  assert.equal(databasePayload.error.message, "SalesFrame could not finish that request. Try again in a moment.")
+  assert.equal(databasePayload.error.message, "SalesFrame needs another moment with that request. Try again shortly.")
   assert.match(databasePayload.error.traceId, /^sf_/)
   assert.equal(databaseResponse.headers.get("X-SalesFrame-Trace-Id"), databasePayload.error.traceId)
 
@@ -169,7 +171,7 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
 
   assert.equal(providerResponse.status, 502)
   assert.equal(providerPayload.error.code, "openai_request_failed")
-  assert.equal(providerPayload.error.message, "SalesFrame could not finish the AI step. Try again in a moment.")
+  assert.equal(providerPayload.error.message, "SalesFrame needs another moment to prepare this. Try again in a moment.")
 
   const quotaResponse = errorResponse(
     upstreamFailure("insufficient_quota: You exceeded your current quota.", "openai_quota_exceeded")
@@ -180,7 +182,7 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
   assert.equal(quotaPayload.error.code, "openai_quota_exceeded")
   assert.equal(
     quotaPayload.error.message,
-    "OpenAI could not run this step because the workspace key needs billing or quota attention. Check the key in Settings, then try again."
+    "This workspace key needs billing or quota attention. Check the key in Settings, then try again."
   )
 
   const rateLimitResponse = errorResponse(
@@ -199,7 +201,7 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
 
   assert.equal(modelResponse.status, 502)
   assert.equal(modelPayload.error.code, "openai_model_error")
-  assert.equal(modelPayload.error.message, "OpenAI could not use the selected model. Contact support if this keeps happening.")
+  assert.equal(modelPayload.error.message, "The selected OpenAI model is not available. Contact support if this keeps happening.")
 
   const htmlPlatformResponse = errorResponse(
     upstreamFailure("<!doctype html><html><body>Bad Gateway</body></html>", "openai_gateway_html")
@@ -208,21 +210,21 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
 
   assert.equal(htmlPlatformResponse.status, 502)
   assert.equal(htmlPlatformPayload.error.code, "openai_gateway_html")
-  assert.equal(htmlPlatformPayload.error.message, "SalesFrame could not finish the AI step. Try again in a moment.")
+  assert.equal(htmlPlatformPayload.error.message, "SalesFrame needs another moment to prepare this. Try again in a moment.")
 
   const runtimeResponse = errorResponse(new Error("TypeError: Cannot read properties of undefined (reading 'id')\nstack trace"))
   const runtimePayload = await runtimeResponse.json()
 
   assert.equal(runtimeResponse.status, 500)
   assert.equal(runtimePayload.error.code, "server_error")
-  assert.equal(runtimePayload.error.message, "SalesFrame could not finish that request. Try again in a moment.")
+  assert.equal(runtimePayload.error.message, "SalesFrame needs another moment with that request. Try again shortly.")
 
   const validationResponse = errorResponse(badRequest("workspaceId is required.", "workspace_id_required"))
   const validationPayload = await validationResponse.json()
 
   assert.equal(validationResponse.status, 400)
   assert.equal(validationPayload.error.code, "workspace_id_required")
-  assert.equal(validationPayload.error.message, "workspaceId is required.")
+  assert.equal(validationPayload.error.message, "Choose a workspace before continuing.")
   assert.match(validationPayload.error.traceId, /^sf_/)
 
   assert.equal(
@@ -270,6 +272,14 @@ test("expensive AI functions enforce authenticated rate limits", async () => {
     assert.match(source, /assertRateLimit/)
     assert.match(source, /requireUser\(request\)/)
   }
+
+  assert.match(liveState, /authorizeCall\(user\.id, payload\.callId\)/)
+  assert.match(liveState, /authorizeAccount\(user\.id, payload\.accountId\)/)
+  assert.match(liveState, /authorizeOpportunity\(user\.id, payload\.opportunityId\)/)
+  assert.match(liveState, /buildLiveStateContext/)
+  assert.match(liveState, /liveStateContext/)
+  assert.match(liveState, /Do not expose database identifiers/)
+  assert.doesNotMatch(liveState, /input: JSON\.stringify\(\{[\s\S]*account,[\s\S]*call,[\s\S]*opportunity,/)
 
   assert.match(customerResearch, /name: "customer research"/)
   assert.match(accountEnrichment, /name: "account enrichment"/)

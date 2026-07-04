@@ -6,6 +6,7 @@ import type {
   OpportunitySort,
 } from "@/lib/salesframe-core"
 import { parseCurrencyAmount } from "@/lib/currency-utils"
+import { hasStarterOpportunityGuidance } from "@/lib/record-factories"
 
 export function normalizeSearchText(value: string) {
   return value
@@ -53,6 +54,8 @@ export function getOpportunitySearchText(
   account?: AccountNavItem,
   draft?: OpportunityDraft
 ) {
+  const hasLiveGuidanceText = !hasStarterOpportunityGuidance(opportunity)
+
   return [
     opportunity.name,
     account?.name,
@@ -61,8 +64,8 @@ export function getOpportunitySearchText(
     opportunity.amount,
     opportunity.closeDate,
     opportunity.callType,
-    opportunity.nextQuestion,
-    opportunity.questionReason,
+    hasLiveGuidanceText ? opportunity.nextQuestion : "",
+    hasLiveGuidanceText ? opportunity.questionReason : "",
     draft?.frameworks,
     draft?.source,
     draft?.nextStep,

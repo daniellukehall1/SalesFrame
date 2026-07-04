@@ -507,3 +507,190 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 - Before impact: Local Safari QA could get stuck before reaching Start Call even when the app itself reloaded cleanly.
 - After impact: The limitation is documented, and the diagnostic path is stronger for actual Start Call failures.
 - Verification: Reproduced in Safari via Computer Use, confirmed the dev server emitted no error, and verified code through contract tests and build.
+
+### Live question refresh waited too long after meaningful turns
+
+- Severity: High
+- Description: The live coach had a 30-second AI audit and a fast flow-decision lane, but the full next-question refresh was only forced after two meaningful final transcript turns when the fast lane did not explicitly request a replacement.
+- Root cause: The protected contract encoded `turnsSinceLastFullGuidance >= 2`, which could leave the seller looking at a stale question after a buyer answered once, especially if the fast flow reader conservatively returned hold.
+- Recommended improvement: Treat every meaningful final turn as enough evidence to ask the full AI coach whether the current question should hold, replace, park, or recover, while still letting the model keep a good question stable.
+- Fix applied: Added `LIVE_COACH_FORCE_REFRESH_TURNS = 1`, changed the full-guidance trigger to use that threshold, updated the live-call eval contracts, and clarified in the build spec that the 30-second audit is backup rather than the normal update path.
+- Before impact: A seller could experience an awkward pause waiting for the second question because the first buyer answer did not always force the polished question lane.
+- After impact: SalesFrame now asks OpenAI to reassess the visible question after every meaningful final turn, while the existing stability/lifecycle rules prevent unnecessary churn.
+- Verification: Reran TypeScript and the live guidance/eval production contracts after the change.
+
+### Live coach refresh errors sounded like AI failure
+
+- Severity: Medium
+- Description: During an active call, a temporary live-guidance refresh issue could show wording such as `could not shape the next question` or `could not refresh the next question`.
+- Root cause: The error copy described the backend request outcome instead of the seller's safest next action while SalesFrame kept the last valid recommendation visible.
+- Recommended improvement: Keep the live card calm under transient AI latency or provider errors: tell the seller to keep the current question for now and explain that SalesFrame is checking whether the flow moved.
+- Fix applied: Reworded the no-guidance and existing-guidance error paths, and added production-contract assertions that reject the old failure-style copy.
+- Before impact: A seller could lose confidence mid-call because the guidance card read like the AI had broken.
+- After impact: Temporary refresh issues now preserve seller momentum and keep the last usable question in focus while the app catches up.
+- Verification: Added runtime copy guards in the production contract and reran the targeted suite.
+
+### Shared AI/service errors still used implementation-shaped wording
+
+- Severity: Medium
+- Description: Shared browser and Netlify error fallbacks still used phrases such as `finish the AI step`, `finish that request`, and provider-centric copy like `OpenAI could not use the selected model`.
+- Root cause: The shared error layer was written to be technically safe and sanitized, but some fallback language still described the internal operation rather than the seller's next step.
+- Recommended improvement: Keep technical sanitization and trace IDs, but make fallback messages calm, short, and action-oriented.
+- Fix applied: Reworded shared service, AI, quota, invalid-key, timeout, selected-model, Start Call first-question, non-JSON function fallback, and missing context copy. Added contract guards for the calmer copy and old-phrase rejection.
+- Before impact: A customer could see safe but cold messages during high-trust workflows like Start Call, enrichment, or replay recovery.
+- After impact: The app now tells sellers what to do next without exposing backend language or making transient platform issues feel like product failure.
+- Verification: Updated app and function contracts and reran the relevant suites.
+
+### Start Call background research copy used the old feature name
+
+- Severity: Low
+- Description: Two suppressed Start Call/account setup research paths still threw `Customer research could not be prepared` even though the visible setup step is now `Seller Research`.
+- Root cause: The feature label was updated in the modal, but background error strings were left behind in asynchronous research handling.
+- Recommended improvement: Keep Start Call copy neutral or aligned to `Seller Research`; reserve `Customer Research` for account enrichment/customer intelligence surfaces.
+- Fix applied: Reworded the background errors to `Research context could not be prepared`, updated the design-language guide, and added a production-contract guard rejecting the old Start Call copy.
+- Before impact: Even if mostly hidden, stale strings made the codebase and any future surfaced message inconsistent with the product language.
+- After impact: Start Call research copy now stays aligned with the Seller Research step and the customer-account enrichment distinction.
+- Verification: Added the regression guard to the existing Seller Research contract.
+
+### Live-guidance context contract was too easy to drift
+
+- Severity: Medium
+- Description: The product requires all visible seller-editable account and opportunity fields to shape live guidance, but the test only checked a fixed list of field names. A future field could be added to the UI without the live-question engine receiving it.
+- Root cause: The contract asserted today's fields individually instead of deriving the editable field list from the shared `AccountDraft` and `OpportunityDraft` types.
+- Recommended improvement: Make the test fail whenever a new seller-editable draft field appears without an explicit live-guidance context mapping.
+- Fix applied: Added a dynamic production-contract guard that extracts the draft field keys, verifies the mapping to `recordContext` or selected playbooks, and fails with a direct message if a new field is not wired into live guidance. Removed `Owner` from editable-field docs because ownership is workspace/user context, not a visible seller-editable record field.
+- Before impact: Question quality could quietly degrade after future UI additions because the AI would not know about a newly added field.
+- After impact: Future editable account/opportunity field changes must deliberately update the live-guidance context contract, keeping the question engine aligned with the seller-visible record.
+- Verification: Added the contract guard and reran the app production contract.
+
+### Starter opportunities exposed placeholder AI guidance copy
+
+- Severity: Medium
+- Description: New opportunities without a generated live recommendation could show `AI guidance pending` and a technical OpenAI sentence in dashboard, account, and opportunity intelligence surfaces.
+- Root cause: `createStarterOpportunity` used internal fallback text for `nextQuestion` and `questionReason`, and list/detail components rendered those fields directly even when they represented a starter state rather than real AI guidance.
+- Recommended improvement: Treat missing guidance as a deliberate empty state: tell the seller to start a call, and only label content as `Next best question` when a real recommendation exists.
+- Fix applied: Added shared starter-guidance constants and `hasStarterOpportunityGuidance`, replaced direct opportunity guidance rendering with `getOpportunityGuidancePreview`, changed the opportunity intelligence heading to `Live question` for starter records, removed starter notes, and kept starter guidance out of workspace fuzzy search.
+- Before impact: A first-time seller could see internal placeholder language and wonder whether the AI question engine was broken.
+- After impact: Fresh opportunities now stay calm and intentional until the first live question is generated, while real AI-generated questions still appear normally.
+- Verification: Added a production-contract regression test for starter guidance rendering and search behavior.
+
+### Dialog dismissal protection depended on every modal remembering the same handlers
+
+- Severity: Medium
+- Description: Existing modals mostly prevented accidental Escape/outside-click dismissal, but the safety depended on each modal manually adding the same three Radix handlers.
+- Root cause: The shared `DialogContent` primitive allowed Radix's default dismiss-on-outside behavior unless every new modal remembered to override it.
+- Recommended improvement: Make deliberate dismissal the design-system default, with an explicit opt-in only for future lightweight dialogs that should be dismissible.
+- Fix applied: Added a `dismissible` prop to `DialogContent`, defaulting to `false`, and composed Escape, interact-outside, and pointer-down-outside handlers so accidental close is prevented at the primitive level while caller handlers still run.
+- Before impact: A future modal could regress into the clunky accidental-close behavior the app has already been trying to avoid.
+- After impact: New modals inherit the same calm close model by default: use the footer Cancel/Back/Done actions rather than disappearing when a seller taps the wrong area.
+- Verification: Added production-contract assertions for the shared dialog primitive.
+
+### Fast live-state AI context used implementation-shaped inputs
+
+- Severity: Medium
+- Description: The fast live-state function authorized the account, opportunity, and call correctly, but then sent minimal raw authorization rows to OpenAI instead of a focused business context. That left the fast lane with database-shaped IDs rather than the seller-visible fields that help decide whether the question should hold, refresh, park, or recover.
+- Root cause: The full live-guidance function had a normalized record-context contract, but the newer fast flow-decision function did not get the same context-shaping treatment.
+- Recommended improvement: Build a compact `liveStateContext` server-side after authorization, using seller-visible account, opportunity, and call fields only. Exclude workspace IDs, owner IDs, storage paths, raw database rows, and other implementation internals from the model input.
+- Fix applied: Added a sanitized live-state context builder, loaded the required visible fields after authorization, sent `liveStateContext` to OpenAI, updated the prompt to use it only for flow/timing relevance, and added production/security contract guards.
+- Before impact: The fast lane had less useful context for live flow decisions and sent implementation-shaped data into a prompt that should stay product-shaped and private by default.
+- After impact: The fast lane now receives the account/opportunity/call facts it needs to read conversation flow while keeping model input cleaner, calmer, and less coupled to the database schema.
+- Verification: Added contract tests for the sanitized live-state context and raw-row exclusion.
+
+### CSV import modal still used a bespoke action footer
+
+- Severity: Low
+- Description: The CSV import modal had been visually improved, but its footer layout was still hand-built instead of using the shared modal action component. That kept one of the app's most complex modals on a separate path from workspace setup and made future button-spacing drift more likely.
+- Root cause: `DialogActions` was introduced during onboarding polish, but the import modal continued to carry its own Cancel, Back, Next, Import, and Done footer structure.
+- Recommended improvement: Route import actions through the shared modal footer helper while preserving the right-side primary action and the summary-step Done placement.
+- Fix applied: Extended `DialogActions` with an optional `cancelAction`, migrated `CsvImportDialog` to the shared action footer, and updated contracts so mobile button width and footer spacing are protected by the design system rather than one-off modal code.
+- Before impact: Future changes to modal button spacing or mobile touch targets could fix onboarding while leaving CSV import subtly different again.
+- After impact: CSV import inherits the same footer rhythm as the rest of the app, reducing one-off modal UX and making future polish cheaper and safer.
+- Verification: Updated the import, onboarding, and mobile viewport contracts, then reran the app production contract and TypeScript.
+
+### Record mutation modals used one-off footer actions
+
+- Severity: Low
+- Description: Create Account, Edit Account, Create Opportunity, and Edit Opportunity all used visually similar but hand-built modal footers. The modals looked mostly correct, but the implementation kept the app vulnerable to small future differences in button order, spacing, mobile width, and disabled states.
+- Root cause: The shared `DialogActions` helper was only applied to onboarding and CSV import, leaving the everyday record-editing workflows on a separate footer pattern.
+- Recommended improvement: Move common record mutation dialogs onto the same modal action component while preserving each modal's labels, icons, disabled states, and back/cancel behavior.
+- Fix applied: Migrated the four record mutation dialogs to `DialogActions`, using a custom cancel action for Create Account's Back/Cancel button and standard shared cancel/primary actions for the other record dialogs. Added a production-contract guard to keep these dialogs on the shared action footer.
+- Before impact: Future modal polish could still reach one workflow but miss another, creating the small UI differences that make the product feel less designed.
+- After impact: Core account and opportunity creation/editing now share the same footer system as onboarding and CSV import, making mobile touch targets and action placement more consistent.
+- Verification: Added the `record mutation dialogs use the shared modal action footer` contract and reran the app production contract plus TypeScript.
+
+### Secondary modals still had bespoke footer layouts
+
+- Severity: Low
+- Description: Call prep, Start Call loading, destructive record deletion, OpenAI key removal, workspace edit, and workspace deletion still used raw modal footers even after the primary creation/edit flows moved to the shared action pattern.
+- Root cause: The modal footer standard was being adopted workflow by workflow instead of being enforced as a broader design-system contract.
+- Recommended improvement: Route all standard Cancel/primary and Cancel/Back/primary modal actions through the same `DialogActions` helper, and add a contract guard so raw footers stay inside the UI primitive only.
+- Fix applied: Extended `DialogActions` with a `leftActions` slot, migrated the remaining standard modals in the app shell and workspace switcher, and updated the production contract to reject direct modal-footer usage in those areas.
+- Before impact: Less-traveled modals could still have subtly different spacing, mobile button width, or action placement than the core flows.
+- After impact: Standard modal actions now share one rhythm across call prep, start call, deletion, key management, record editing, CSV import, onboarding, and workspace management.
+- Verification: Updated the modal dismissal/action contract and prepared the full app verification run.
+
+### High-trust recovery copy still sounded like system failure
+
+- Severity: Low
+- Description: A few fallback messages in live capture, account enrichment, seller research, and workspace setup still used cold phrases like `failed`, `could not start`, or `could not be completed`.
+- Root cause: Earlier error handling work sanitized technical details, but not every fallback had been rewritten into the calmer SalesFrame voice.
+- Recommended improvement: Keep errors honest and actionable, but phrase them around what remains safe, what SalesFrame is doing next, and what the seller can do now.
+- Fix applied: Reworded transcript-save, capture-start, call-stop, recording-upload, speaker-review, account-enrichment, seller-domain-research, account-intelligence, and workspace-setup cancellation fallbacks. Added production-contract checks for the calmer strings and old-phrase rejection.
+- Before impact: Some high-pressure moments could still read like a backend failure even when the safest action was simply to keep going or retry a contained step.
+- After impact: Recovery copy now better protects confidence: transcript keeps listening, accounts remain saved, and draft/workspace cleanup is framed as a retryable follow-up rather than a product break.
+- Verification: Added regression coverage in the customer-facing error contract.
+
+### Clickable account opportunity rows were mouse-first
+
+- Severity: Low
+- Description: The account Opportunities tab made the full opportunity row clickable for mouse users, but keyboard users only had the smaller opportunity-name button as the equivalent path.
+- Root cause: The row-level click target was added for ease of scanning and opening, but the accessibility contract still assumed the inner name button was enough.
+- Recommended improvement: If a whole row visually behaves like an open target, it should also be reachable from the keyboard without breaking the table's semantics or interfering with the row action menu.
+- Fix applied: Added row focus, a row action label, and Enter/Space handling that only fires when the row itself has focus. Inner controls still stop propagation and keep their own behavior.
+- Before impact: Mouse users had a large forgiving target, while keyboard users had a smaller and less discoverable target.
+- After impact: Account opportunity rows now offer the same open affordance to keyboard users while preserving the explicit name button and actions dropdown.
+- Verification: Updated the account opportunities contract to require keyboard handling and preserve table semantics.
+
+### Keyboard row focus lacked a visible landing point
+
+- Severity: Low
+- Description: After adding keyboard access to account opportunity rows, the focused row did not yet have a strong visual focus state.
+- Root cause: The row inherited hover styling but did not receive the focus-visible ring treatment used by the rest of the app's interactive controls.
+- Recommended improvement: Every keyboard-reachable row-level action should make the current focus target obvious without changing the table layout.
+- Fix applied: Added a muted focus background, visible ring, inset ring placement, and outline reset to the account opportunity row.
+- Before impact: A keyboard user could open the row, but might lose confidence about which row was currently active.
+- After impact: The row now gives a clear, calm focus indication consistent with the rest of SalesFrame's controls.
+- Verification: Extended the account opportunities contract to require the row focus-visible classes.
+
+### Dense list pagination ranges were not defensive
+
+- Severity: Low
+- Description: Opportunities and Calls currently hide pagination when a filtered result set is empty, but the displayed range calculation assumed at least one result. If a future layout change exposed the footer in an empty state, it could show an impossible range such as `1-0 of 0`.
+- Root cause: Pagination copy was calculated inline in the JSX instead of using safe start/end values derived from the visible list length.
+- Recommended improvement: Compute defensive range labels for dense lists so empty filtered states stay calm and accurate even if footer visibility changes later.
+- Fix applied: Added safe range start/end values to Opportunities and Calls, updated the visible footer copy to use those values, and added contract assertions for both lists.
+- Before impact: The app was correct today, but the list footer was brittle and easy to regress during future density/layout polish.
+- After impact: Dense list range copy is now safe by construction while preserving the current hidden-footer behavior for small and empty result sets.
+- Verification: Added production-contract coverage for the safe range calculations.
+
+### Call-capture recovery copy still carried failure language
+
+- Severity: Low
+- Description: A few call-capture paths still used hard failure wording such as transcription `could not connect`, audio recording upload `failed`, or audio preflight `could not verify`.
+- Root cause: Earlier copy polish covered the common capture states, but a few edge recovery paths and documentation strings were still written from an implementation perspective.
+- Recommended improvement: Keep the state honest, but phrase recoverable capture problems as the next attempt SalesFrame needs rather than a finished failure verdict.
+- Fix applied: Reworded audio preflight, partial transcription connection, recording preparation, and upload recovery messages. Updated the production smoke checklist and added contract guards rejecting the older failure phrases.
+- Before impact: A seller hitting a rough audio edge could read the message as a broken product rather than a contained recovery step.
+- After impact: Capture recovery copy now stays consistent with the calmer app voice: SalesFrame keeps listening where it can, and clearly names the next attempt needed.
+- Verification: Added production-contract checks for the new capture copy and old-phrase rejection.
+
+### Start Call docs still described Seller Research as Customer Research
+
+- Severity: Low
+- Description: The runtime Start Call wizard consistently uses `Seller Research`, but the product spec and smoke checklist still described the final Start Call step as `Customer Research`.
+- Root cause: The UI naming changed after the seller/customer research split, but the source-of-truth docs and launch checklist were not updated in the same pass.
+- Recommended improvement: Keep `Seller Research` for the seller's company/product and buyer-contact context inside Start Call. Reserve `Customer Research` for account enrichment and customer intelligence.
+- Fix applied: Updated the Start Call workflow spec, live-guidance input description, smoke checklist, and production contract guards to preserve the naming boundary.
+- Before impact: Future build work could follow stale docs and accidentally reintroduce `Customer Research` into the Start Call modal.
+- After impact: Documentation and UI now agree: Start Call uses Seller Research, while Customer Research belongs to account enrichment.
+- Verification: Added production-contract checks for the spec and smoke checklist wording.

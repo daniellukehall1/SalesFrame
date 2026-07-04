@@ -18,10 +18,10 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { DialogActions } from "@/components/ui/dialog-actions"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
@@ -641,50 +641,43 @@ export function CsvImportDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          {step === "summary" ? (
-            <span aria-hidden="true" />
-          ) : (
-            <Button variant="outline" disabled={isImporting} onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-          )}
-          <div className="grid gap-2 sm:flex sm:flex-row">
-            {step !== "upload" && step !== "summary" ? (
-              <Button
-                variant="outline"
-                disabled={isImporting}
-                onClick={() => setStep(getPreviousStep(step))}
-              >
-                Back
-              </Button>
-            ) : null}
-            {step === "upload" ? (
+        <DialogActions
+          cancelAction={step === "summary" ? <span aria-hidden="true" /> : undefined}
+          cancelDisabled={isImporting}
+          onCancel={() => onOpenChange(false)}
+          primaryAction={
+            step === "upload" ? (
               <Button disabled={rows.length === 0} onClick={() => setStep("map")}>
                 Next
               </Button>
-            ) : null}
-            {step === "map" ? (
+            ) : step === "map" ? (
               <Button onClick={() => setStep("validate")}>Validate rows</Button>
-            ) : null}
-            {step === "validate" ? (
+            ) : step === "validate" ? (
               <Button disabled={previewRows.length === 0} onClick={() => setStep("review")}>
                 Review rows
               </Button>
-            ) : null}
-            {step === "review" ? (
+            ) : step === "review" ? (
               <Button disabled={isImporting || importableRows.length === 0} onClick={handleImport}>
                 {isImporting ? <Loader2Icon className="animate-spin" /> : <UploadIcon />}
                 {isImporting ? "Importing..." : `Import ${importableRows.length} rows`}
               </Button>
-            ) : null}
-            {step === "summary" ? (
+            ) : (
               <Button disabled={isImporting} onClick={() => onOpenChange(false)}>
                 Done
               </Button>
-            ) : null}
-          </div>
-        </DialogFooter>
+            )
+          }
+        >
+          {step !== "upload" && step !== "summary" ? (
+            <Button
+              variant="outline"
+              disabled={isImporting}
+              onClick={() => setStep(getPreviousStep(step))}
+            >
+              Back
+            </Button>
+          ) : null}
+        </DialogActions>
       </DialogContent>
     </Dialog>
   )

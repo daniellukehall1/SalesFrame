@@ -61,15 +61,15 @@ export function getUserFacingErrorMessage(error: unknown, fallback: string) {
   }
 
   if (/failed to fetch|networkerror|network request failed|load failed|internet connection/i.test(message)) {
-    return "SalesFrame could not reach the service. Check your connection, then try again."
+    return "SalesFrame cannot reach the service right now. Check your connection, then try again."
   }
 
   if (/incorrect api key|invalid api key|authentication.*openai/i.test(message)) {
-    return "OpenAI could not use that key. Check the key in Settings, then try again."
+    return "This OpenAI key did not work. Check the key in Settings, then try again."
   }
 
   if (/insufficient_quota|quota|billing|hard limit|usage limit|credits/i.test(message)) {
-    return "OpenAI could not run this step because the workspace key needs billing or quota attention. Check the key in Settings, then try again."
+    return "This workspace key needs billing or quota attention. Check the key in Settings, then try again."
   }
 
   if (/rate.?limit|too many requests|\b429\b/i.test(message)) {
@@ -77,11 +77,11 @@ export function getUserFacingErrorMessage(error: unknown, fallback: string) {
   }
 
   if (/model_not_found|model .* does not exist|unsupported model|model .* unavailable/i.test(message)) {
-    return "OpenAI could not use the selected model. Contact support if this keeps happening."
+    return "The selected OpenAI model is not available. Contact support if this keeps happening."
   }
 
   if (/timeout|timed out|service unavailable|temporarily unavailable|overloaded/i.test(message)) {
-    return "OpenAI is taking longer than expected. Try again in a moment."
+    return "SalesFrame is taking longer than expected. Try again in a moment."
   }
 
   if (technicalErrorPatterns.some((pattern) => pattern.test(message))) {

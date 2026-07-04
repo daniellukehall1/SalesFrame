@@ -109,7 +109,7 @@ async function readFunctionPayload<T>(response: Response): Promise<FunctionEnvel
     if (!response.ok) {
       return {
         error: {
-          message: text.slice(0, 240) || "SalesFrame could not finish that request. Try again in a moment.",
+          message: text.slice(0, 240) || "SalesFrame needs another moment with that request. Try again shortly.",
         },
       }
     }
@@ -119,7 +119,7 @@ async function readFunctionPayload<T>(response: Response): Promise<FunctionEnvel
 }
 
 function getFunctionErrorMessage(payload: unknown) {
-  const fallback = "SalesFrame could not finish that request. Try again in a moment."
+  const fallback = "SalesFrame needs another moment with that request. Try again shortly."
 
   if (
     payload &&

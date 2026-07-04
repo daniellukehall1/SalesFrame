@@ -89,8 +89,8 @@ The Start Call wizard has four steps:
    - Multi-select playbooks.
    - Opportunity-level playbooks are inherited by default.
    - Call-level playbooks can override the inherited set.
-4. Research
-   - Optional Customer Research toggle.
+4. Seller Research
+   - Optional Seller Research toggle.
    - Captures seller company, company domain, customer contact, customer role, and what the seller sells.
    - Company domain should auto-populate seller company and what the seller sells where possible.
    - Seller company/domain/product context should persist across future calls and only change when the user changes it.
@@ -101,7 +101,7 @@ When Start Call is confirmed:
 - Call type and selected playbooks are applied to the live cockpit.
 - Recording state starts.
 - A new account or opportunity is created if selected.
-- Customer research settings are passed into live guidance.
+- Seller Research and buyer-context settings are passed into live guidance.
 
 ## Live Call Capture And Guidance Pipeline
 
@@ -140,7 +140,7 @@ Realtime transcription must feel like a clean human conversation, not raw subtit
   - The OpenAI live-guidance function receives account context, opportunity context, selected playbooks, customer research, recent transcript, and recent guidance events.
   - Every visible seller-editable account and opportunity field must be available to live guidance either through `recordContext` or, for methodology/framework selection, through selected playbooks and playbook fields. Adding a new seller-editable field requires updating the live-guidance context contract and tests deliberately.
   - Guidance refreshes from meaningful final turns or explicit seller feedback, not partial transcript fragments. Seller turns can also make the currently displayed recommendation stale if the seller asks a different question or moves the conversation forward.
-  - A fast flow-decision lane classifies conversation stage, buyer mood, topic shift, active intent status, and whether the displayed question should refresh before the full polished question is requested.
+  - A fast flow-decision lane classifies conversation stage, buyer mood, topic shift, active intent status, and whether the displayed question should refresh before the full polished question is requested. It receives a compact `liveStateContext` with seller-visible account, opportunity, and call fields only; it must not send workspace IDs, owner IDs, raw database rows, storage paths, or other implementation internals to OpenAI.
   - Candidate ranking must consider conversation stage, buyer mood, what was just answered, methodology gap value, naturalness, information gain, and risk of sounding abrupt.
   - Candidate ranking must separate methodology value from ask-now fit. A high-value methodology gap can be parked when asking it would be awkward in the current flow.
   - Every AI guidance response includes a formal question lifecycle: active, asked, answered, stale, parked, revisit before close, or dropped.
@@ -149,7 +149,7 @@ Realtime transcription must feel like a clean human conversation, not raw subtit
   - If the conversation has moved on, the coach should follow the customer thread and park the original intent rather than forcing an awkward methodology question.
   - Near wrap-up, the coach can recover the top one or two high-value parked intents with soft bridge wording.
   - When a previous recommended question was asked and the buyer answered it, the next AI guidance event must advance the conversation rather than repeating the same question.
-  - If two meaningful final turns have passed since the last full guidance event, the app must force a flow-decision or full guidance refresh so the visible question cannot stay stale.
+  - If one meaningful final turn has passed since the last full guidance event, the app must force a flow-decision or full guidance refresh so the visible question cannot stay stale. The 30-second audit is a backup heartbeat, not the normal update path.
   - While a call is recording or paused, the browser also forces an OpenAI live-guidance recheck every 30 seconds using the current transcript, current visible question, and seller feedback. This is an AI refresh cadence, not a local fallback question.
   - The initial first-question request must not overwrite newer live guidance once transcript has started.
   - Post-call correction is the transcript source-of-truth cleanup layer and should regenerate evidence, notes, follow-up, and next-call brief from corrected turns.
@@ -260,7 +260,7 @@ Inputs:
 - Opportunity intelligence.
 - Selected call type.
 - Selected playbooks.
-- Customer research context if enabled.
+- Seller Research and buyer context if enabled.
 - Transcript segments with speaker labels.
 - Previous opportunity calls and next-call brief.
 
@@ -275,12 +275,12 @@ Core behaviour:
 - Multiple selected playbooks are merged into shared intent clusters before live guidance is ranked. The app should treat overlaps such as MEDDICC Identify Pain, SPIN Problem, Force Business Pain, Gap Selling Current State or Gap, SPICED Pain, Sandler Pain, and Value Selling Business Issue as one customer-learning goal.
 - Strict methodology adherence happens in the background, natural human conversation happens in the foreground. The seller sees one best move, while evidence can update several selected playbook fields at once.
 - Intent cluster mapping is methodology metadata only. It may group selected fields and provide OpenAI with candidate learning goals, but it must not generate deterministic local questions or local evidence judgments.
-- Customer research changes the angle of the recommended question.
+- Seller Research and buyer context change the angle of the recommended question.
 - The call cockpit next-best question is AI-required. The front end must not show a deterministic local question when AI guidance is unavailable.
 - Start Call performs an AI guidance readiness check before recording begins. If the AI guidance endpoint cannot return a valid first question, the call does not start and the seller sees the issue in the start flow.
 - Conversation thread profiles include opening, context, pain, impact, decision, commercial, stakeholder, solution-fit, and next-step.
 - The next best question should feel like a natural follow-up to the latest customer topic while still enforcing the selected methodology.
-- OpenAI services produce the live next-best question, intent coverage, conversation read, gaps, and alternatives. The product contract remains: call type, selected playbooks, missing fields, current discussion flow, customer research, and previous opportunity context all influence the recommendation.
+- OpenAI services produce the live next-best question, intent coverage, conversation read, gaps, and alternatives. The product contract remains: call type, selected playbooks, missing fields, current discussion flow, Seller Research, buyer context, and previous opportunity context all influence the recommendation.
 - Live coaching runs in three AI lanes:
   - Fast lane: reads meaningful final transcript turns, detects buyer answers, and updates the live state.
   - Thinking lane: ranks three candidate seller moves and returns the best display recommendation plus a softer alternative.
@@ -500,7 +500,6 @@ Editable account fields:
 - Employee count
 - Region
 - Currency
-- Owner
 - Current tools
 - Strategic initiatives
 - Competitors
@@ -532,7 +531,6 @@ Editable opportunity fields:
 - Stage
 - Amount, formatted using the parent account currency
 - Close date
-- Owner
 - Source
 - Frameworks
 - Next step

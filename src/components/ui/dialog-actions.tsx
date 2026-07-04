@@ -5,18 +5,22 @@ import { DialogFooter } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
 type DialogActionsProps = React.ComponentProps<typeof DialogFooter> & {
+  cancelAction?: React.ReactNode
   cancelLabel?: string
   cancelDisabled?: boolean
+  leftActions?: React.ReactNode
   onCancel?: () => void
   secondaryActions?: React.ReactNode
   primaryAction: React.ReactNode
 }
 
 function DialogActions({
+  cancelAction,
   cancelDisabled,
   cancelLabel = "Cancel",
   children,
   className,
+  leftActions,
   onCancel,
   primaryAction,
   secondaryActions,
@@ -27,9 +31,11 @@ function DialogActions({
       className={cn("gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between", className)}
       {...props}
     >
-      <Button variant="outline" disabled={cancelDisabled} onClick={onCancel}>
-        {cancelLabel}
-      </Button>
+      {cancelAction ?? leftActions ?? (
+        <Button variant="outline" disabled={cancelDisabled} onClick={onCancel}>
+          {cancelLabel}
+        </Button>
+      )}
       <div className="grid gap-2 sm:flex sm:flex-row sm:justify-end">
         {children ?? secondaryActions}
         {primaryAction}

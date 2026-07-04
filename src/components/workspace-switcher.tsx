@@ -27,10 +27,10 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { DialogActions } from "@/components/ui/dialog-actions"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -397,15 +397,15 @@ function WorkspaceFormDialog({
             </p>
           ) : null}
         </div>
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button className="gap-2" disabled={!canSave || isSaving} onClick={handleSubmit}>
-            <Building2Icon />
-            {isSaving ? "Saving..." : "Save workspace"}
-          </Button>
-        </DialogFooter>
+        <DialogActions
+          onCancel={() => onOpenChange(false)}
+          primaryAction={
+            <Button className="gap-2" disabled={!canSave || isSaving} onClick={handleSubmit}>
+              <Building2Icon />
+              {isSaving ? "Saving..." : "Save workspace"}
+            </Button>
+          }
+        />
       </DialogContent>
     </Dialog>
   )
@@ -478,14 +478,15 @@ function DeleteWorkspaceDialog({
             {deleteError}
           </div>
         ) : null}
-        <DialogFooter className="gap-3 max-sm:[&_[data-slot=button]]:w-full sm:justify-between">
-          <Button variant="outline" disabled={deleteSubmitting} onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button variant="destructive" disabled={isLastWorkspace || deleteSubmitting} onClick={handleDelete}>
-            {deleteSubmitting ? "Deleting..." : "Delete workspace"}
-          </Button>
-        </DialogFooter>
+        <DialogActions
+          cancelDisabled={deleteSubmitting}
+          onCancel={onCancel}
+          primaryAction={
+            <Button variant="destructive" disabled={isLastWorkspace || deleteSubmitting} onClick={handleDelete}>
+              {deleteSubmitting ? "Deleting..." : "Delete workspace"}
+            </Button>
+          }
+        />
       </DialogContent>
     </Dialog>
   )

@@ -43,7 +43,7 @@ export function dataResponse(data: unknown, status = 200) {
 
 export function errorResponse(
   error: unknown,
-  defaultMessage = "SalesFrame could not finish that request. Try again in a moment.",
+  defaultMessage = "SalesFrame needs another moment with that request. Try again shortly.",
   options: ErrorResponseOptions = {}
 ) {
   const appError = toAppError(error, defaultMessage)
@@ -105,7 +105,7 @@ export function logSafeEvent(level: LogLevel, event: string, payload: Record<str
   console.error(line)
 }
 
-export function getPublicErrorMessageForError(error: unknown, defaultMessage = "SalesFrame could not finish that request. Try again in a moment.") {
+export function getPublicErrorMessageForError(error: unknown, defaultMessage = "SalesFrame needs another moment with that request. Try again shortly.") {
   if (!(error instanceof AppError) && error instanceof Error) {
     const message = error.message.trim()
 
@@ -179,6 +179,9 @@ function getPublicAppErrorMessage(error: AppError, defaultMessage: string) {
 
   if (error.code === "server_configuration_missing") return message
 
+  const requiredContextMessage = getMissingContextMessage(error)
+  if (requiredContextMessage) return requiredContextMessage
+
   if (error.status >= 500) {
     if (error.status === 502 || /^openai_|_openai_|upstream/.test(error.code)) {
       return getPublicAiProviderMessage(message)
@@ -190,17 +193,40 @@ function getPublicAppErrorMessage(error: AppError, defaultMessage: string) {
   return isTechnicalErrorMessage(message) ? defaultMessage : message
 }
 
+function getMissingContextMessage(error: AppError) {
+  const code = error.code.toLowerCase()
+  const message = error.message.toLowerCase()
+
+  if (code === "workspace_id_required" || /workspaceid is required/.test(message)) {
+    return "Choose a workspace before continuing."
+  }
+
+  if (code === "account_id_required" || /accountid is required/.test(message)) {
+    return "Choose an account before continuing."
+  }
+
+  if (code === "opportunity_id_required" || /opportunityid is required/.test(message)) {
+    return "Choose an opportunity before continuing."
+  }
+
+  if (code === "call_id_required" || /callid is required/.test(message)) {
+    return "Choose a call before continuing."
+  }
+
+  return ""
+}
+
 function isTechnicalErrorMessage(message: string) {
   return technicalErrorPatterns.some((pattern) => pattern.test(message))
 }
 
 function getPublicAiProviderMessage(message: string) {
   if (/incorrect api key|invalid api key|authentication.*openai/i.test(message)) {
-    return "OpenAI could not use that key. Check the key in Settings, then try again."
+    return "This OpenAI key did not work. Check the key in Settings, then try again."
   }
 
   if (/insufficient_quota|quota|billing|hard limit|usage limit|credits/i.test(message)) {
-    return "OpenAI could not run this step because the workspace key needs billing or quota attention. Check the key in Settings, then try again."
+    return "This workspace key needs billing or quota attention. Check the key in Settings, then try again."
   }
 
   if (/rate.?limit|too many requests|\b429\b/i.test(message)) {
@@ -208,18 +234,18 @@ function getPublicAiProviderMessage(message: string) {
   }
 
   if (/model_not_found|model .* does not exist|unsupported model|model .* unavailable/i.test(message)) {
-    return "OpenAI could not use the selected model. Contact support if this keeps happening."
+    return "The selected OpenAI model is not available. Contact support if this keeps happening."
   }
 
   if (/timeout|timed out|service unavailable|temporarily unavailable|overloaded/i.test(message)) {
-    return "OpenAI is taking longer than expected. Try again in a moment."
+    return "SalesFrame is taking longer than expected. Try again in a moment."
   }
 
   if (isTechnicalErrorMessage(message)) {
-    return "SalesFrame could not finish the AI step. Try again in a moment."
+    return "SalesFrame needs another moment to prepare this. Try again in a moment."
   }
 
-  return "SalesFrame could not finish the AI step. Try again in a moment."
+  return "SalesFrame needs another moment to prepare this. Try again in a moment."
 }
 
 const technicalErrorPatterns = [
@@ -236,6 +262,7 @@ const technicalErrorPatterns = [
   /postgrest|postgres|supabase/i,
   /response_format|json_schema|schema validation/i,
   /required .* properties/i,
+  /\b(workspace|account|opportunity|call|user|project)Id is required\b/i,
   /invalid url \(post/i,
   /parameter is not supported/i,
   /internal server error/i,

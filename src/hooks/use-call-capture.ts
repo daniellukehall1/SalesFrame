@@ -429,7 +429,7 @@ export function useCallCapture() {
                 if (isRecoverableTranscriptDuplicateError(caughtError)) return
 
                 setStatus("error")
-                setError(getUserFacingErrorMessage(caughtError, "Transcript could not be saved."))
+                setError(getUserFacingErrorMessage(caughtError, "That transcript line needs another save attempt. SalesFrame will keep listening."))
               },
               onTranscriptEvent: (event) => persistTranscriptEvent(event, source),
               sourceKind: source.kind,
@@ -441,7 +441,7 @@ export function useCallCapture() {
           } catch (caughtError: unknown) {
             if (connections.length === 0 && sources.length === 1) throw caughtError
             setError(
-              `${getAudioSourceLabel(source.kind)} transcription could not connect. ${getUserFacingErrorMessage(
+              `${getAudioSourceLabel(source.kind)} transcription needs another connection attempt. ${getUserFacingErrorMessage(
                 caughtError,
                 "SalesFrame is continuing with the audio it can hear."
               )}`
@@ -450,7 +450,7 @@ export function useCallCapture() {
         }
 
         if (connections.length === 0) {
-          throw new Error("Realtime transcription could not connect to any audio source.")
+          throw new Error("SalesFrame needs another transcription connection attempt before it can capture this call.")
         }
 
         peerConnectionsRef.current = connections
@@ -473,7 +473,7 @@ export function useCallCapture() {
           throw caughtError
         }
 
-        const message = getUserFacingErrorMessage(caughtError, "Call capture could not start.")
+        const message = getUserFacingErrorMessage(caughtError, "SalesFrame needs access to the call audio before it can start.")
 
         if (isCaptureUnavailableError(caughtError)) {
           setPermissionState("capture-unavailable")
@@ -531,7 +531,7 @@ export function useCallCapture() {
       }
       blob = await stopRecorder(mediaRecorderRef.current, chunksRef.current)
     } catch (caughtError: unknown) {
-      setError(getUserFacingErrorMessage(caughtError, "The call ended, but SalesFrame could not finish preparing the audio recording."))
+      setError(getUserFacingErrorMessage(caughtError, "The call ended, and the audio recording needs another preparation attempt."))
     } finally {
       cleanup()
       activeConfigRef.current = null
@@ -553,7 +553,7 @@ export function useCallCapture() {
         status: "processing",
       })
     } catch (caughtError: unknown) {
-      setError(getUserFacingErrorMessage(caughtError, "Call stopped, but final status could not be saved."))
+      setError(getUserFacingErrorMessage(caughtError, "Call stopped. SalesFrame needs another moment to save the final status."))
     }
 
     let uploadFailed = false
@@ -575,7 +575,7 @@ export function useCallCapture() {
         }
       } catch (caughtError: unknown) {
         uploadFailed = true
-        setError(getUserFacingErrorMessage(caughtError, "Recording upload failed."))
+        setError(getUserFacingErrorMessage(caughtError, "Transcript is saved. The audio recording needs another upload attempt."))
       }
     }
 
@@ -813,7 +813,7 @@ async function resolveTurnAttribution({
     return {
       ...initialAttribution,
       needsReview: true,
-      reason: `${initialAttribution.reason} Speaker label could not be refined before the turn was written.`,
+      reason: `${initialAttribution.reason} Speaker label still needs review.`,
     }
   }
 }

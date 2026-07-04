@@ -160,7 +160,7 @@ Use:
 
 ```text
 Company context
-This helps customer research and live questions connect the buyer's world to what you sell.
+This helps Seller Research and live questions connect the buyer's world to what you sell.
 ```
 
 Avoid:

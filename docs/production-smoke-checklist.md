@@ -26,7 +26,7 @@ Run this before every production deploy.
 ## Call Lifecycle
 
 - Start Call creates or selects an account and opportunity before recording begins.
-- Browser audio permission states are visible: requesting, denied, connecting, recording, paused, stopping, upload failed.
+- Browser audio permission states are visible: requesting, denied, connecting, recording, paused, stopping, and recording needs another upload attempt.
 - A captured call writes transcript segments, call notes, and a private recording path to Supabase.
 - Stop Call finalises duration, uploads the recording, and generates post-call outputs.
 - Refreshing the page keeps transcript, notes, recording metadata, post-call outputs, and next-call brief visible.
@@ -34,7 +34,7 @@ Run this before every production deploy.
 ## AI Features
 
 - Saved OpenAI key shows a connected masked state and is not returned to the browser.
-- Customer research runs from the Start Call and Add Account flows when enabled.
+- Seller Research runs from Start Call when enabled; Customer Research runs from account enrichment when enabled.
 - Post-call output is generated from persisted transcript and notes.
 - Malformed OpenAI JSON is handled as a retryable processing error, not saved as production data.
 

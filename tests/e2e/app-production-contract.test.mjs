@@ -25,6 +25,13 @@ async function listFiles(directory, predicate) {
   return files
 }
 
+function extractObjectTypeKeys(source, typeName) {
+  const match = source.match(new RegExp(`export type ${typeName} = \\{([\\s\\S]*?)\\n\\}`))
+  if (!match) throw new Error(`Could not find ${typeName}`)
+
+  return [...match[1].matchAll(/^\s{2}([A-Za-z][A-Za-z0-9]*):/gm)].map((item) => item[1])
+}
+
 test("shared button defaults to non-submit for form safety", async () => {
   const button = await read("src/components/ui/button.tsx")
 
@@ -75,6 +82,7 @@ test("GitHub release checks run the same production gate as local deploys", asyn
 
 test("modal dismissal stays deliberate on prep and destructive dialogs", async () => {
   const app = await read("src/App.tsx")
+  const dialogPrimitive = await read("src/components/ui/dialog.tsx")
   const workspaceSwitcher = await read("src/components/workspace-switcher.tsx")
   const callPrepDialog = app.slice(app.indexOf("function CallPrepDialog"), app.indexOf("\ntype StartCallPreparationStep ="))
   const deleteDialog = app.slice(app.indexOf("function DeleteRecordDialog"), app.indexOf("function PlaybookMultiSelect"))
@@ -84,22 +92,35 @@ test("modal dismissal stays deliberate on prep and destructive dialogs", async (
   )
   const deleteWorkspaceDialog = workspaceSwitcher.slice(workspaceSwitcher.indexOf("function DeleteWorkspaceDialog"))
 
+  assert.match(dialogPrimitive, /dismissible = false/)
+  assert.match(dialogPrimitive, /onEscapeKeyDown\?\.\(event\)[\s\S]*if \(!dismissible && !event\.defaultPrevented\) event\.preventDefault\(\)/)
+  assert.match(dialogPrimitive, /onInteractOutside\?\.\(event\)[\s\S]*if \(!dismissible && !event\.defaultPrevented\) event\.preventDefault\(\)/)
+  assert.match(dialogPrimitive, /onPointerDownOutside\?\.\(event\)[\s\S]*if \(!dismissible && !event\.defaultPrevented\) event\.preventDefault\(\)/)
+  assert.doesNotMatch(dialogPrimitive, /XIcon/)
+  assert.doesNotMatch(dialogPrimitive, /absolute top-2 right-2/)
+
   for (const dialogSource of [callPrepDialog, deleteDialog, deleteWorkspaceDialog]) {
     assert.match(dialogSource, /onEscapeKeyDown=\{\(event\) => event\.preventDefault\(\)\}/)
     assert.match(dialogSource, /onInteractOutside=\{\(event\) => event\.preventDefault\(\)\}/)
     assert.match(dialogSource, /onPointerDownOutside=\{\(event\) => event\.preventDefault\(\)\}/)
   }
 
-  for (const dialogSource of [deleteDialog, editWorkspaceDialog, deleteWorkspaceDialog]) {
-    assert.match(dialogSource, /<DialogFooter className="gap-3 max-sm:\[&_\[data-slot=button\]\]:w-full sm:justify-between">/)
+  for (const dialogSource of [callPrepDialog, deleteDialog, editWorkspaceDialog, deleteWorkspaceDialog]) {
+    assert.match(dialogSource, /<DialogActions/)
+    assert.doesNotMatch(dialogSource, /<DialogFooter className="gap-3 max-sm:\[&_\[data-slot=button\]\]:w-full sm:justify-between">/)
   }
+
+  assert.doesNotMatch(app, /DialogFooter,\n/)
+  assert.doesNotMatch(workspaceSwitcher, /DialogFooter,\n/)
+  assert.match(workspaceSwitcher, /import \{ DialogActions \} from "@\/components\/ui\/dialog-actions"/)
 
   assert.match(callPrepDialog, /Open methodology/)
   assert.doesNotMatch(callPrepDialog, /View question queue/)
 
   assert.match(deleteWorkspaceDialog, /const \[deleteSubmitting, setDeleteSubmitting\] = React\.useState\(false\)/)
   assert.match(deleteWorkspaceDialog, /onOpenChange=\{\(nextOpen\) => \(!nextOpen && !deleteSubmitting \? onCancel\(\) : undefined\)\}/)
-  assert.match(deleteWorkspaceDialog, /disabled=\{deleteSubmitting\}[\s\S]*Cancel/)
+  assert.match(deleteWorkspaceDialog, /cancelDisabled=\{deleteSubmitting\}/)
+  assert.match(deleteWorkspaceDialog, /onCancel=\{onCancel\}/)
   assert.match(deleteWorkspaceDialog, /disabled=\{isLastWorkspace \|\| deleteSubmitting\}/)
   assert.match(deleteWorkspaceDialog, /\{deleteSubmitting \? "Deleting\.\.\." : "Delete workspace"\}/)
   assert.match(deleteWorkspaceDialog, /role="alert"[\s\S]*\{deleteError\}/)
@@ -216,6 +237,29 @@ test("account and opportunity record forms only show fields backed by saved data
   assert.doesNotMatch(workspaceFormDialog, /Your role/)
 })
 
+test("record mutation dialogs use the shared modal action footer", async () => {
+  const app = await read("src/App.tsx")
+  const createAccountDialog = app.slice(app.indexOf("function CreateAccountDialog("), app.indexOf("function EditAccountDialog("))
+  const editAccountDialog = app.slice(app.indexOf("function EditAccountDialog("), app.indexOf("function CreateOpportunityDialog("))
+  const createOpportunityDialog = app.slice(app.indexOf("function CreateOpportunityDialog("), app.indexOf("function EditOpportunityDialog("))
+  const editOpportunityDialog = app.slice(app.indexOf("function EditOpportunityDialog("), app.indexOf("function DeleteRecordDialog("))
+
+  for (const dialogSource of [
+    createAccountDialog,
+    editAccountDialog,
+    createOpportunityDialog,
+    editOpportunityDialog,
+  ]) {
+    assert.match(dialogSource, /<DialogActions/)
+    assert.doesNotMatch(dialogSource, /<DialogFooter className="gap-3 max-sm:\[&_\[data-slot=button\]\]:w-full sm:justify-between">/)
+  }
+
+  assert.match(createAccountDialog, /cancelAction=\{[\s\S]*step === 1 \? "Cancel" : "Back"[\s\S]*primaryAction=\{step === 4 \? \(/)
+  assert.match(editAccountDialog, /onCancel=\{\(\) => onOpenChange\(false\)\}[\s\S]*Save account/)
+  assert.match(createOpportunityDialog, /onCancel=\{\(\) => handleOpenChange\(false\)\}[\s\S]*Create opportunity/)
+  assert.match(editOpportunityDialog, /onCancel=\{\(\) => onOpenChange\(false\)\}[\s\S]*Save changes/)
+})
+
 test("Start Call uses the real call capture hook and post-call function", async () => {
   const app = await read("src/App.tsx")
 
@@ -278,12 +322,18 @@ test("call cockpit refreshes AI guidance from live transcript flow", async () =>
   assert.match(liveStateFunction, /refreshReason/)
   assert.match(liveStateFunction, /topicShiftConfidence/)
   assert.match(liveStateFunction, /Do not create a full next question/)
+  assert.match(liveStateFunction, /buildLiveStateContext/)
+  assert.match(liveStateFunction, /liveStateContext/)
+  assert.match(liveStateFunction, /seller-visible account, opportunity, and call context/)
+  assert.match(liveStateFunction, /Do not expose database identifiers/)
+  assert.doesNotMatch(liveStateFunction, /input: JSON\.stringify\(\{[\s\S]*\n\s+account,[\s\S]*\n\s+call,[\s\S]*\n\s+opportunity,/)
   assert.doesNotMatch(liveStateFunction, /nextQuestion:/)
   assert.match(liveStateFunction, /naturalnessGuidance/)
   assert.match(app, /const aiTranscript = buildTranscriptForAi\(transcript\)/)
   assert.match(app, /aiTranscript\.length === 0/)
   assert.doesNotMatch(app, /latestTurnIsSeller/)
-  assert.match(app, /turnsSinceLastFullGuidance >= 2/)
+  assert.match(app, /LIVE_COACH_FORCE_REFRESH_TURNS = 1/)
+  assert.match(app, /turnsSinceLastFullGuidance >= LIVE_COACH_FORCE_REFRESH_TURNS/)
   assert.match(app, /LIVE_COACH_AI_RECHECK_SECONDS = 30/)
   assert.match(app, /LIVE_COACH_AI_RECHECK_MS/)
   assert.match(app, /setLiveCoachHeartbeatTick/)
@@ -301,7 +351,10 @@ test("call cockpit refreshes AI guidance from live transcript flow", async () =>
   assert.match(liveGuidanceFunction, /mandatory AI audit of the visible recommendation/)
   assert.match(liveGuidanceFunction, /do not repeat the exact visible question/)
   assert.match(app, /const existingGuidance = aiLiveGuidanceRef\.current/)
-  assert.match(app, /Keeping the last AI question while it reconnects/)
+  assert.match(app, /Keep this question for now/)
+  assert.match(app, /checking whether the flow has moved/)
+  assert.doesNotMatch(app, /could not refresh the next question/)
+  assert.doesNotMatch(app, /could not shape the next question/)
   assert.doesNotMatch(app, /setAiLiveGuidance\(null\)\s*liveCoachHasGuidanceRef\.current = false\s*setLiveCoachStatus\("error"\)\s*setLiveCoachError\(getUserFacingErrorMessage\(caughtError, "AI coach could not refresh\."\)\)/)
 })
 
@@ -325,26 +378,53 @@ test("live guidance uses account and opportunity record context without exposing
   assert.match(liveGuidanceFunction, /Selected playbooks and intent clusters decide what must be learned/)
   assert.match(liveGuidanceFunction, /account and opportunity record fields only shape wording, sequencing, and timing/i)
   assert.match(liveGuidanceFunction, /Do not mark a framework field complete from account or opportunity record context alone/)
-  assert.match(core, /accountName: string/)
-  assert.match(core, /website: string/)
-  assert.match(core, /industry: string/)
-  assert.match(core, /employeeCount: string/)
-  assert.match(core, /region: string/)
-  assert.match(core, /currency: CurrencyCode/)
-  assert.match(core, /currentTools: string/)
-  assert.match(core, /strategicInitiatives: string/)
-  assert.match(core, /competitors: string/)
-  assert.match(core, /accountNotes: string/)
-  assert.match(core, /opportunityName: string/)
-  assert.match(core, /stage: string/)
-  assert.match(core, /amount: string/)
-  assert.match(core, /closeDate: string/)
-  assert.match(core, /source: string/)
-  assert.match(core, /frameworks: string/)
-  assert.match(core, /nextStep: string/)
-  assert.match(core, /pain: string/)
-  assert.match(core, /decisionProcess: string/)
-  assert.match(core, /manualNotes: string/)
+  const accountGuidanceContextByDraftField = {
+    accountName: "name",
+    website: "website",
+    industry: "industry",
+    employeeCount: "employeeCount",
+    region: "region",
+    currency: "currency",
+    currentTools: "currentTools",
+    strategicInitiatives: "strategicInitiatives",
+    competitors: "competitors",
+    accountNotes: "profileNotes",
+  }
+  const opportunityGuidanceContextByDraftField = {
+    opportunityName: "name",
+    stage: "stage",
+    amount: "amount",
+    closeDate: "closeDate",
+    source: "source",
+    frameworks: "selected-playbooks",
+    nextStep: "nextStep",
+    pain: "pain",
+    decisionProcess: "decisionProcess",
+    manualNotes: "manualNotes",
+  }
+  assert.deepEqual(
+    extractObjectTypeKeys(core, "AccountDraft").sort(),
+    Object.keys(accountGuidanceContextByDraftField).sort(),
+    "Every visible seller-editable account field needs an explicit live-guidance context mapping."
+  )
+  assert.deepEqual(
+    extractObjectTypeKeys(core, "OpportunityDraft").sort(),
+    Object.keys(opportunityGuidanceContextByDraftField).sort(),
+    "Every visible seller-editable opportunity field needs an explicit live-guidance context mapping."
+  )
+
+  for (const contextField of Object.values(accountGuidanceContextByDraftField)) {
+    assert.match(liveGuidanceFunction, new RegExp(`\\b${contextField}:`))
+  }
+  for (const contextField of Object.values(opportunityGuidanceContextByDraftField)) {
+    if (contextField === "selected-playbooks") {
+      assert.match(liveGuidanceFunction, /playbooks: selectedPlaybooks/)
+      assert.match(liveGuidanceFunction, /playbookFields: playbookFieldResponse\.data/)
+      assert.match(liveGuidanceFunction, /intentClusters/)
+      continue
+    }
+    assert.match(liveGuidanceFunction, new RegExp(`\\b${contextField}:`))
+  }
   assert.match(liveGuidanceFunction, /name: getRecordText\(account, "name"\)/)
   assert.match(liveGuidanceFunction, /website: accountProfileContext\.website/)
   assert.match(liveGuidanceFunction, /industry: getRecordText\(account, "industry"\)/)
@@ -740,9 +820,12 @@ test("call cockpit requires AI guidance instead of deterministic frontend questi
   assert.match(startCallHandler, /updatePreparationStep\("context"/)
   assert.match(startCallHandler, /updatePreparationStep\(\s*"coach"/)
   assert.match(startCallHandler, /updatePreparationStep\("audio"/)
-  assert.match(app, /SalesFrame got an incomplete AI response while writing the first live question/)
-  assert.match(app, /OpenAI took too long to write the first live question/)
-  assert.match(app, /OpenAI could not use this workspace key/)
+  assert.match(app, /SalesFrame needs another moment to write the first question/)
+  assert.match(app, /SalesFrame is taking longer than expected to write the first question/)
+  assert.match(app, /This workspace key needs attention/)
+  assert.doesNotMatch(app, /incomplete AI response/)
+  assert.doesNotMatch(app, /OpenAI took too long/)
+  assert.doesNotMatch(app, /OpenAI could not use this workspace key/)
   assert.doesNotMatch(app, /setStartError\(result\.message\)/)
   assert.match(startCallHandler, /await requestLiveGuidance/)
   assert.match(startCallHandler, /timeoutMs: 22000/)
@@ -769,6 +852,29 @@ test("call cockpit requires AI guidance instead of deterministic frontend questi
   assert.doesNotMatch(app, /localGuidance: localLiveGuidance/)
   assert.doesNotMatch(liveGuidanceFunction, /localFallbackGuidance/)
   assert.doesNotMatch(liveGuidanceFunction, /localGuidance\?:/)
+})
+
+test("starter opportunities do not expose placeholder AI guidance as a real question", async () => {
+  const app = await read("src/App.tsx")
+  const fuzzySearch = await read("src/lib/fuzzy-search.ts")
+  const recordFactories = await read("src/lib/record-factories.ts")
+
+  assert.match(recordFactories, /starterOpportunityGuidance/)
+  assert.match(recordFactories, /Ready for your first live question/)
+  assert.match(recordFactories, /hasStarterOpportunityGuidance/)
+  assert.doesNotMatch(recordFactories, /AI guidance pending/)
+  assert.doesNotMatch(recordFactories, /Start a call to generate the next question with OpenAI live guidance/)
+  assert.doesNotMatch(recordFactories, /Start a call to generate live guidance, transcript, and post-call outputs with OpenAI/)
+
+  assert.match(app, /function getOpportunityGuidancePreview/)
+  assert.match(app, /hasStarterOpportunityGuidance\(opportunity\) \? "Live question" : "Next best question"/)
+  assert.match(app, /SalesFrame will prepare the first live question from the account, opportunity, and selected playbooks/)
+  assert.match(app, /getOpportunityGuidancePreview\(opportunity\)/)
+  assert.doesNotMatch(app, /\{opportunity\.nextQuestion\}/)
+
+  assert.match(fuzzySearch, /const hasLiveGuidanceText = !hasStarterOpportunityGuidance\(opportunity\)/)
+  assert.match(fuzzySearch, /hasLiveGuidanceText \? opportunity\.nextQuestion : ""/)
+  assert.match(fuzzySearch, /hasLiveGuidanceText \? opportunity\.questionReason : ""/)
 })
 
 test("call cockpit feedback buttons suppress acted-on questions and force AI refresh", async () => {
@@ -830,6 +936,7 @@ test("call cockpit feedback buttons suppress acted-on questions and force AI ref
 test("CSV import lives only on the personal Account page and scopes to the selected workspace", async () => {
   const app = await read("src/App.tsx")
   const dialog = await read("src/components/csv-import-dialog.tsx")
+  const dialogActions = await read("src/components/ui/dialog-actions.tsx")
   const dialogUi = await read("src/components/ui/dialog.tsx")
   const importLib = await read("src/lib/csv-import.ts")
   const serverFunctions = await read("src/lib/server-functions.ts")
@@ -922,8 +1029,11 @@ test("CSV import lives only on the personal Account page and scopes to the selec
   assert.doesNotMatch(dialog, /csv-import-paste/)
   assert.match(dialog, /<DialogTitle>\{mode === "accounts" \? "Import accounts" : "Import opportunities"\}<\/DialogTitle>/)
   assert.match(dialog, /Import into \{workspaceName\}\. This only affects the selected workspace\./)
-  assert.match(dialog, /step === "summary" \? \([\s\S]*<span aria-hidden="true" \/>[\s\S]*\) : \([\s\S]*<Button variant="outline" disabled=\{isImporting\} onClick=\{\(\) => onOpenChange\(false\)\}>[\s\S]*Cancel[\s\S]*<\/Button>/)
-  assert.match(dialog, /step === "summary" \? \([\s\S]*<Button disabled=\{isImporting\} onClick=\{\(\) => onOpenChange\(false\)\}>[\s\S]*Done[\s\S]*<\/Button>/)
+  assert.match(dialog, /<DialogActions[\s\S]*cancelAction=\{step === "summary" \? <span aria-hidden="true" \/> : undefined\}[\s\S]*cancelDisabled=\{isImporting\}[\s\S]*onCancel=\{\(\) => onOpenChange\(false\)\}/)
+  assert.match(dialog, /step === "summary" \? <span aria-hidden="true" \/> : undefined/)
+  assert.match(dialog, /<Button disabled=\{isImporting\} onClick=\{\(\) => onOpenChange\(false\)\}>[\s\S]*Done[\s\S]*<\/Button>/)
+  assert.match(dialogActions, /cancelAction\?: React\.ReactNode/)
+  assert.match(dialogActions, /leftActions\?: React\.ReactNode/)
   assert.doesNotMatch(dialog, /step === "summary" \? "Done" : "Cancel"/)
   assert.doesNotMatch(dialog, /<Button variant="ghost" disabled=\{isImporting\} onClick=\{\(\) => onOpenChange\(false\)\}>[\s\S]*Close[\s\S]*<\/Button>/)
   assert.doesNotMatch(dialog, /showCloseButton=/)
@@ -1452,7 +1562,9 @@ test("opportunity gap counts use selected playbook checklist across list and int
   assert.match(opportunitiesView, /const displayOpportunities = opportunities\.map/)
   assert.match(opportunitiesView, /const pageSize = 15/)
   assert.match(opportunitiesView, /const paginatedOpportunities = visibleOpportunities\.slice/)
-  assert.match(opportunitiesView, /Showing \{\(currentPage - 1\) \* pageSize \+ 1\}-\{Math\.min\(currentPage \* pageSize, visibleOpportunities\.length\)\}/)
+  assert.match(opportunitiesView, /const opportunityRangeStart = visibleOpportunities\.length === 0 \? 0 : \(currentPage - 1\) \* pageSize \+ 1/)
+  assert.match(opportunitiesView, /const opportunityRangeEnd = Math\.min\(currentPage \* pageSize, visibleOpportunities\.length\)/)
+  assert.match(opportunitiesView, /Showing \{opportunityRangeStart\}-\{opportunityRangeEnd\} of \{visibleOpportunities\.length\}/)
   assert.match(opportunitiesView, /Page \{currentPage\} of \{pageCount\}/)
   assert.match(opportunitiesView, /displayOpportunities[\s\S]*matchesCoverageFilter/)
   assert.match(opportunityIntelligence, /const methodologySummary = getOpportunityMethodologySummary/)
@@ -1577,10 +1689,11 @@ test("account opportunities render as aligned table rows", async () => {
   assert.match(app, /<th className="hidden w-\[96px\] px-3 py-2 text-center font-medium xl:table-cell">Gaps<\/th>/)
   assert.match(app, /<th className="w-\[128px\] px-2 py-2 text-right font-medium">Action<\/th>/)
   assert.match(app, /className="min-w-\[104px\] justify-center gap-1\.5"/)
-  assert.doesNotMatch(accountView, /tabIndex=\{0\}/)
+  assert.match(accountView, /tabIndex=\{0\}/)
   assert.doesNotMatch(accountView, /role="button"/)
-  assert.match(accountView, /className="cursor-pointer border-b transition-colors hover:bg-muted\/30 last:border-b-0"/)
+  assert.match(accountView, /className="cursor-pointer border-b transition-colors hover:bg-muted\/30 focus-visible:bg-muted\/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"/)
   assert.match(accountView, /onClick=\{\(\) => onOpportunitySelect\(opportunity\.id\)\}/)
+  assert.match(accountView, /onKeyDown=\{\(event\) => \{[\s\S]*event\.target !== event\.currentTarget[\s\S]*event\.key !== "Enter" && event\.key !== " "[\s\S]*event\.preventDefault\(\)[\s\S]*onOpportunitySelect\(opportunity\.id\)/)
   assert.match(accountView, /onClick=\{\(event\) => \{[\s\S]*event\.stopPropagation\(\)[\s\S]*onOpportunitySelect\(opportunity\.id\)/)
   assert.match(accountView, /aria-label=\{`Open \$\{opportunity\.name\}`\}/)
   assert.match(accountView, /className="px-2 py-3 text-right align-middle"[\s\S]*onClick=\{\(event\) => event\.stopPropagation\(\)\}/)
@@ -1845,6 +1958,7 @@ test("mobile viewport uses safe areas, scrollable tabs, and reachable call actio
   const sidebar = await read("src/components/ui/sidebar.tsx")
   const card = await read("src/components/ui/card.tsx")
   const csvImportDialog = await read("src/components/csv-import-dialog.tsx")
+  const dialogActions = await read("src/components/ui/dialog-actions.tsx")
   const workspaceSwitcher = await read("src/components/workspace-switcher.tsx")
   const mobileStartCallViewList = app.slice(
     app.indexOf("const mobileStartCallViews = ["),
@@ -1868,7 +1982,7 @@ test("mobile viewport uses safe areas, scrollable tabs, and reachable call actio
   assert.match(app, /max-sm:\[&_\[data-slot=button\]\]:min-h-11/)
   assert.match(app, /max-sm:\[&_\[data-slot=select-trigger\]\]:min-h-11/)
   assert.match(app, /max-sm:\[&_\[data-slot=input\]\]:min-h-11/)
-  assert.match(app, /max-sm:\[&_\[data-slot=button\]\]:w-full/)
+  assert.match(dialogActions, /max-sm:\[&_\[data-slot=button\]\]:w-full/)
   assert.match(app, /flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between/)
   assert.match(app, /className="w-full gap-2 sm:w-auto"/)
   assert.match(card, /has-data-\[slot=card-action\]:grid-cols-1/)
@@ -1877,12 +1991,13 @@ test("mobile viewport uses safe areas, scrollable tabs, and reachable call actio
   assert.match(card, /sm:col-start-2 sm:row-span-2 sm:row-start-1 sm:mt-0 sm:w-auto sm:justify-self-end/)
   assert.match(csvImportDialog, /max-sm:\[&_\[data-slot=button\]\]:min-h-11/)
   assert.match(csvImportDialog, /max-sm:\[&_\[data-slot=input\]\]:min-h-11/)
-  assert.match(csvImportDialog, /max-sm:\[&_\[data-slot=button\]\]:w-full/)
-  assert.match(csvImportDialog, /flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between/)
-  assert.match(csvImportDialog, /className="grid gap-2 sm:flex"/)
+  assert.match(csvImportDialog, /<DialogActions/)
+  assert.match(dialogActions, /max-sm:\[&_\[data-slot=button\]\]:w-full/)
+  assert.match(dialog, /flex flex-col-reverse gap-2[\s\S]*sm:flex-row sm:justify-between/)
+  assert.match(dialogActions, /className="grid gap-2 sm:flex sm:flex-row sm:justify-end"/)
   assert.match(workspaceSwitcher, /max-sm:\[&_\[data-slot=button\]\]:min-h-11/)
   assert.match(workspaceSwitcher, /max-sm:\[&_\[data-slot=input\]\]:min-h-11/)
-  assert.match(workspaceSwitcher, /max-sm:\[&_\[data-slot=button\]\]:w-full/)
+  assert.match(workspaceSwitcher, /<DialogActions/)
   assert.match(sidebar, /className=\{cn\("size-10 md:size-7", className\)\}/)
   assert.match(app, /className="size-10 md:size-8"[\s\S]*aria-label="Toggle theme"/)
   assert.match(authPage, /className="size-10 md:size-7"[\s\S]*aria-label="Toggle theme"/)
@@ -2212,8 +2327,11 @@ test("call library navigation is workspace-level, not tied to the active opportu
   assert.match(callsView, /const callsPageSize = 10/)
   assert.match(callsView, /const \[callsPage, setCallsPage\] = React\.useState\(1\)/)
   assert.match(callsView, /const paginatedCalls = visibleCalls\.slice\(/)
+  assert.match(callsView, /const callRangeStart = visibleCalls\.length === 0 \? 0 : \(safeCallsPage - 1\) \* callsPageSize \+ 1/)
+  assert.match(callsView, /const callRangeEnd = Math\.min\(safeCallsPage \* callsPageSize, visibleCalls\.length\)/)
   assert.match(callsView, /\{paginatedCalls\.map\(\(call\) => \{/)
   assert.match(callsView, /visibleCalls\.length > callsPageSize/)
+  assert.match(callsView, /Showing \{callRangeStart\}-\{callRangeEnd\} of \{visibleCalls\.length\}/)
   assert.match(callsView, /Page \{safeCallsPage\} of \{totalCallPages\}/)
   assert.match(callsView, /Previous/)
   assert.match(callsView, /Next/)
@@ -2340,7 +2458,7 @@ test("call capture persists transcript, notes, and recordings", async () => {
   assert.doesNotMatch(hook, /Realtime transcript finalisation needs attention/)
   assert.doesNotMatch(hook, /final recording cleanup needs attention/)
   assert.match(hook, /SalesFrame may need a moment to finish the last transcript lines\./)
-  assert.match(hook, /The call ended, but SalesFrame could not finish preparing the audio recording\./)
+  assert.match(hook, /The call ended, and the audio recording needs another preparation attempt\./)
   assert.match(hook, /abortSignal\?: AbortSignal/)
   assert.match(hook, /throwIfCallStartCancelled\(config\.abortSignal\)/)
   assert.match(hook, /const cancelCallStart = React\.useCallback/)
@@ -2359,6 +2477,8 @@ test("call capture persists transcript, notes, and recordings", async () => {
   assert.match(audioPreflight, /SalesFrame needs customer-side audio before this call can start/)
   assert.match(audioPreflight, /stopCapturedSources\(sources\)/)
   assert.match(audioPreflight, /SalesFrame can hear customer audio, but still needs your microphone before the call can start/)
+  assert.match(audioPreflight, /SalesFrame needs one more audio check before the call can start\./)
+  assert.doesNotMatch(audioPreflight, /could not verify the call audio/)
   assert.match(audioPreflight, /mode === "in_person_microphone"/)
   assert.match(audioPreflight, /const microphoneSourceKind: AudioSourceKind = sources\.length > 0/)
   assert.match(audioPreflight, /speakerHint: microphoneSpeakerHint/)
@@ -2855,6 +2975,8 @@ test("setup flows use saved OpenAI keys and route missing keys to settings", asy
 
 test("Start Call research step routes missing OpenAI keys to settings", async () => {
   const app = await read("src/App.tsx")
+  const spec = await read("docs/product-build-spec.md")
+  const smokeChecklist = await read("docs/production-smoke-checklist.md")
   const startCallDialog = app.slice(
     app.indexOf("function StartRecordingDialog"),
     app.indexOf("function MobileStartCallBar")
@@ -2875,6 +2997,16 @@ test("Start Call research step routes missing OpenAI keys to settings", async ()
   assert.match(startCallDialog, /Buyer context/)
   assert.match(startCallDialog, /Optional details help the question fit the person you are meeting\./)
   assert.doesNotMatch(startCallDialog, />Customer Research</)
+  assert.doesNotMatch(app, /Customer research could not be prepared/)
+  assert.match(app, /Research context could not be prepared/)
+  assert.match(spec, /4\. Seller Research/)
+  assert.match(spec, /Optional Seller Research toggle/)
+  assert.match(spec, /Seller Research and buyer-context settings are passed into live guidance\./)
+  assert.match(spec, /Seller Research, buyer context, and previous opportunity context/)
+  assert.doesNotMatch(spec, /Optional Customer Research toggle/)
+  assert.doesNotMatch(spec, /Customer research settings are passed into live guidance/)
+  assert.match(smokeChecklist, /Seller Research runs from Start Call when enabled; Customer Research runs from account enrichment when enabled\./)
+  assert.doesNotMatch(smokeChecklist, /Customer research runs from the Start Call/)
   assert.doesNotMatch(startCallDialog, /start-call-openai-key/)
   assert.doesNotMatch(startCallDialog, /Research will shape live questions/)
   assert.doesNotMatch(startCallDialog, /AI will use the same trusted source set every time/)
@@ -2883,6 +3015,7 @@ test("Start Call research step routes missing OpenAI keys to settings", async ()
 
 test("workspace onboarding does not reset steps while saving OpenAI key", async () => {
   const app = await read("src/App.tsx")
+  const csvImportDialog = await read("src/components/csv-import-dialog.tsx")
   const dialogActions = await read("src/components/ui/dialog-actions.tsx")
   const workspaceSwitcher = await read("src/components/workspace-switcher.tsx")
   const onboardingDialog = app.slice(
@@ -2915,9 +3048,14 @@ test("workspace onboarding does not reset steps while saving OpenAI key", async 
   assert.match(onboardingDialog, /const dialogTitle = isNewWorkspaceSetup \? "Set up workspace" : `Set up \$\{workspaceName\.trim\(\) \|\| workspace\.name\}`/)
   assert.match(onboardingDialog, /<DialogTitle>\{dialogTitle\}<\/DialogTitle>/)
   assert.match(dialogActions, /function DialogActions/)
+  assert.match(dialogActions, /cancelAction\?: React\.ReactNode/)
+  assert.match(dialogActions, /leftActions\?: React\.ReactNode/)
+  assert.match(dialogActions, /\{cancelAction \?\? leftActions \?\? \(/)
   assert.match(dialogActions, /<Button variant="outline" disabled=\{cancelDisabled\} onClick=\{onCancel\}>/)
   assert.match(dialogActions, /<DialogFooter[\s\S]*gap-3 max-sm:\[&_\[data-slot=button\]\]:w-full sm:justify-between/)
   assert.match(onboardingDialog, /<DialogActions[\s\S]*cancelLabel=\{backActionLabel\}[\s\S]*onCancel=\{\(\) => void onBackToLogin\(\)\}/)
+  assert.match(csvImportDialog, /<DialogActions[\s\S]*cancelAction=\{step === "summary" \? <span aria-hidden="true" \/> : undefined\}[\s\S]*onCancel=\{\(\) => onOpenChange\(false\)\}/)
+  assert.doesNotMatch(csvImportDialog, /<DialogFooter className="gap-3 max-sm:\[&_\[data-slot=button\]\]:w-full sm:justify-between">/)
   assert.doesNotMatch(onboardingDialog, /<Button variant="ghost" className="justify-start"/)
   assert.match(onboardingDialog, /rounded-lg bg-\[#0f0f10\] text-white">\s*<AudioLinesIcon aria-hidden="true" className="size-5" \/>/)
   assert.match(onboardingDialog, /const \[step, setStep\] = React\.useState<1 \| 2 \| 3 \| 4>\(1\)/)
@@ -3178,13 +3316,13 @@ test("customer-facing errors do not leak backend implementation details", async 
   assert.match(userFacingErrors, /unexpected token/)
   assert.match(userFacingErrors, /<!doctype/)
   assert.match(userFacingErrors, /stack trace\|traceback/)
-  assert.match(userFacingErrors, /OpenAI could not use that key/)
+  assert.match(userFacingErrors, /This OpenAI key did not work/)
   assert.match(userFacingErrors, /workspace key needs billing or quota attention/)
   assert.match(userFacingErrors, /OpenAI is receiving too many requests at once/)
-  assert.match(userFacingErrors, /OpenAI could not use the selected model/)
-  assert.match(userFacingErrors, /OpenAI is taking longer than expected/)
+  assert.match(userFacingErrors, /The selected OpenAI model is not available/)
+  assert.match(userFacingErrors, /SalesFrame is taking longer than expected/)
   assert.match(userFacingErrors, /Your session has expired\. Sign in again to continue\./)
-  assert.match(userFacingErrors, /SalesFrame could not reach the service\. Check your connection, then try again\./)
+  assert.match(userFacingErrors, /SalesFrame cannot reach the service right now\. Check your connection, then try again\./)
   assert.match(app, /getUserFacingErrorMessage/)
   assert.match(salesframeDataHook, /getUserFacingErrorMessage/)
   assert.match(callCaptureHook, /getUserFacingErrorMessage/)
@@ -3223,6 +3361,30 @@ test("customer-facing errors do not leak backend implementation details", async 
   assert.doesNotMatch(app, /No call recordings are stored/)
   assert.match(app, /Getting live transcription ready\./)
   assert.match(app, /No recordings for this opportunity yet\./)
+  assert.match(app, /Enrichment needs another try\. The account is still saved\./)
+  assert.match(app, /Account intelligence needs another save attempt\./)
+  assert.match(app, /SalesFrame needs another moment to research this domain\. You can type what you sell manually\./)
+  assert.match(app, /Workspace setup was cancelled\. SalesFrame needs another try to remove the draft workspace\./)
+  assert.match(callCaptureHook, /That transcript line needs another save attempt\. SalesFrame will keep listening\./)
+  assert.match(callCaptureHook, /SalesFrame needs access to the call audio before it can start\./)
+  assert.match(callCaptureHook, /transcription needs another connection attempt/)
+  assert.match(callCaptureHook, /Call stopped\. SalesFrame needs another moment to save the final status\./)
+  assert.match(callCaptureHook, /Transcript is saved\. The audio recording needs another upload attempt\./)
+  assert.match(app, /Recording needs another upload attempt/)
+  assert.match(app, /Transcript is saved\. The audio recording needs another upload attempt\./)
+  assert.match(callCaptureHook, /Speaker label still needs review\./)
+  assert.doesNotMatch(app, /Account enrichment could not be completed/)
+  assert.doesNotMatch(app, /Account intelligence could not be saved/)
+  assert.doesNotMatch(app, /OpenAI could not research this domain/)
+  assert.doesNotMatch(app, /Workspace setup was cancelled, but the draft workspace could not be removed/)
+  assert.doesNotMatch(callCaptureHook, /Recording upload failed/)
+  assert.doesNotMatch(app, /Recording upload needs attention/)
+  assert.doesNotMatch(app, /audio recording upload failed/)
+  assert.doesNotMatch(callCaptureHook, /transcription could not connect/)
+  assert.doesNotMatch(callCaptureHook, /Realtime transcription could not connect/)
+  assert.doesNotMatch(callCaptureHook, /Transcript could not be saved/)
+  assert.doesNotMatch(callCaptureHook, /Call capture could not start/)
+  assert.doesNotMatch(callCaptureHook, /Speaker label could not be refined/)
   assert.doesNotMatch(callCaptureHook, /caughtError instanceof Error \? caughtError\.message/)
   assert.doesNotMatch(csvImportDialog, /error instanceof Error \? error\.message/)
   assert.doesNotMatch(workspaceSwitcher, /error instanceof Error \? error\.message/)
