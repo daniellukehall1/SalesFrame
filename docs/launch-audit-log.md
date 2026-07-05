@@ -1602,3 +1602,14 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 - Before impact: Sellers could click into a record and feel disoriented because the page opened at the previous scroll depth.
 - After impact: Navigation now consistently lands at the top of the target page while avoiding surprise resets during ordinary data refreshes.
 - Verification: Extended production-contract coverage for pending navigation scroll resets and load-aware scroll consumption.
+
+### Motion audit found custom animation drift
+
+- Severity: Medium
+- Description: The app had accumulated SalesFrame-specific motion tokens, pulsing decorative icons, and nested sidebar fade/slide choreography even though the desired app feel is calm shadcn-style motion.
+- Root cause: Motion was improved surface-by-surface instead of audited as a full component inventory, so some custom animation choices were missed.
+- Recommended improvement: Treat shadcn/Radix/tw-animate as the default, use Animate UI only for justified component-level interactions, and keep all other surfaces static.
+- Fix applied: Removed `--sf-motion-*` and `--sf-ease-*` tokens from the source app, removed decorative pulsing icons and replay marker lift, restored direct sidebar account/playbook reveal, and added `docs/animation-component-audit.md` as the component-level motion inventory.
+- Before impact: Sidebar and setup/live surfaces could feel slightly over-animated or locally tuned instead of default and calm.
+- After impact: Motion now comes from default shadcn/Radix/tw-animate patterns, with shadcn Skeleton as the only approved pulse.
+- Verification: Updated production-contract coverage to reject custom motion variables, local keyframes, decorative pulse in app code, sidebar nested choreography, shimmer, gradient text masking, and large hover scale.

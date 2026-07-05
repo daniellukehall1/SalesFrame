@@ -160,7 +160,7 @@ export function NavProjects({
               type="button"
               aria-expanded={allAccountsExpanded}
               aria-label={allAccountsExpanded ? "Collapse all account opportunities" : "Expand all account opportunities"}
-              className="inline-flex h-7 items-center rounded-md px-2 text-[11px] font-medium text-sidebar-foreground/70 transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+              className="inline-flex h-7 items-center rounded-md px-2 text-[11px] font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
               onClick={handleToggleAllAccounts}
             >
               {allAccountsExpanded ? "Collapse all" : "Expand all"}
@@ -169,7 +169,7 @@ export function NavProjects({
           <button
             type="button"
             aria-label="Create account"
-            className="flex size-7 items-center justify-center rounded-md text-sidebar-foreground transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+            className="flex size-7 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
             onClick={onCreateAccount}
           >
             <PlusIcon className="size-4" />
@@ -210,7 +210,7 @@ export function NavProjects({
                     aria-label={`Toggle ${account.name} opportunities`}
                     onClick={(event) => event.stopPropagation()}
                   >
-                    <ChevronRightIcon className="transition-transform duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-standard)] group-data-[state=open]/account:rotate-90" />
+                    <ChevronRightIcon className="transition-transform duration-200 group-data-[state=open]/account:rotate-90" />
                   </SidebarMenuAction>
                 </CollapsibleTrigger>
                 <ContextMenuContent className="w-56">
@@ -237,7 +237,7 @@ export function NavProjects({
                   </ContextMenuItem>
                 </ContextMenuContent>
               </ContextMenu>
-              <CollapsibleContent className="overflow-hidden transition-none duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-enter)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-1 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1">
+              <CollapsibleContent>
                 <SidebarMenuSub>
                   {account.opportunities.map((opportunity) => (
                     <SidebarMenuSubItem key={opportunity.id}>

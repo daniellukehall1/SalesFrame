@@ -657,7 +657,7 @@ export function CsvImportDialog({
               </Button>
             ) : step === "review" ? (
               <Button disabled={isImporting || importableRows.length === 0} onClick={handleImport}>
-                <UploadIcon className={isImporting ? "sf-state-pulse" : undefined} />
+                <UploadIcon />
                 {isImporting ? "Importing..." : `Import ${importableRows.length} rows`}
               </Button>
             ) : (

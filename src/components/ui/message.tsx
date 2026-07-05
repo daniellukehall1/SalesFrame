@@ -22,7 +22,7 @@ function Message({
       data-slot="message"
       data-align={align}
       className={cn(
-        "sf-fade-in group/message relative flex w-full min-w-0 gap-2 text-sm data-[align=end]:flex-row-reverse",
+        "animate-in fade-in-0 slide-in-from-bottom-1 duration-200 group/message relative flex w-full min-w-0 gap-2 text-sm data-[align=end]:flex-row-reverse",
         className
       )}
       {...props}

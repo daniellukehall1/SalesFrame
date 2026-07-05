@@ -75,10 +75,10 @@ export function NavMain({
                   >
                     {item.icon}
                     <span>{item.title}</span>
-                    <ChevronRightIcon className="ml-auto transition-transform duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-standard)] group-data-[state=open]/collapsible:rotate-90" />
+                    <ChevronRightIcon className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
                   </SidebarMenuButton>
                 </CollapsibleTrigger>
-                <CollapsibleContent className="overflow-hidden duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-enter)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-1 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1">
+                <CollapsibleContent>
                   <SidebarMenuSub>
                     {subItems.map((subItem) => (
                       <SidebarMenuSubItem key={subItem.title}>

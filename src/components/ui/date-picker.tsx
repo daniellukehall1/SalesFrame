@@ -55,7 +55,7 @@ function DatePicker({
             type="button"
             disabled={disabled}
             aria-label="Clear date"
-            className="absolute top-1/2 right-0.5 flex size-10 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-[background-color,color,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:right-1.5 md:size-7"
+            className="absolute top-1/2 right-0.5 flex size-10 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-[background-color,color,opacity] duration-150 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:right-1.5 md:size-7"
             onClick={() => onChange("")}
           >
             <XIcon className="size-4" />

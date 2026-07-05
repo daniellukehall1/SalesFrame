@@ -6367,7 +6367,7 @@ function GlobalSearch({
       <button
         key={`${mode}-${result.type}-${result.id}`}
         type="button"
-        className="grid grid-cols-[28px_1fr_auto] items-center gap-3 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-accent"
+        className="grid grid-cols-[28px_1fr_auto] items-center gap-3 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-accent"
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => handleSelect(result)}
       >
@@ -6731,7 +6731,7 @@ function StartCallPreparingView({
                     isComplete && "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
                   )}
                 >
-                  {isComplete ? <CheckIcon className="size-4" /> : <Icon className={cn("size-4", isActive && "sf-state-pulse")} />}
+                  {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
                 </span>
                 <div className="min-w-0">
                   <p className="truncate font-medium">{item.label}</p>
@@ -7319,7 +7319,7 @@ function StartRecordingDialog({
               onCancel={handleCancelStart}
               primaryAction={
                 <Button disabled className="gap-2">
-                  <SparklesIcon className="sf-state-pulse" />
+                  <SparklesIcon />
                   Starting call
                 </Button>
               }
@@ -9568,7 +9568,7 @@ function PlaybookMultiSelect({
               <span className="shrink-0 text-muted-foreground">+{hiddenPlaybookCount} more</span>
             ) : null}
           </span>
-          <ChevronDownIcon className={cn("size-4 shrink-0 transition-transform duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-standard)]", open && "rotate-180")} />
+          <ChevronDownIcon className={cn("size-4 shrink-0 transition-transform duration-200 ease-linear", open && "rotate-180")} />
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -9594,7 +9594,7 @@ function PlaybookMultiSelect({
               type="button"
               role="option"
               aria-selected={isSelected}
-              className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => togglePlaybook(playbook)}
             >
               <span
@@ -9862,7 +9862,7 @@ function HomeDashboard({
                     return (
                       <tr
                         key={`${opportunity.id}-row`}
-                        className="cursor-pointer border-b transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
+                        className="cursor-pointer border-b transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
                         tabIndex={0}
                         aria-label={`Open ${opportunity.name}`}
                         onClick={() => onOpportunitySelect(opportunity.id)}
@@ -10439,7 +10439,7 @@ function AccountView({
                       {visibleOpportunities.map((opportunity) => (
                         <tr
                           key={opportunity.id}
-                          className="cursor-pointer border-b transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
+                          className="cursor-pointer border-b transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
                           tabIndex={0}
                           aria-label={`Open ${opportunity.name}`}
                           onClick={() => onOpportunitySelect(opportunity.id)}
@@ -11538,7 +11538,7 @@ function NextQuestionCard({
         {displayedQuestion ? (
           <p
             key={`${displayedQuestion.id}-${displayedQuestion.question}`}
-            className="next-question-text sf-soft-highlight max-w-5xl break-words text-2xl leading-[1.08] font-semibold sm:text-3xl md:text-4xl lg:text-[2.75rem]"
+            className="next-question-text animate-in fade-in-0 slide-in-from-bottom-1 duration-300 max-w-5xl break-words text-2xl leading-[1.08] font-semibold sm:text-3xl md:text-4xl lg:text-[2.75rem]"
           >
             “{displayedQuestion.question}”
           </p>
@@ -12376,7 +12376,7 @@ function SpeakerIdentityPanel({
     <details className="group rounded-lg bg-muted/20 px-3 py-2">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
         <span className="text-xs font-medium text-muted-foreground">Speaker map</span>
-        <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-standard)] group-open:rotate-180" aria-hidden="true" />
+        <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-200 ease-linear group-open:rotate-180" aria-hidden="true" />
       </summary>
       <div className="mt-2 grid gap-2">
         {nextSpeakerLabel ? (
@@ -12799,7 +12799,7 @@ function CaptureSignalStack({
               className={cn(
                 "size-1.5 shrink-0 rounded-full",
                 indicator.tone === "live" && "bg-emerald-500 shadow-[0_0_0_4px_rgb(16_185_129_/_0.12)]",
-                indicator.tone === "building" && "sf-state-pulse bg-sky-500 shadow-[0_0_0_4px_rgb(14_165_233_/_0.12)]",
+                indicator.tone === "building" && "bg-sky-500 shadow-[0_0_0_4px_rgb(14_165_233_/_0.12)]",
                 indicator.tone === "warning" && "bg-amber-500 shadow-[0_0_0_4px_rgb(245_158_11_/_0.12)]",
                 indicator.tone === "error" && "bg-destructive shadow-[0_0_0_4px_rgb(239_68_68_/_0.12)]",
                 indicator.tone === "muted" && "bg-muted-foreground/40"
@@ -13191,7 +13191,7 @@ function CallReplayContent({
                 key={`${call.id}-${marker.label}-${marker.time}`}
                 type="button"
                 className={cn(
-                  "absolute top-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-background text-[9px] font-medium text-white shadow-sm transition-transform duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:scale-110",
+                  "absolute top-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-background text-[9px] font-medium text-white shadow-sm hover:ring-2 hover:ring-ring/30",
                   marker.tone
                 )}
                 style={{ left: `${marker.position}%` }}
@@ -13219,7 +13219,7 @@ function CallReplayContent({
                 <button
                   key={`${call.id}-${marker.label}-label-${marker.time}`}
                   type="button"
-                  className="rounded-md bg-background/70 px-2 py-1 text-left transition-[background-color,border-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-background"
+                  className="rounded-md bg-background/70 px-2 py-1 text-left transition-[background-color,border-color,color,box-shadow,opacity] duration-150 hover:bg-background"
                   onClick={() => setPlaybackPosition(marker.seconds, `Jumped to ${marker.label} at ${marker.time}`)}
                 >
                   <span className="flex items-center justify-between gap-2">
@@ -14100,7 +14100,7 @@ function OpportunitiesView({
               return (
                 <div
                   key={opportunity.id}
-                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_150px_110px_110px_112px] md:items-center"
+                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_150px_110px_110px_112px] md:items-center"
                   tabIndex={0}
                   aria-label={`Open ${opportunity.name}`}
                   onClick={() => onOpportunitySelect(opportunity.id)}
@@ -14428,7 +14428,7 @@ function CallsView({
               return (
                 <div
                   key={call.id}
-                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_140px_110px_110px_112px] md:items-center"
+                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_140px_110px_110px_112px] md:items-center"
                   tabIndex={0}
                   aria-label={`Open ${call.title}`}
                   onClick={() => onCallSelect(call.id)}
@@ -16043,7 +16043,7 @@ function WorkspaceSwitchSkeleton({
   workspace: WorkspaceNavItem
 }) {
   return (
-    <div className="sf-fade-in grid gap-4" aria-busy="true" aria-live="polite">
+    <div className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 grid gap-4" aria-busy="true" aria-live="polite">
       <Card>
         <CardHeader>
           <div className="flex items-start gap-3">
@@ -16122,7 +16122,7 @@ function PageTransitionSkeleton({
   const label = viewLabels[activeView] ?? "Workspace"
 
   return (
-    <div className="sf-fade-in grid gap-4" aria-busy="true" aria-live="polite" data-testid="page-transition-skeleton">
+    <div className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 grid gap-4" aria-busy="true" aria-live="polite" data-testid="page-transition-skeleton">
       <div className="flex items-center justify-between gap-3">
         <div className="grid gap-2">
           <Skeleton className="h-4 w-20" />
@@ -16243,7 +16243,7 @@ function WorkspaceStateView({
   }
 
   return (
-    <div className="sf-fade-in grid min-h-[calc(100svh-9rem)] place-items-center">
+    <div className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 grid min-h-[calc(100svh-9rem)] place-items-center">
       <Card className="w-full max-w-3xl">
         <CardHeader>
           <div className="flex items-start gap-3">

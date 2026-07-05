@@ -284,7 +284,7 @@ export function MarketingLandingPage({
         ref={videoRef}
         aria-hidden="true"
         className={[
-          "fixed inset-0 z-0 h-full w-full object-cover object-[70%_center] transition-opacity duration-500",
+          "fixed inset-0 z-0 h-full w-full object-cover object-[70%_center] transition-opacity duration-300",
           videoReady && !videoUnavailable ? "opacity-100" : "opacity-0",
         ].join(" ")}
         disablePictureInPicture
@@ -348,7 +348,7 @@ export function MarketingLandingPage({
           <div
             className={[
               "landing-actions",
-              prefersReducedMotion ? "translate-y-0 opacity-100 transition-none" : "transition-[opacity,transform] duration-[400ms] ease-out",
+              prefersReducedMotion ? "translate-y-0 opacity-100 transition-none" : "transition-[opacity,transform] duration-300",
               actionsVisible ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
             ].join(" ")}
           >

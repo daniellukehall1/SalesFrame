@@ -127,27 +127,43 @@ Rules:
 - Avoid bounce, elastic movement, oversized slides, flashing, or animations that run forever.
 - Reserve expressive motion for rare setup or milestone moments.
 - Always respect reduced-motion preferences.
+- Do not introduce custom motion tokens. Use default shadcn/tw-animate classes, or an Animate UI component when the interaction truly benefits from component-level motion.
 
 Approved patterns:
 
 ```text
-Button press: subtle compression
-Menu open: quick fade/scale
+Button press: shadcn default press/focus feedback
+Menu open: shadcn/Radix fade/scale
+Dialog/sheet open: shadcn/Radix fade/scale
+Sidebar desktop collapse: stock shadcn width transition
+Sidebar account/playbook reveal: direct open/close with chevron rotation only
 Step change: short fade/translate
-Live question changed: one brief highlight
-Transcript line added: quiet fade-in
-Audio health active: gentle pulse
+Live question changed: shadcn animate-in fade/short slide
+Transcript line added: shadcn animate-in fade/short slide
+Audio health active: static status and colour changes
 ```
 
 Avoid:
 
 ```text
 Permanent shimmer
+Gradient text masking for everyday app controls
+Text-shadow flashes
+Large hover scale effects
 Celebration effects in daily workflows
 Animating entire page layouts
 Motion that makes the user wait
 Multiple competing animations at once
+Fade/slide animation inside nested sidebar account or playbook lists
+Custom `--sf-motion-*` or `--sf-ease-*` tokens
+Pulsing icons outside shadcn Skeleton loading
 ```
+
+Implementation note:
+
+- Use shadcn/Radix primitives and `tw-animate-css` open/close classes for dialogs, sheets, dropdowns, popovers, selects, tooltips, menus, live question changes, and transcript/message entry.
+- Use Animate UI only where the component behavior clearly improves continuity without adding decorative movement.
+- Do not add SalesFrame-specific keyframes or animation utility classes. If a motion pattern cannot be expressed with default shadcn/tw-animate or Animate UI, leave it static.
 
 ### Error States
 
