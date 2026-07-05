@@ -154,6 +154,17 @@ Realtime transcription must feel like a clean human conversation, not raw subtit
   - While a call is recording or paused, the browser also forces an OpenAI live-guidance recheck every 30 seconds using the current transcript, current visible question, and seller feedback. This is an AI refresh cadence, not a local fallback question.
   - The initial first-question request must not overwrite newer live guidance once transcript has started.
   - Post-call correction is the transcript source-of-truth cleanup layer and should regenerate evidence, notes, follow-up, and next-call brief from corrected turns.
+- Desktop live calls can expose a Live Coach popout window:
+  - The main SalesFrame tab remains the only call engine for capture, transcription, AI guidance, persistence, and stop-call lifecycle.
+  - The popout is a same-origin companion surface that mirrors the current live question and sends back only small seller commands: asked, skip, and end call.
+  - The supported popout command contract is intentionally narrow: ready, asked, skip, and end call. Do not add no-op command names.
+  - The popout route is lazy-loaded so the ordinary SalesFrame app shell does not bundle the desktop companion surface for every session.
+  - Use browser-local sync such as `BroadcastChannel` with a `localStorage` fallback; do not add a second backend session, OpenAI stream, or Supabase subscription for the popout in V1.
+  - Popout commands must be deduped in the main cockpit because BroadcastChannel and localStorage can both deliver the same seller action.
+  - Popout commands must be fresh and strictly scoped: call actions require the current `activeCallId`, and question actions require the current question ID.
+  - Popout actions must give the seller calm acknowledgement: show that a command was sent, confirm when the main tab reflects the update, and explain if the main tab does not respond.
+  - Stored and already-open popout snapshots must be freshness-gated so a reopened or disconnected window never presents an old next question as live guidance.
+  - Hide the popout action on mobile viewports because a second browser window is not useful on phone-sized call workflows.
 
 ## Create Account Workflow
 
@@ -913,8 +924,9 @@ Database-backed search should preserve the same behaviour while moving larger da
   - Login, signup, forgot password, and logout call Supabase Auth. Legal links route to the production Terms and Privacy pages.
   - Sidebar top workspace selector supports Supabase-backed workspace switching, create workspace modal, edit workspace modal, duplicate workspace, and guarded delete workspace.
   - Sidebar footer account menu routes Account to a separate personal profile page for seller identity, workspace access, and guarded account deletion; Settings remains for OpenAI key, capture, retention, and product configuration.
+  - Personal Account CSV import is an interaction-gated lazy workflow: keep CSV parsing and the import dialog out of the everyday app shell until the seller opens Import accounts or Import opportunities.
   - Billing, notifications, and upgrade stay hidden until billing and notification systems exist.
-  - Settings capture switches show `One-channel microphone capture` and `Two-channel mic + system audio` as active browser modes, with the Start Call modal also showing a disabled `Meeting bot` option for later integrations.
+  - Settings capture switches show `One-channel microphone capture` and `Two-channel mic + system audio` as active browser modes, with the Start Call modal also showing a disabled `Meeting bot` option for hosted bot integrations.
   - Two-channel capture requests app/window/tab/system audio where the browser supports it. SalesFrame treats the shared audio track as the customer side and the microphone stream as the seller side; it does not send or record display video.
   - Two-channel preflight shows a plain status: `Customer audio detected: start call.` when the shared source returns customer audio, or `Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, one-channel mode, or install SalesFrame Audio Connector.` when the selected native app/window does not expose audio.
   - Non-settings pages render loading, empty, error, and permission-denied states so async data boundaries can reuse the same UI.

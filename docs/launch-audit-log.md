@@ -10,7 +10,7 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 - Description: The Start Call `Call` step exposed technical capture labels like microphone-only, in-person phone mic, and meeting audio plus microphone.
 - Root cause: The UI mirrored internal browser capture modes instead of the seller's mental model: one audio stream, two separate audio streams, or a future meeting bot.
 - Recommended improvement: Keep the capture engine stable, but translate the selector into a simple channel model with clear helper copy and a disabled future bot option.
-- Fix applied: Replaced the visible audio source choices with `One channel`, `Two channels`, and disabled `Meeting bot - coming later`; mapped one-channel selections to the tuned mixed-microphone path with a legacy microphone fallback, and mapped two-channel selections to the existing meeting-audio plus seller-mic path.
+- Fix applied: Replaced the visible audio source choices with `One channel`, `Two channels`, and disabled `Meeting bot`; mapped one-channel selections to the tuned mixed-microphone path with a legacy microphone fallback, and mapped two-channel selections to the existing meeting-audio plus seller-mic path.
 - Before impact: Sellers had to infer which browser/device option matched their call setup, increasing hesitation before the call could start.
 - After impact: The modal now asks sellers to choose the number of audio channels, which is calmer, more device-agnostic, and easier to reason about across desktop and mobile.
 - Verification: Production-contract coverage now requires the new selector labels, rejects the old visible labels, and keeps the disabled meeting bot non-actionable until the integration exists.
@@ -1613,3 +1613,212 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 - Before impact: Sidebar and setup/live surfaces could feel slightly over-animated or locally tuned instead of default and calm.
 - After impact: Motion now comes from default shadcn/Radix/tw-animate patterns, with shadcn Skeleton as the only approved pulse.
 - Verification: Updated production-contract coverage to reject custom motion variables, local keyframes, decorative pulse in app code, sidebar nested choreography, shimmer, gradient text masking, and large hover scale.
+
+### Live calls needed a calm desktop companion surface
+
+- Severity: Medium
+- Description: Desktop sellers had to keep the full call cockpit visible to see the next question, even when they were working in Zoom, Teams, Meet, notes, or CRM windows during the customer conversation.
+- Root cause: The live coach existed only inside the main SalesFrame tab, so the smallest available guidance surface still included the full cockpit layout.
+- Recommended improvement: Add a same-origin popout companion window that mirrors only the current next question and essential actions, while keeping capture, transcription, AI, persistence, and lifecycle ownership in the main tab.
+- Fix applied: Added a desktop-only `Pop out coach` action, a focused `/coach-popout` window, browser-local snapshot sync, command handling for `Asked`, `Skip`, and `End call` through the same cockpit feedback handlers, and a close fallback that returns direct-opened tabs to SalesFrame when the browser refuses `window.close()`.
+- Before impact: Sellers could lose sight of the live recommendation while presenting, taking notes, or checking another app, which undercut the core “right question at the right moment” promise.
+- After impact: Desktop sellers can keep a small branded coach beside other apps with one question, minimal controls, and no duplicate call engine.
+- Verification: Added production-contract coverage for desktop-only visibility, BroadcastChannel/localStorage sync, popout route rendering, and shared `Asked`, `Skip`, and stop-call command handling. Browser QA confirmed the direct popout route opens to a calm waiting state when no live call is connected.
+
+### Stored popout guidance could become stale
+
+- Severity: High
+- Description: A same-origin popout that restores its last localStorage snapshot could accidentally show an old next question if reopened long after a call ended or after another tab wrote stale state.
+- Root cause: LocalStorage is useful as a fallback sync path, but it persists beyond the live call moment unless snapshots are time-bounded.
+- Recommended improvement: Treat stored popout snapshots as transient live state, not durable product data.
+- Fix applied: Added a 45-second freshness gate for stored Live Coach snapshots and made the popout ignore stale BroadcastChannel/storage payloads.
+- Before impact: A seller could potentially see yesterday's live recommendation presented with today's trusted SalesFrame branding.
+- After impact: Old snapshots fall back to the disconnected waiting state, protecting trust in the next-question workflow.
+- Verification: Added production-contract coverage requiring snapshot freshness checks in both stored snapshot reads and live popout message handling.
+
+### Recovery copy exposed internal state language
+
+- Severity: Low
+- Description: The app crash/recovery path used technical wording like `workspace service connection` and `latest saved workspace state`.
+- Root cause: Error copy was written from the implementation perspective rather than the seller's perspective at the moment of failure.
+- Recommended improvement: Keep recovery messages calm and human: explain what happened, give a next action, and avoid internal words like service, state, schema, or endpoint.
+- Fix applied: Reworded the app error boundary and Supabase setup error to use `workspace connection` and `latest saved work`, while preserving the same retry and homepage recovery actions.
+- Before impact: A first-time seller hitting a rare crash or setup issue could see wording that sounded technical and less polished.
+- After impact: The recovery screen now feels more like SalesFrame: plain, calm, and oriented around getting the seller back to work.
+- Verification: Updated production-contract and security-contract coverage to require the new wording and reject `workspace service connection` and `latest saved workspace state`.
+
+### Live coach updates were visual-first
+
+- Severity: Medium
+- Description: The cockpit and popout visually updated the live recommendation, but the dynamic question area did not explicitly announce changes to assistive technology.
+- Root cause: The live question was built as a visual card update first, while the accessibility behavior relied on ordinary DOM replacement.
+- Recommended improvement: Treat the next question like a polite live recommendation: announce meaningful changes without turning the whole cockpit into a noisy alert surface.
+- Fix applied: Added polite, atomic live-region semantics to the main next-question text, empty guidance state, flow note, and the popout recommendation panel.
+- Before impact: Screen reader users could miss a new question or flow status change while the visual UI updated correctly.
+- After impact: Live coaching remains visually calm while assistive technology receives the same important recommendation changes.
+- Verification: Added production-contract coverage for polite live-region semantics in the cockpit and desktop popout.
+
+### Popout route was bundled into the main app shell
+
+- Severity: Low
+- Description: The desktop-only Live Coach popout was imported eagerly by the main app even though it is only needed when a seller opens the companion window.
+- Root cause: The new companion surface was added as a normal component import instead of a route-level lazy chunk.
+- Recommended improvement: Treat the popout like other route-specific surfaces so the everyday app shell does not pay for uncommon desktop companion UI.
+- Fix applied: Lazy-loaded the `/coach-popout` window behind a suspense fallback and added contract coverage so the route remains split from the main app bundle.
+- Before impact: First-load JavaScript included UI that most sessions never render.
+- After impact: The normal SalesFrame shell stays a little lighter, while the popout still opens into a branded fallback and then hydrates into the focused coach window.
+- Verification: Added production-contract coverage for the dynamic import and suspense fallback; production build now emits a separate popout chunk.
+
+### CSV import loaded before sellers asked for it
+
+- Severity: Low
+- Description: The personal Account CSV importer was bundled into the main app shell even though it is only needed when a seller explicitly starts an account or opportunity import.
+- Root cause: The importer was mounted globally in the app dialog stack with a direct component import, which pulled the modal and CSV parsing dependency into ordinary sessions.
+- Recommended improvement: Keep rare utility workflows behind interaction-gated lazy loading and show a calm dialog fallback only when a seller opens that workflow.
+- Fix applied: Lazy-loaded the CSV import dialog, rendered it only while the import modal is open, and added a lightweight branded fallback dialog while the importer chunk loads.
+- Before impact: Sellers paid first-load cost for CSV parsing and a large import workflow even when they were only using dashboard, accounts, opportunities, calls, or live coach.
+- After impact: The app shell is lighter by default, and the import flow still feels deliberate when opened from the Account page or workspace onboarding.
+- Verification: Added production-contract coverage for the interaction-gated dynamic import and importer fallback; production build emits a separate CSV import chunk.
+
+### Popout commands could be delivered twice
+
+- Severity: Medium
+- Description: Live Coach popout commands are intentionally sent through both BroadcastChannel and localStorage fallback, but a browser that supports both paths can deliver the same seller action twice.
+- Root cause: The main call cockpit listened to both sync channels without a recent-command dedupe guard.
+- Recommended improvement: Treat BroadcastChannel and localStorage as redundant delivery paths for the same command and process each command identity once.
+- Fix applied: Added a deterministic Live Coach command key and a bounded processed-command set in the cockpit command listener before `Asked`, `Skip`, or `End call` side effects run.
+- Before impact: A popout `End call` action could theoretically call the stop lifecycle twice if both sync paths fired close together.
+- After impact: The popout keeps its fallback reliability while destructive live-call commands are handled once.
+- Verification: Added production-contract coverage for command key generation and cockpit-side deduplication.
+
+### Popout commands were not strictly call-scoped
+
+- Severity: High
+- Description: The main cockpit accepted popout commands with a missing `activeCallId`, which meant malformed or legacy browser-local commands could theoretically act on the current live call.
+- Root cause: The command listener only rejected mismatched call IDs when both the command and current call had IDs, leaving call-less commands to continue into the action handlers.
+- Recommended improvement: Treat popout commands as momentary, call-scoped control messages: require freshness, require the exact current call for call actions, and require the exact current question for question actions.
+- Fix applied: Added a 15-second command freshness check, validated optional command fields, required `activeCallId` to equal the current call before `End call`, `Asked`, or `Skip`, and required `questionId` to equal the current question before question feedback is applied.
+- Before impact: A stale or malformed local browser command had too much authority over the active call.
+- After impact: The popout remains useful, but only fresh commands from the active call can affect the cockpit.
+- Verification: Added production-contract coverage for command freshness, field validation, exact call matching, and exact question matching.
+
+### Popout command contract included an unsupported action
+
+- Severity: Low
+- Description: The Live Coach popout command type still included a `close` command and a stored-command read helper even though the UI never sent `close` and the cockpit never handled it.
+- Root cause: The command contract was broader than the shipped popout behaviour.
+- Recommended improvement: Keep live-call control contracts narrow: every supported command should have a visible sender and a real handler.
+- Fix applied: Removed the unsupported `close` command and unused stored-command read helper from the shared popout module.
+- Before impact: Future code could accidentally build against a command that looked supported but did nothing.
+- After impact: The popout command API now contains only real actions: `ready`, `asked`, `skip`, and `end_call`.
+- Verification: Added production-contract coverage rejecting unsupported popout commands and the unused command-read helper.
+
+### Popout actions had weak acknowledgement
+
+- Severity: Medium
+- Description: A seller could click `Asked`, `Skip`, or `End call` in the Live Coach popout without seeing whether the main SalesFrame tab had accepted the action.
+- Root cause: The popout sent browser-local commands and briefly disabled buttons, but it did not keep a visible command status or detect when the main cockpit reflected the change.
+- Recommended improvement: Treat the companion window like a remote control: acknowledge the click immediately, confirm when the main tab updates, and calmly explain when the main tab has not responded.
+- Fix applied: Added a polite status line for popout actions, kept commands pending until the snapshot confirms the question/call changed, and added calm waiting/recovery copy if the main tab does not update.
+- Before impact: The popout could feel unreliable during the highest-pressure workflow because clicks did not visibly resolve.
+- After impact: Sellers get clear, low-noise feedback that the action was sent, applied, or needs the main SalesFrame tab checked.
+- Verification: Added production-contract coverage for popout action status copy, live-region semantics, and snapshot-driven command settlement.
+
+### Open popout windows could outlive the main tab heartbeat
+
+- Severity: High
+- Description: An already-open Live Coach popout could keep showing its last question if the main SalesFrame tab stopped publishing updates.
+- Root cause: Snapshot freshness was checked when snapshots were read or received, but the open popout did not re-check the age of the current snapshot over time.
+- Recommended improvement: Treat the popout as a live heartbeat surface. If the main tab stops sending fresh snapshots, switch to a disconnected state instead of showing old guidance.
+- Fix applied: Added a heartbeat expiry check inside the popout window that clears pending actions, shows calm reconnect copy, and falls back to the disconnected waiting state when the snapshot goes stale.
+- Before impact: A seller could theoretically keep a stale next question on screen after the call cockpit closed, crashed, or stopped sending updates.
+- After impact: The popout protects trust by refusing to present stale guidance as live coaching.
+- Verification: Added production-contract coverage requiring the open-window stale snapshot timer and reconnect copy.
+
+### Capture settings exposed browser storage language
+
+- Severity: Low
+- Description: If a seller changed capture preferences and the browser could not persist the setting, Settings displayed `Browser storage was not available`.
+- Root cause: The recovery message described the implementation detail instead of explaining the practical effect for the seller.
+- Recommended improvement: Keep Settings copy calm and action-oriented, especially around recoverable browser constraints.
+- Fix applied: Reworded the warning to `Preference changed for now. It may reset after this browser closes.` and added production-contract coverage against the implementation-detail copy.
+- Before impact: A normal preference change could feel like a technical failure.
+- After impact: The seller sees what happened and what to expect without needing to understand browser storage.
+- Verification: Added production-contract coverage for the human recovery message and for excluding the old browser-storage language.
+
+### Unknown workspace sections sounded like app errors
+
+- Severity: Low
+- Description: The fallback view for an unknown workspace section used the title `This section is not available`.
+- Root cause: The copy described the app state rather than helping the seller recover.
+- Recommended improvement: Keep rare recovery surfaces human and directional, matching the same calm tone used in the rest of SalesFrame.
+- Fix applied: Replaced the fallback title with `Let's get you back on track` while keeping the existing Home and Call Cockpit actions.
+- Before impact: A harmless navigation edge case could feel like a broken or unavailable feature.
+- After impact: The view now reads like a calm redirect, not an error.
+- Verification: Added production-contract coverage requiring the new title and rejecting the old generic availability copy.
+
+### Audio capture capability errors were not actionable enough
+
+- Severity: Medium
+- Description: When a browser lacked audio capture or microphone APIs, preflight could throw generic messages like `Audio capture is not available in this browser`.
+- Root cause: The errors named the missing browser capability without giving the seller a practical path forward.
+- Recommended improvement: Keep preflight blocking behavior strict, but make capability errors specific, calm, and action-oriented.
+- Fix applied: Reworded browser and microphone capability failures to suggest a current desktop browser, one-channel mode on mobile, checking browser permissions, or trying another browser.
+- Before impact: A seller could hit a dead-end sounding browser error before the call even started.
+- After impact: The same blocker now explains the next reasonable action without weakening preflight safeguards.
+- Verification: Added production-contract coverage for the new actionable copy and against the old generic capture errors.
+
+### Popout question actions could conflict while pending
+
+- Severity: Medium
+- Description: In the Live Coach popout, a seller could click `Asked` and then click `Skip` before the main SalesFrame tab had accepted the first action.
+- Root cause: Each question action only disabled itself while pending, leaving the opposite action available during the same command round-trip.
+- Recommended improvement: Treat popout question feedback as a single in-flight decision. Once one question action is sent, lock both question controls until the main tab confirms or the action times out.
+- Fix applied: Added a shared pending-question command state and disabled both `Asked` and `Skip` while either one is in flight.
+- Before impact: The popout could send conflicting guidance signals for the same live question, making the companion window feel unreliable.
+- After impact: The seller gets one clear remote-control action at a time, matching the calm one-question UI model.
+- Verification: Added production-contract coverage that both question controls share the pending state.
+
+### Disconnected popout repeated fake call context
+
+- Severity: Low
+- Description: Opening the Live Coach popout directly with no live call showed a context block reading `SalesFrame` / `Live coach`.
+- Root cause: The disconnected snapshot reused the same account/opportunity context layout as an active call, even though there was no real call context.
+- Recommended improvement: Keep the disconnected companion state minimal: branded header, waiting guidance, and a close action.
+- Fix applied: Hid the account/opportunity context block while the popout is disconnected and has no active call.
+- Before impact: The waiting state repeated the brand and implied call context that did not exist.
+- After impact: The direct-opened popout feels calmer and more honest about waiting for a main SalesFrame tab.
+- Verification: Added production-contract coverage for the disconnected-context rule and browser-smoked the direct route.
+
+### Accepted popout actions unlocked before the cockpit updated
+
+- Severity: Medium
+- Description: The Live Coach popout cleared pending question actions as soon as the main tab acknowledged `Asked` or `Skip`, even before the updated guidance snapshot arrived.
+- Root cause: Accepted acknowledgements were treated as final UI settlement instead of the first step in a cross-window command round-trip.
+- Recommended improvement: Only rejected/ignored commands should unlock immediately. Accepted live-call commands should stay pending until the snapshot confirms the question changed, the call starts ending, or the action times out.
+- Fix applied: Changed acknowledgement handling so only ignored commands clear the pending state immediately; accepted question actions now remain locked until the existing snapshot-settlement path resolves them.
+- Before impact: The companion window could briefly re-enable the opposite question action after acceptance but before the cockpit update, allowing conflicting feedback for the same question.
+- After impact: The popout behaves like a reliable remote control: once an action is accepted, it stays settled-in-progress until the live surface catches up.
+- Verification: Added production-contract coverage requiring ignored-only immediate unlock and rejecting the earlier accepted-action unlock pattern.
+
+### Popout sync accepted loose snapshot values
+
+- Severity: Medium
+- Description: The browser-local Live Coach snapshot validator accepted any string as `callStatus`, any number as elapsed time, and future-dated messages as fresh.
+- Root cause: The sync contract focused on basic object shape, but did not fully validate enum values, bounded numeric values, or message freshness direction.
+- Recommended improvement: Treat popout sync messages like a narrow live-call protocol: reject unknown statuses, invalid timing, out-of-range confidence, negative elapsed time, and future timestamps.
+- Fix applied: Added explicit call-status validation, finite non-negative elapsed time checks, bounded 0-1 confidence validation, and freshness checks that reject future-dated snapshot or command messages.
+- Before impact: Malformed old-tab or localStorage data could make the companion window appear to be in an unsupported live state.
+- After impact: The popout only trusts well-formed, current live-coach messages and otherwise falls back to its disconnected state.
+- Verification: Added production-contract coverage for enum validation, bounded elapsed/confidence values, and non-future freshness checks.
+
+### Popout acknowledgements were not freshness-checked
+
+- Severity: Medium
+- Description: The Live Coach popout validated acknowledgement shape, but did not reject stale or future-dated acknowledgement messages.
+- Root cause: Snapshot and command messages had freshness checks, while command acknowledgement handling only compared command keys.
+- Recommended improvement: Apply the same live-message freshness discipline to acknowledgements as commands, so browser-local sync remains a short-lived protocol.
+- Fix applied: Added a 15-second acknowledgement freshness helper and made the popout ignore stale or future-dated acknowledgements before they can change pending action state.
+- Before impact: A malformed browser-local acknowledgement with a matching command key could resolve popout feedback outside the intended live-command window.
+- After impact: Popout command feedback now requires a current, well-formed acknowledgement from the main tab.
+- Verification: Added production-contract coverage for acknowledgement freshness constants, helper export, and popout-side enforcement.

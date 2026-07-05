@@ -174,7 +174,7 @@ function getAudioPreflightFailureMessage(preflight: AudioPreflightResult) {
 async function requestAudioSources(mode: CallAudioCaptureMode): Promise<CapturedAudioSource[]> {
   const mediaDevices = navigator.mediaDevices
   if (!mediaDevices) {
-    throw new Error("Audio capture is not available in this browser.")
+    throw new Error("This browser cannot start audio capture. Try a current desktop browser, or use one-channel mode on mobile.")
   }
 
   const sources: CapturedAudioSource[] = []
@@ -226,7 +226,7 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
 
   if (!mediaDevices.getUserMedia) {
     if (sources.length > 0) return sources
-    throw new Error("Microphone capture is not available in this browser.")
+    throw new Error("This browser cannot access the microphone. Check browser permissions or try another browser.")
   }
 
   try {

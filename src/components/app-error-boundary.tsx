@@ -54,14 +54,14 @@ export class AppErrorBoundary extends React.Component<
   render() {
     if (!this.state.error) return this.props.children
 
-    const isWorkspaceConnectionError = this.state.error.message.includes("workspace service")
+    const isWorkspaceConnectionError = this.state.error.message.includes("workspace connection")
     const description = isWorkspaceConnectionError ? "Workspace connection" : "Let's get you back in"
     const title = isWorkspaceConnectionError
       ? "SalesFrame is having trouble reaching your workspace"
       : "SalesFrame needs another pass at this view"
     const body = isWorkspaceConnectionError
-      ? "Your browser opened SalesFrame, but the workspace connection did not complete. Try once more, or head back to the homepage while we get it back in shape."
-      : "We hit a snag opening this view. Try again and SalesFrame will reopen it from the latest saved workspace state."
+      ? "Your browser opened SalesFrame, but the workspace connection did not finish. Try once more, or head back to the homepage while SalesFrame gets things back in shape."
+      : "Something got stuck opening this view. Try again and SalesFrame will pick up from your latest saved work."
 
     return (
       <main className="grid min-h-svh place-items-center bg-background p-4 text-foreground">

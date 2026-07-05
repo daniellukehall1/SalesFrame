@@ -50,7 +50,6 @@ import {
 import { AppSidebar } from "@/components/app-sidebar"
 import { AccountLogoAvatar } from "@/components/account-logo-avatar"
 import type { AuthMode } from "@/components/auth-page"
-import { CsvImportDialog } from "@/components/csv-import-dialog"
 import type { LoginFormValues } from "@/components/login-form"
 import { type AccountNavItem } from "@/components/nav-projects"
 import type { SignupFormValues } from "@/components/signup-form"
@@ -229,8 +228,25 @@ import {
   sortOpportunities,
 } from "@/lib/fuzzy-search"
 import {
-  createManualQuestionFromGuidance,
+  getDisplayedLiveCoachQuestion,
 } from "@/lib/manual-coach"
+import {
+  createLiveCoachPopoutSourceId,
+  getLiveCoachPopoutCommandKey,
+  isFreshLiveCoachPopoutCommand,
+  isLiveCoachPopoutCommand,
+  isLiveCoachPopoutRoute,
+  liveCoachPopoutChannelName,
+  liveCoachPopoutCommandStorageKey,
+  liveCoachPopoutRoute,
+  liveCoachPopoutVersion,
+  writeStoredLiveCoachPopoutAcknowledgement,
+  writeStoredLiveCoachPopoutSnapshot,
+  type LiveCoachPopoutCommandAcknowledgement,
+  type LiveCoachPopoutCallStatus,
+  type LiveCoachPopoutCommand,
+  type LiveCoachPopoutSnapshot,
+} from "@/lib/live-coach-popout"
 import { formatSavedAt } from "@/lib/openai-key-storage"
 import { formatPlaybooks, normalizePlaybooks, parsePlaybookSelection } from "@/lib/playbook-utils"
 import {
@@ -294,6 +310,10 @@ const LegalDocumentPage = React.lazy(() =>
 )
 const MarketingLandingPage = React.lazy(() =>
   import("@/components/marketing-landing-page").then((module) => ({ default: module.MarketingLandingPage }))
+)
+const LiveCoachPopoutWindow = React.lazy(() => import("@/components/live-coach-popout-window"))
+const CsvImportDialog = React.lazy(() =>
+  import("@/components/csv-import-dialog").then((module) => ({ default: module.CsvImportDialog }))
 )
 
 type PersonalAccountProfile = {
@@ -549,6 +569,47 @@ function PublicRouteFallback({
         </p>
       </div>
     </main>
+  )
+}
+
+function CsvImportDialogFallback({
+  mode,
+  onOpenChange,
+  open,
+}: {
+  mode: CsvImportType
+  onOpenChange: (open: boolean) => void
+  open: boolean
+}) {
+  const title = mode === "accounts" ? "Import accounts" : "Import opportunities"
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="grid max-h-[calc(100svh-2rem)] min-w-0 overflow-hidden sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>SalesFrame is getting the importer ready.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 py-4">
+          <Progress value={35} aria-label="Importer loading progress" />
+          <p className="text-sm text-muted-foreground">
+            Your workspace stays in place while the upload tools wake up.
+          </p>
+        </div>
+        <DialogActions
+          cancelAction={
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+          }
+          primaryAction={
+            <Button type="button" disabled>
+              Next
+            </Button>
+          }
+        />
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -2159,6 +2220,7 @@ function App() {
   const [pageLoadingView, setPageLoadingView] = React.useState<string | null>(null)
   const [workspaceErrorMessage, setWorkspaceErrorMessage] = React.useState("")
   const [workspaceRefreshToken, setWorkspaceRefreshToken] = React.useState(0)
+  const [mobileStartCallScrolledPastPrimaryAction, setMobileStartCallScrolledPastPrimaryAction] = React.useState(false)
   const [transcript, setTranscript] = React.useState<Opportunity["transcript"]>([])
   const [speakerIdentities, setSpeakerIdentities] = React.useState<CallSpeakerIdentityMap>({})
   const [notes, setNotes] = React.useState<string[]>([])
@@ -5170,11 +5232,42 @@ function App() {
     !shouldShowPageTransition &&
     !isCallLive &&
     mobileStartCallViews.includes(activeView)
+  const mobileStartCallHasVisiblePrimaryAction = activeView === "home" || activeView === "calls"
+  const shouldRenderMobileStartCall =
+    shouldShowMobileStartCall &&
+    (!mobileStartCallHasVisiblePrimaryAction || mobileStartCallScrolledPastPrimaryAction)
   const isWorkspaceSetupFlow = Boolean(workspaceSetupDraft) || onboardingInitialStep === 4
+
+  React.useEffect(() => {
+    if (!shouldShowMobileStartCall || !mobileStartCallHasVisiblePrimaryAction) {
+      setMobileStartCallScrolledPastPrimaryAction(false)
+      return
+    }
+
+    const appContent = appMainScrollRef.current
+    if (!appContent) return
+
+    const updateMobileStartCallVisibility = () => {
+      setMobileStartCallScrolledPastPrimaryAction(appContent.scrollTop > 180)
+    }
+
+    updateMobileStartCallVisibility()
+    appContent.addEventListener("scroll", updateMobileStartCallVisibility, { passive: true })
+
+    return () => appContent.removeEventListener("scroll", updateMobileStartCallVisibility)
+  }, [activeNavigationKey, mobileStartCallHasVisiblePrimaryAction, shouldShowMobileStartCall])
 
   const handleRetryWorkspaceState = () => {
     setWorkspaceDataState("loading")
     setWorkspaceRefreshToken((value) => value + 1)
+  }
+
+  if (isLiveCoachPopoutRoute()) {
+    return (
+      <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} />}>
+        <LiveCoachPopoutWindow darkMode={darkMode} />
+      </React.Suspense>
+    )
   }
 
   if (legalPage) {
@@ -5295,7 +5388,7 @@ function App() {
             data-navigation-reset={navigationScrollResetNonce}
             className={cn(
               "sf-navigation-scroll-root flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pt-0 md:gap-6 md:p-6 md:pb-6 md:pt-0",
-              shouldShowMobileStartCall
+              shouldRenderMobileStartCall
                 ? "pb-[calc(6.5rem+env(safe-area-inset-bottom))]"
                 : "pb-[calc(1rem+env(safe-area-inset-bottom))]"
             )}
@@ -5525,7 +5618,7 @@ function App() {
               />
             )}
           </main>
-          {shouldShowMobileStartCall ? (
+          {shouldRenderMobileStartCall ? (
             <MobileStartCallBar
               account={activeAccount}
               accounts={workspaceAccounts}
@@ -5600,27 +5693,37 @@ function App() {
           onCancel={() => setPendingDeleteRecord(null)}
           onConfirm={handleConfirmDeleteRecord}
         />
-        {activeWorkspace ? (
-          <CsvImportDialog
-            accounts={workspaceAccounts}
-            defaultCurrency={activeWorkspace.defaultCurrency}
-            mode={csvImportMode}
-            onImportComplete={() => {
-              setWorkspaceRefreshToken((value) => value + 1)
-              setBulkImportStatusRefreshToken((value) => value + 1)
-              if (onboardingCsvImportActive) {
-                setOnboardingCompletedImports((items) =>
-                  items.includes(csvImportMode) ? items : [...items, csvImportMode]
-                )
-              }
-            }}
-            onOpenChange={handleCsvImportOpenChange}
-            open={csvImportOpen}
-            opportunities={workspaceOpportunities}
-            playbooks={workspacePlaybooks}
-            workspaceId={activeWorkspaceId}
-            workspaceName={activeWorkspace.name}
-          />
+        {activeWorkspace && csvImportOpen ? (
+          <React.Suspense
+            fallback={
+              <CsvImportDialogFallback
+                mode={csvImportMode}
+                onOpenChange={handleCsvImportOpenChange}
+                open={csvImportOpen}
+              />
+            }
+          >
+            <CsvImportDialog
+              accounts={workspaceAccounts}
+              defaultCurrency={activeWorkspace.defaultCurrency}
+              mode={csvImportMode}
+              onImportComplete={() => {
+                setWorkspaceRefreshToken((value) => value + 1)
+                setBulkImportStatusRefreshToken((value) => value + 1)
+                if (onboardingCsvImportActive) {
+                  setOnboardingCompletedImports((items) =>
+                    items.includes(csvImportMode) ? items : [...items, csvImportMode]
+                  )
+                }
+              }}
+              onOpenChange={handleCsvImportOpenChange}
+              open={csvImportOpen}
+              opportunities={workspaceOpportunities}
+              playbooks={workspacePlaybooks}
+              workspaceId={activeWorkspaceId}
+              workspaceName={activeWorkspace.name}
+            />
+          </React.Suspense>
         ) : null}
         {setupWorkspace ? (
           <WorkspaceOnboardingDialog
@@ -6928,6 +7031,12 @@ function StartRecordingDialog({
     { label: "Seller Research", icon: SearchIcon },
   ]
   const currentRecordingStepLabel = recordingSteps[step - 1]?.label ?? recordingSteps[0].label
+  const canNavigateToRecordingStep = (targetStep: 1 | 2 | 3 | 4) => {
+    if (targetStep === 1) return true
+    if (targetStep === 2) return canContinueAccount
+    if (targetStep === 3) return canContinueAccount && canContinueOpportunity
+    return canContinueAccount && canContinueOpportunity && canContinueCall
+  }
   const startPreparationSteps: StartCallPreparationStep[] = [
     {
       id: "ai_access",
@@ -7397,36 +7506,47 @@ function StartRecordingDialog({
             <p className="sr-only" aria-live="polite">
               Step {step} of {recordingSteps.length}: {currentRecordingStepLabel}
             </p>
-            <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4" role="list" aria-label="Start call steps">
+            <ol className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Start call steps">
               {recordingSteps.map(({ label, icon: Icon }, index) => {
                 const itemStep = (index + 1) as 1 | 2 | 3 | 4
                 const isActive = step === itemStep
                 const isComplete = step > itemStep
+                const canNavigate = canNavigateToRecordingStep(itemStep)
 
                 return (
-                  <div
+                  <li
                     key={label}
-                    role="listitem"
-                    aria-current={isActive ? "step" : undefined}
-                    className={cn(
-                      "flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-sm sm:px-3",
-                      isActive && "border-primary bg-primary/5",
-                      isComplete && "bg-muted/50"
-                    )}
+                    className="min-w-0"
                   >
-                    <span
+                    <button
+                      type="button"
+                      aria-current={isActive ? "step" : undefined}
+                      aria-label={`Go to ${label} step`}
+                      disabled={!canNavigate}
+                      onClick={() => setStep(itemStep)}
                       className={cn(
-                        "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background",
-                        isActive && "border-primary text-primary"
+                        "flex min-h-12 w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-left text-sm transition-colors duration-150 sm:px-3",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                        canNavigate && "hover:bg-muted/50",
+                        !canNavigate && "cursor-not-allowed opacity-55",
+                        isActive && "border-primary bg-primary/5",
+                        isComplete && "bg-muted/50"
                       )}
                     >
-                      {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
-                    </span>
-                    <span className="truncate font-medium">{label}</span>
-                  </div>
+                      <span
+                        className={cn(
+                          "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background",
+                          isActive && "border-primary text-primary"
+                        )}
+                      >
+                        {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
+                      </span>
+                      <span className="truncate font-medium">{label}</span>
+                    </button>
+                  </li>
                 )
               })}
-            </div>
+            </ol>
 
             <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain pr-1 max-sm:pr-0">
               {step === 1 ? (
@@ -7617,7 +7737,7 @@ function StartRecordingDialog({
                               Two channels
                             </SelectItem>
                             <SelectItem value="meeting_bot" disabled>
-                              Meeting bot - coming later
+                              Meeting bot
                             </SelectItem>
                           </SelectContent>
                         </Select>
@@ -7974,6 +8094,11 @@ function CreateAccountDialog({
     { label: "Opportunity", icon: TargetIcon },
   ]
   const currentAccountStepLabel = accountSteps[step - 1]?.label ?? accountSteps[0].label
+  const canNavigateToAccountStep = (targetStep: 1 | 2 | 3 | 4) => {
+    if (targetStep === 1) return true
+    if (targetStep === 2 || targetStep === 3) return canContinueBasics
+    return canContinueBasics && canUseResearch && canUseEnrichment && canUseOpenAi
+  }
 
   const reset = () => {
     if (sellerDomainLookupTimeoutRef.current) {
@@ -8205,36 +8330,47 @@ function CreateAccountDialog({
         <p className="sr-only" aria-live="polite">
           Step {step} of {accountSteps.length}: {currentAccountStepLabel}
         </p>
-        <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4" role="list" aria-label="Create account steps">
+        <ol className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Create account steps">
           {accountSteps.map(({ label, icon: Icon }, index) => {
             const itemStep = (index + 1) as 1 | 2 | 3 | 4
             const isActive = step === itemStep
             const isComplete = step > itemStep
+            const canNavigate = canNavigateToAccountStep(itemStep)
 
             return (
-              <div
+              <li
                 key={label}
-                role="listitem"
-                aria-current={isActive ? "step" : undefined}
-                className={cn(
-                  "flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-sm sm:px-3",
-                  isActive && "border-primary bg-primary/5",
-                  isComplete && "bg-muted/50"
-                )}
+                className="min-w-0"
               >
-                <span
+                <button
+                  type="button"
+                  aria-current={isActive ? "step" : undefined}
+                  aria-label={`Go to ${label} step`}
+                  disabled={!canNavigate}
+                  onClick={() => setStep(itemStep)}
                   className={cn(
-                    "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background",
-                    isActive && "border-primary text-primary"
+                    "flex min-h-12 w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-left text-sm transition-colors duration-150 sm:px-3",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    canNavigate && "hover:bg-muted/50",
+                    !canNavigate && "cursor-not-allowed opacity-55",
+                    isActive && "border-primary bg-primary/5",
+                    isComplete && "bg-muted/50"
                   )}
                 >
-                  {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
-                </span>
-                <span className="truncate font-medium">{label}</span>
-              </div>
+                  <span
+                    className={cn(
+                      "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background",
+                      isActive && "border-primary text-primary"
+                    )}
+                  >
+                    {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
+                  </span>
+                  <span className="truncate font-medium">{label}</span>
+                </button>
+              </li>
             )
           })}
-        </div>
+        </ol>
 
         <div className="min-h-0 overflow-y-auto pr-1">
         {step === 1 ? (
@@ -10845,6 +10981,50 @@ function AccountEnrichmentEditor({
   )
 }
 
+function getCoachPopoutCallStatus({
+  activeCallId,
+  captureStatus,
+  isRecording,
+  isStoppingCall,
+}: {
+  activeCallId: string
+  captureStatus: CallCaptureStatus
+  isRecording: boolean
+  isStoppingCall: boolean
+}): LiveCoachPopoutCallStatus {
+  if (isStoppingCall || captureStatus === "stopping") return "stopping"
+  if (captureStatus === "error" || captureStatus === "permission-denied" || captureStatus === "upload-failed") {
+    return "error"
+  }
+  if (captureStatus === "requesting-permission" || captureStatus === "connecting") return "starting"
+  if (captureStatus === "paused") return "paused"
+  if (isRecording || captureStatus === "recording") return "live"
+  if (activeCallId || captureStatus === "stopped") return "ended"
+
+  return "idle"
+}
+
+function getCoachPopoutMessage({
+  callStatus,
+  coachStatus,
+  hasQuestion,
+  liveCoachError,
+}: {
+  callStatus: LiveCoachPopoutCallStatus
+  coachStatus: LiveCoachStatus
+  hasQuestion: boolean
+  liveCoachError: string
+}) {
+  if (callStatus === "starting") return "Getting the live coach ready."
+  if (callStatus === "stopping") return "Saving the call and wrapping things up."
+  if (callStatus === "ended") return "Call ended. You can close this window."
+  if (callStatus === "error") return liveCoachError || "SalesFrame needs attention in the main tab."
+  if (hasQuestion) return "Keep this close while you work in other apps."
+  if (coachStatus === "thinking" || coachStatus === "checking") return "SalesFrame is reading the conversation."
+
+  return "Waiting for the next live question."
+}
+
 function WorkspaceView({
   activeCallId,
   activeView,
@@ -10956,6 +11136,7 @@ function WorkspaceView({
   const [liveCoachError, setLiveCoachError] = React.useState("")
   const [liveCoachStatus, setLiveCoachStatus] = React.useState<LiveCoachStatus>("idle")
   const [liveCoachHeartbeatTick, setLiveCoachHeartbeatTick] = React.useState(0)
+  const [coachPopoutMessage, setCoachPopoutMessage] = React.useState("")
   const liveCoachRequestRef = React.useRef(0)
   const liveCoachSignatureRef = React.useRef("")
   const liveCoachFeedbackCountRef = React.useRef(0)
@@ -10964,6 +11145,14 @@ function WorkspaceView({
   const liveCoachHeartbeatHandledRef = React.useRef(0)
   const liveCoachFullGuidanceInFlightRef = React.useRef(false)
   const aiLiveGuidanceRef = React.useRef<LiveGuidance | null>(null)
+  const coachPopoutChannelRef = React.useRef<BroadcastChannel | null>(null)
+  const coachPopoutOpenedRef = React.useRef(false)
+  const coachPopoutQuestionRef = React.useRef<ManualQuestion | null>(null)
+  const coachPopoutActiveCallIdRef = React.useRef("")
+  const coachPopoutCanEndCallRef = React.useRef(false)
+  const coachPopoutSnapshotRef = React.useRef<LiveCoachPopoutSnapshot | null>(null)
+  const coachPopoutSourceIdRef = React.useRef(createLiveCoachPopoutSourceId("main"))
+  const processedCoachPopoutCommandKeysRef = React.useRef<Set<string>>(new Set())
   const defaultTab =
     activeView === "post-call"
       ? "post-call"
@@ -10971,6 +11160,66 @@ function WorkspaceView({
         ? "opportunity"
         : "cockpit"
   const liveGuidance = aiLiveGuidance
+  const displayedCoachQuestion = getDisplayedLiveCoachQuestion({ guidance: liveGuidance, manualCoach })
+  const coachPopoutCallStatus = getCoachPopoutCallStatus({
+    activeCallId,
+    captureStatus,
+    isRecording,
+    isStoppingCall,
+  })
+  const coachPopoutCanEndCall = Boolean(
+    activeCallId &&
+      isRecording &&
+      !isStoppingCall &&
+      ["requesting-permission", "connecting", "recording", "paused"].includes(captureStatus)
+  )
+  const shouldShowCoachPopoutButton = Boolean(
+    activeCallId && ["starting", "live", "paused", "stopping", "error"].includes(coachPopoutCallStatus)
+  )
+  const coachPopoutQuestionConfidence =
+    liveGuidance?.displayRecommendation?.confidence ?? liveGuidance?.conversationState?.confidence ?? null
+  const coachPopoutQuestionIsAsked = displayedCoachQuestion
+    ? manualCoach.askedQuestionIds.includes(displayedCoachQuestion.id)
+    : false
+  const coachPopoutSnapshot = React.useMemo<LiveCoachPopoutSnapshot>(() => ({
+    type: "snapshot",
+    version: liveCoachPopoutVersion,
+    sentAt: new Date().toISOString(),
+    sourceId: coachPopoutSourceIdRef.current,
+    activeCallId,
+    accountName: account.name || "Account",
+    opportunityName: opportunity.name || "Opportunity",
+    callStatus: coachPopoutCallStatus,
+    coachStatus: liveCoachStatus,
+    elapsedSeconds: elapsed,
+    question: displayedCoachQuestion
+      ? {
+          ...displayedCoachQuestion,
+          confidence: coachPopoutQuestionConfidence,
+          isAsked: coachPopoutQuestionIsAsked,
+        }
+      : null,
+    canActOnQuestion: Boolean(displayedCoachQuestion && !coachPopoutQuestionIsAsked),
+    canEndCall: coachPopoutCanEndCall,
+    message: getCoachPopoutMessage({
+      callStatus: coachPopoutCallStatus,
+      coachStatus: liveCoachStatus,
+      hasQuestion: Boolean(displayedCoachQuestion),
+      liveCoachError,
+    }),
+  }), [
+    account.name,
+    activeCallId,
+    coachPopoutCallStatus,
+    coachPopoutCanEndCall,
+    coachPopoutQuestionConfidence,
+    coachPopoutQuestionIsAsked,
+    displayedCoachQuestion,
+    elapsed,
+    liveCoachError,
+    liveCoachStatus,
+    opportunity.name,
+  ])
   const postCallReplayCall = getLatestReplayableCallForOpportunity({
     calls,
     opportunityId: opportunity.id,
@@ -10981,6 +11230,169 @@ function WorkspaceView({
     opportunityId: opportunity.id,
     preferredCallId: activeCallId || postCallFocusCallId,
   })
+
+  const publishCoachPopoutSnapshot = React.useCallback((snapshot: LiveCoachPopoutSnapshot) => {
+    coachPopoutChannelRef.current?.postMessage(snapshot)
+    writeStoredLiveCoachPopoutSnapshot(snapshot)
+  }, [])
+
+  const publishCoachPopoutCommandAcknowledgement = React.useCallback((
+    acknowledgement: LiveCoachPopoutCommandAcknowledgement
+  ) => {
+    coachPopoutChannelRef.current?.postMessage(acknowledgement)
+    writeStoredLiveCoachPopoutAcknowledgement(acknowledgement)
+  }, [])
+
+  React.useEffect(() => {
+    coachPopoutSnapshotRef.current = coachPopoutSnapshot
+  }, [coachPopoutSnapshot])
+
+  React.useEffect(() => {
+    coachPopoutQuestionRef.current = displayedCoachQuestion
+  }, [displayedCoachQuestion])
+
+  React.useEffect(() => {
+    coachPopoutActiveCallIdRef.current = activeCallId
+  }, [activeCallId])
+
+  React.useEffect(() => {
+    coachPopoutCanEndCallRef.current = coachPopoutCanEndCall
+  }, [coachPopoutCanEndCall])
+
+  React.useEffect(() => {
+    const handleCommand = (command: LiveCoachPopoutCommand) => {
+      if (command.sourceId === coachPopoutSourceIdRef.current) return
+      if (!isFreshLiveCoachPopoutCommand(command)) return
+
+      const commandKey = getLiveCoachPopoutCommandKey(command)
+      if (processedCoachPopoutCommandKeysRef.current.has(commandKey)) return
+      processedCoachPopoutCommandKeysRef.current.add(commandKey)
+      if (processedCoachPopoutCommandKeysRef.current.size > 50) {
+        const oldestCommandKey = processedCoachPopoutCommandKeysRef.current.values().next().value
+        if (oldestCommandKey) processedCoachPopoutCommandKeysRef.current.delete(oldestCommandKey)
+      }
+
+      const acknowledgeCommand = (
+        status: LiveCoachPopoutCommandAcknowledgement["status"],
+        message: string
+      ) => {
+        publishCoachPopoutCommandAcknowledgement({
+          type: "command_ack",
+          version: liveCoachPopoutVersion,
+          sentAt: new Date().toISOString(),
+          sourceId: coachPopoutSourceIdRef.current,
+          commandKey,
+          status,
+          message,
+        })
+      }
+
+      if (command.command === "ready") {
+        if (coachPopoutSnapshotRef.current) publishCoachPopoutSnapshot(coachPopoutSnapshotRef.current)
+        return
+      }
+
+      const currentCallId = coachPopoutActiveCallIdRef.current
+      if (!currentCallId || command.activeCallId !== currentCallId) {
+        acknowledgeCommand("ignored", "That live call is no longer active in the main tab.")
+        return
+      }
+
+      if (command.command === "end_call") {
+        if (coachPopoutCanEndCallRef.current) {
+          acknowledgeCommand("accepted", "Ending the call in SalesFrame.")
+          void onStopRecording()
+        } else {
+          acknowledgeCommand("ignored", "That call cannot be ended from the popout right now.")
+        }
+        return
+      }
+
+      const currentQuestion = coachPopoutQuestionRef.current
+      if (!currentQuestion || command.questionId !== currentQuestion.id) {
+        acknowledgeCommand("ignored", "That question has already changed in the main tab.")
+        return
+      }
+
+      if (command.command === "asked") {
+        acknowledgeCommand("accepted", "Marked as asked in SalesFrame.")
+        onMarkQuestionAsked(currentQuestion)
+        return
+      }
+
+      if (command.command === "skip") {
+        acknowledgeCommand("accepted", "Skipped in SalesFrame.")
+        onCoachFeedback("skip", currentQuestion)
+      }
+    }
+
+    const handleBroadcastMessage = (event: MessageEvent) => {
+      if (isLiveCoachPopoutCommand(event.data)) handleCommand(event.data)
+    }
+
+    const handleStorageMessage = (event: StorageEvent) => {
+      if (event.key !== liveCoachPopoutCommandStorageKey || !event.newValue) return
+
+      try {
+        const parsedValue: unknown = JSON.parse(event.newValue)
+        if (isLiveCoachPopoutCommand(parsedValue)) handleCommand(parsedValue)
+      } catch {
+        // Ignore malformed storage events from older tabs.
+      }
+    }
+
+    if (typeof BroadcastChannel !== "undefined") {
+      const channel = new BroadcastChannel(liveCoachPopoutChannelName)
+      coachPopoutChannelRef.current = channel
+      channel.addEventListener("message", handleBroadcastMessage)
+    }
+
+    window.addEventListener("storage", handleStorageMessage)
+
+    return () => {
+      window.removeEventListener("storage", handleStorageMessage)
+      coachPopoutChannelRef.current?.removeEventListener("message", handleBroadcastMessage)
+      coachPopoutChannelRef.current?.close()
+      coachPopoutChannelRef.current = null
+    }
+  }, [
+    onCoachFeedback,
+    onMarkQuestionAsked,
+    onStopRecording,
+    publishCoachPopoutCommandAcknowledgement,
+    publishCoachPopoutSnapshot,
+  ])
+
+  React.useEffect(() => {
+    if (!activeCallId && !displayedCoachQuestion && !coachPopoutOpenedRef.current) return
+    publishCoachPopoutSnapshot(coachPopoutSnapshot)
+  }, [activeCallId, coachPopoutSnapshot, displayedCoachQuestion, publishCoachPopoutSnapshot])
+
+  const handleOpenCoachPopout = React.useCallback(() => {
+    if (typeof window === "undefined") return
+
+    const width = 420
+    const height = 560
+    const left = Math.max(0, window.screenX + window.outerWidth - width - 24)
+    const top = Math.max(0, window.screenY + 80)
+    const popoutUrl = new URL(liveCoachPopoutRoute, window.location.origin)
+    const popoutWindow = window.open(
+      popoutUrl.toString(),
+      "salesframe-live-coach",
+      `popup=yes,width=${width},height=${height},left=${left},top=${top}`
+    )
+
+    if (!popoutWindow) {
+      setCoachPopoutMessage("Allow popups for SalesFrame, then try again.")
+      return
+    }
+
+    coachPopoutOpenedRef.current = true
+    setCoachPopoutMessage("")
+    popoutWindow.focus()
+    publishCoachPopoutSnapshot(coachPopoutSnapshot)
+    window.setTimeout(() => publishCoachPopoutSnapshot(coachPopoutSnapshot), 250)
+  }, [coachPopoutSnapshot, publishCoachPopoutSnapshot])
 
   React.useEffect(() => {
     setAiLiveGuidance(initialLiveGuidance)
@@ -11233,7 +11645,7 @@ function WorkspaceView({
       </div>
 
       <TabsContent value="cockpit" className="m-0 grid w-full min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="flex w-full justify-start 2xl:col-span-2">
+        <div className="flex w-full flex-wrap justify-start gap-2 2xl:col-span-2">
           {isRecording ? (
             <Button
               className="gap-2"
@@ -11258,6 +11670,22 @@ function WorkspaceView({
               onOpenSettings={onOpenSettings}
               onStartRecording={onStartRecording}
             />
+          ) : null}
+          {shouldShowCoachPopoutButton ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="hidden gap-2 md:inline-flex"
+              onClick={handleOpenCoachPopout}
+            >
+              <ExternalLinkIcon />
+              Pop out coach
+            </Button>
+          ) : null}
+          {coachPopoutMessage ? (
+            <p className="hidden w-full text-sm text-muted-foreground md:block">
+              {coachPopoutMessage}
+            </p>
           ) : null}
         </div>
         <div className="grid min-w-0 gap-4">
@@ -11543,14 +11971,7 @@ function NextQuestionCard({
   onNavigate: (view: string) => void
   onUseManualQuestion: (question: ManualQuestion) => void
 }) {
-  const rawLiveQuestion = guidance ? createManualQuestionFromGuidance(guidance) : null
-  const liveQuestion =
-    rawLiveQuestion &&
-    !manualCoach.askedQuestionIds.includes(rawLiveQuestion.id) &&
-    !manualCoach.deferredQuestionIds.includes(rawLiveQuestion.id)
-      ? rawLiveQuestion
-      : null
-  const displayedQuestion = manualCoach.activeQuestion ?? liveQuestion
+  const displayedQuestion = getDisplayedLiveCoachQuestion({ guidance, manualCoach })
   const isManualOverride = manualCoach.activeQuestion !== null
   const isAsked = displayedQuestion ? manualCoach.askedQuestionIds.includes(displayedQuestion.id) : false
   const confidence = guidance?.displayRecommendation?.confidence ?? guidance?.conversationState?.confidence
@@ -11605,12 +12026,14 @@ function NextQuestionCard({
         {displayedQuestion ? (
           <p
             key={`${displayedQuestion.id}-${displayedQuestion.question}`}
+            aria-atomic="true"
+            aria-live="polite"
             className="next-question-text animate-in fade-in-0 slide-in-from-bottom-1 duration-300 max-w-5xl break-words text-2xl leading-[1.08] font-semibold sm:text-3xl md:text-4xl lg:text-[2.75rem]"
           >
             “{displayedQuestion.question}”
           </p>
         ) : (
-          <div className="grid gap-3 rounded-lg bg-muted/30 p-4">
+          <div className="grid gap-3 rounded-lg bg-muted/30 p-4" role="status" aria-live="polite" aria-atomic="true">
             <div className="flex items-center gap-2">
               <SparklesIcon className="size-4 text-muted-foreground" />
               <p className="text-sm font-medium">{emptyGuidanceTitle}</p>
@@ -11642,7 +12065,11 @@ function NextQuestionCard({
           </div>
         ) : null}
         {flowNote ? (
-          <div className="max-w-5xl truncate rounded-lg bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          <div
+            className="max-w-5xl truncate rounded-lg bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+            role="status"
+            aria-live="polite"
+          >
             {flowNote}
           </div>
         ) : null}
@@ -16685,7 +17112,7 @@ function SettingsView({
     setCaptureSettingsMessage(
       didSave
         ? "Capture preference saved for this workspace on this browser."
-        : "Capture preference changed for this session. Browser storage was not available."
+        : "Preference changed for now. It may reset after this browser closes."
     )
   }
 
@@ -16940,7 +17367,7 @@ function SectionView({
     <div className="grid gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>{cards.length ? label : "This section is not available"}</CardTitle>
+          <CardTitle>{cards.length ? label : "Let's get you back on track"}</CardTitle>
           <CardDescription>
             {cards.length
               ? "Use this section to keep the workspace focused and easy to navigate."
