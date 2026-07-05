@@ -143,7 +143,6 @@ import { playbooks } from "@/data/playbook-reference-data"
 import type { LegalPageId } from "@/data/legal-documents"
 import {
   useCallCapture,
-  type CallCaptureDiarizationResult,
   type CallCapturePermissionState,
   type CallCaptureStatus,
 } from "@/hooks/use-call-capture"
@@ -166,6 +165,7 @@ import {
   requestAccountEnrichment,
   requestCustomerResearch,
   requestLiveGuidance,
+  requestLiveQuestion,
   requestLiveState,
   requestPostCallOutputs,
   requestSellerDomainResearch,
@@ -247,6 +247,8 @@ import {
   sortOpportunities,
 } from "@/lib/fuzzy-search"
 import {
+  createManualQuestionId,
+  createManualQuestionFromGuidance,
   getDisplayedLiveCoachQuestion,
 } from "@/lib/manual-coach"
 import {
@@ -310,6 +312,7 @@ import {
   type OpportunityDraft,
   type OpportunitySort,
   type PendingDeleteRecord,
+  type RecordingLifecycleStatus,
   type SavedOpenAiKeyState,
   type SellerResearchProfile,
   type StartCallPreparationStepId,
@@ -552,6 +555,10 @@ function getAuthRedirectUrl(path: "/login" | "/signup" = "/login") {
   if (typeof window === "undefined") return path
 
   return new URL(path, window.location.origin).toString()
+}
+
+function isAuthRoutePath(pathname: string) {
+  return pathname === "/login" || pathname === "/signup"
 }
 
 function PublicRouteFallback({
@@ -919,6 +926,7 @@ type RecordSaveStatus = "idle" | "saving" | "saved" | "error"
 
 const LIVE_COACH_AI_RECHECK_SECONDS = 30
 const LIVE_COACH_AI_RECHECK_MS = LIVE_COACH_AI_RECHECK_SECONDS * 1000
+const LIVE_COACH_FAST_CHECK_MS = 10 * 1000
 const LIVE_COACH_FORCE_REFRESH_TURNS = 1
 const RECORDING_LINK_SILENT_REFRESH_LIMIT = 2
 
@@ -1696,87 +1704,6 @@ function buildTranscriptForAi(transcript: Opportunity["transcript"]) {
     }))
 }
 
-function findBestDiarizedSegment(
-  result: CallCaptureDiarizationResult,
-  line: Opportunity["transcript"][number]
-) {
-  const parsedLineSeconds = parseTranscriptTime(line.time)
-  if (parsedLineSeconds === null) return null
-
-  const lineMs = parsedLineSeconds * 1000
-  const relativeLineMs = Math.max(0, lineMs - result.chunkStartedAtMs)
-  const timedSegment = result.segments.find((segment) => {
-    const startsBeforeLine = segment.startMs <= relativeLineMs + 2500
-    const endsAfterLine = segment.endMs === 0 || segment.endMs >= relativeLineMs - 2500
-
-    return startsBeforeLine && endsAfterLine
-  })
-
-  if (timedSegment) return timedSegment
-
-  const normalizedLineText = normalizeSearchText(line.text)
-  if (!normalizedLineText) return null
-
-  return (
-    result.segments.find((segment) => {
-      const normalizedSegmentText = normalizeSearchText(segment.text)
-      return (
-        normalizedSegmentText.includes(normalizedLineText.slice(0, 24)) ||
-        normalizedLineText.includes(normalizedSegmentText.slice(0, 24))
-      )
-    }) ?? null
-  )
-}
-
-function resolveDiarizedSpeakerLabel({
-  currentLabel,
-  diarizedSpeaker,
-  labelByDiarizedSpeaker,
-  sourceHint,
-}: {
-  currentLabel: TranscriptSpeaker
-  diarizedSpeaker: string
-  labelByDiarizedSpeaker: Map<string, TranscriptSpeaker>
-  sourceHint: string
-}) {
-  const existingLabel = labelByDiarizedSpeaker.get(diarizedSpeaker)
-  if (existingLabel) return existingLabel
-
-  const normalizedSpeaker = diarizedSpeaker.toLowerCase()
-  const explicitLabel =
-    normalizedSpeaker.includes("speaker 3") || normalizedSpeaker.includes("speaker_c") || normalizedSpeaker.endsWith(" c")
-      ? getThirdDiarizedSpeakerLabel(sourceHint)
-      : normalizedSpeaker.includes("speaker 2") || normalizedSpeaker.includes("speaker_b") || normalizedSpeaker.endsWith(" b")
-        ? getSecondDiarizedSpeakerLabel(sourceHint)
-        : normalizedSpeaker.includes("seller")
-          ? "Seller"
-          : normalizedSpeaker.includes("customer 3")
-            ? "Customer 3"
-            : normalizedSpeaker.includes("customer 2")
-              ? "Customer 2"
-              : normalizedSpeaker.includes("customer")
-                ? "Customer"
-                : currentLabel !== "Unknown"
-                  ? currentLabel
-                  : getFirstDiarizedSpeakerLabel(sourceHint)
-
-  labelByDiarizedSpeaker.set(diarizedSpeaker, explicitLabel)
-
-  return explicitLabel
-}
-
-function getFirstDiarizedSpeakerLabel(sourceHint: string): TranscriptSpeaker {
-  return sourceHint === "meeting_audio" ? "Customer" : "Seller"
-}
-
-function getSecondDiarizedSpeakerLabel(sourceHint: string): TranscriptSpeaker {
-  return sourceHint === "meeting_audio" ? "Customer 2" : "Customer"
-}
-
-function getThirdDiarizedSpeakerLabel(sourceHint: string): TranscriptSpeaker {
-  return sourceHint === "meeting_audio" ? "Customer 3" : "Customer 2"
-}
-
 function formatPersistedTranscriptTime(value: number | null) {
   if (value === null) return "live"
 
@@ -1814,7 +1741,14 @@ function mapTranscriptSegmentsByCallId({
       const transcript = transcriptByCallId[segment.call_id] ?? []
 
       transcript.push({
+        audioSourceKind: segment.audio_source_kind ?? undefined,
         id: segment.id,
+        diarizationSpeaker: segment.diarization_speaker ?? undefined,
+        endOfTurnConfidence: segment.end_of_turn_confidence ?? undefined,
+        languageDetected: segment.language_detected ?? undefined,
+        providerEventId: segment.provider_event_id ?? undefined,
+        providerSessionId: segment.provider_session_id ?? undefined,
+        providerTurnIndex: segment.provider_turn_index ?? undefined,
         speaker: speakerLabel,
         speakerAttributionReason: segment.speaker_attribution_reason ?? undefined,
         speakerConfidence: segment.speaker_confidence ?? undefined,
@@ -1825,6 +1759,7 @@ function mapTranscriptSegmentsByCallId({
         speakerSource: segment.speaker_source ?? segment.speaker_attribution ?? undefined,
         time: formatPersistedTranscriptTime(segment.start_ms),
         text: segment.text,
+        wordConfidence: segment.word_confidence ?? undefined,
       })
 
       transcriptByCallId[segment.call_id] = transcript
@@ -2331,6 +2266,7 @@ function App() {
     savedOpportunityDrafts[activeOpportunity.id] ?? createOpportunityDraftFromRecord(activeOpportunity)
   const activeWorkspace = workspaceNavItems.find((workspace) => workspace.id === activeWorkspaceId) ?? null
   const setupWorkspace = workspaceSetupDraft ?? activeWorkspace
+  const hasCompletedWorkspace = workspaceNavItems.some((workspace) => Boolean(workspace.onboardingCompletedAt))
   const activePostCallCallId =
     activeCallId ||
     postCallFocusCallId ||
@@ -2411,6 +2347,15 @@ function App() {
     activeElement.blur()
   }, [])
 
+  const ensureAuthenticatedAppRoute = React.useCallback(() => {
+    if (!isAuthRoutePath(window.location.pathname)) return
+
+    setLegalPage(null)
+    setPublicAuthRoute("landing")
+    setAuthMode("login")
+    window.history.replaceState(null, "", "/")
+  }, [])
+
   React.useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode)
 
@@ -2477,6 +2422,12 @@ function App() {
       subscription.unsubscribe()
     }
   }, [supabase])
+
+  React.useEffect(() => {
+    if (!authSession) return
+
+    ensureAuthenticatedAppRoute()
+  }, [authSession, ensureAuthenticatedAppRoute])
 
   React.useEffect(() => {
     if (!authSession) return
@@ -3259,6 +3210,11 @@ function App() {
                   ...call,
                   duration: formatTime(stoppedCall.durationSeconds),
                   durationSeconds: stoppedCall.durationSeconds,
+                  recordingError: stoppedCall.recordingError ?? call.recordingError,
+                  recordingMimeType: stoppedCall.recordingMimeType ?? call.recordingMimeType,
+                  recordingReadyAt: stoppedCall.recordingReadyAt ?? call.recordingReadyAt,
+                  recordingSizeBytes: stoppedCall.recordingSizeBytes ?? call.recordingSizeBytes,
+                  recordingStatus: stoppedCall.recordingStatus,
                   recordingStoragePath: stoppedCall.recordingStoragePath ?? call.recordingStoragePath,
                   recordingUrl: stoppedCall.recordingUrl ?? call.recordingUrl,
                   status: "Processing",
@@ -3483,82 +3439,6 @@ function App() {
     }
   }
 
-  const handleRollingDiarization = async (result: CallCaptureDiarizationResult) => {
-    if (!activeCallIdRef.current || result.segments.length === 0) return
-
-    const labelByDiarizedSpeaker = new Map<string, TranscriptSpeaker>()
-    const updates: Array<{
-      id: string
-      label: TranscriptSpeaker
-      line: Opportunity["transcript"][number]
-    }> = []
-
-    const nextTranscript = transcriptRef.current.map((line) => {
-      if (!line.id || line.isPartial || line.speakerSource === "manual") return line
-
-      const segment = findBestDiarizedSegment(result, line)
-      if (!segment) return line
-
-      const nextLabel = resolveDiarizedSpeakerLabel({
-        currentLabel: getTranscriptSpeakerLabel(line),
-        diarizedSpeaker: segment.speaker,
-        labelByDiarizedSpeaker,
-        sourceHint: result.sourceHint,
-      })
-      const currentLabel = getTranscriptSpeakerLabel(line)
-      if (nextLabel === currentLabel) return applySpeakerIdentitiesToLine(line, speakerIdentitiesRef.current)
-
-      const nextLine = applySpeakerIdentitiesToLine(
-        {
-          ...line,
-          speaker: nextLabel,
-          speakerAttributionReason:
-            "OpenAI diarized the rolling audio window and matched this transcript turn by timing and text.",
-          speakerConfidence: Math.max(line.speakerConfidence ?? 0, 0.84),
-          speakerLabel: nextLabel,
-          speakerNeedsReview: false,
-          speakerSource: "openai_diarization_window",
-        },
-        speakerIdentitiesRef.current
-      )
-
-      updates.push({
-        id: line.id,
-        label: nextLabel,
-        line: nextLine,
-      })
-
-      return nextLine
-    })
-
-    transcriptRef.current = nextTranscript
-    setTranscript(nextTranscript)
-
-    if (updates.length === 0) return
-
-    await Promise.all(
-      updates.map(async (update) => {
-        const identity = speakerIdentitiesRef.current[update.label]
-        const savedSpeaker = await upsertCallSpeaker({
-          call_id: activeCallIdRef.current,
-          label: update.label,
-          display_name: identity?.displayName || update.label,
-          role: identity?.isMe ? "seller" : getSpeakerRoleForLabel(update.label),
-        })
-
-        await updateTranscriptSegment(update.id, {
-          speaker_id: savedSpeaker.id,
-          speaker_attribution: "openai_diarization_window",
-          speaker_attribution_reason:
-            "OpenAI diarized the rolling audio window and matched this transcript turn by timing and text.",
-          speaker_confidence: update.line.speakerConfidence ?? 0.84,
-          speaker_needs_review: false,
-          speaker_source: "openai_diarization_window",
-        })
-      })
-    )
-  }
-
   const handleStartRecording = async (payload: StartRecordingPayload) => {
     if (!activeWorkspaceId) {
       return {
@@ -3770,9 +3650,6 @@ function App() {
         callId: call.id,
         startedAt,
         workspaceId: activeWorkspaceId,
-        onDiarization: (result) => {
-          void handleRollingDiarization(result)
-        },
         onTranscript: (line) =>
           setTranscript((items) => {
             const nextItems = upsertTranscriptLine(
@@ -5024,7 +4901,19 @@ function App() {
     setOnboardingCompletedImports([])
     setPendingCsvImportMode(null)
 
-    if (!draft || draft.id.startsWith("new-workspace-")) return
+    if (!draft) {
+      const fallbackWorkspace =
+        workspaceNavItems.find((workspace) => workspace.id !== activeWorkspaceId && Boolean(workspace.onboardingCompletedAt)) ??
+        workspaceNavItems.find((workspace) => workspace.id !== activeWorkspaceId)
+
+      if (fallbackWorkspace) {
+        handleWorkspaceChange(fallbackWorkspace)
+      }
+
+      return
+    }
+
+    if (draft.id.startsWith("new-workspace-")) return
 
     try {
       await deleteSupabaseWorkspace(draft.id)
@@ -5048,6 +4937,7 @@ function App() {
       return
     }
 
+    ensureAuthenticatedAppRoute()
     if (workspaceLoadTimeoutRef.current !== null) {
       window.clearTimeout(workspaceLoadTimeoutRef.current)
     }
@@ -5059,6 +4949,13 @@ function App() {
     setIsRecording(false)
     setElapsed(0)
     setPageLoadingView(null)
+    setOnboardingOpen(false)
+    setWorkspaceSetupDraft(null)
+    setOnboardingInitialStep(1)
+    setOnboardingCsvImportActive(false)
+    setOnboardingCompletedImports([])
+    setPendingCsvImportMode(null)
+    setCsvImportOpen(false)
     loadedWorkspaceIdRef.current = null
     blurFocusedNavigationElement()
     setActiveView("home")
@@ -5073,6 +4970,7 @@ function App() {
   }
 
   const handleOpenCreateWorkspaceSetup = () => {
+    ensureAuthenticatedAppRoute()
     setOnboardingInitialStep(1)
     setOnboardingCsvImportActive(false)
     setOnboardingCompletedImports([])
@@ -5107,6 +5005,7 @@ function App() {
   }
 
   const handleDuplicateWorkspace = async (workspace: WorkspaceNavItem) => {
+    ensureAuthenticatedAppRoute()
     const duplicatedWorkspace = await createSupabaseWorkspace({
       name: `${workspace.name} Copy`,
       description: workspace.description || "Seller workspace",
@@ -5149,6 +5048,7 @@ function App() {
     workspaceDescription: string
     workspaceName: string
   }) => {
+    ensureAuthenticatedAppRoute()
     let targetWorkspaceId = activeWorkspaceId
     let createdWorkspaceNavItem: WorkspaceNavItem | null = null
 
@@ -5218,6 +5118,11 @@ function App() {
     setActiveWorkspaceId(nextWorkspace.id)
     setWorkspaceSetupDraft(null)
     setOnboardingOpen(false)
+    loadedWorkspaceIdRef.current = null
+    setActiveView("home")
+    requestNavigationScrollReset()
+    setWorkspaceDataState("loading")
+    setWorkspaceRefreshToken((value) => value + 1)
   }
 
   const workspaceViews = ["workspace", "post-call", "methodology", "opportunity-record", "opportunity-intelligence"]
@@ -5256,7 +5161,10 @@ function App() {
   const shouldRenderMobileStartCall =
     shouldShowMobileStartCall &&
     (!mobileStartCallHasVisiblePrimaryAction || mobileStartCallScrolledPastPrimaryAction)
-  const isWorkspaceSetupFlow = Boolean(workspaceSetupDraft) || onboardingInitialStep === 4
+  const isWorkspaceSetupFlow =
+    Boolean(workspaceSetupDraft) ||
+    onboardingInitialStep === 4 ||
+    (Boolean(activeWorkspace) && !activeWorkspace?.onboardingCompletedAt && hasCompletedWorkspace)
 
   React.useEffect(() => {
     if (!shouldShowMobileStartCall || !mobileStartCallHasVisiblePrimaryAction) {
@@ -5952,7 +5860,7 @@ function WorkspaceOnboardingDialog({
           </div>
           <DialogTitle>{dialogTitle}</DialogTitle>
           <DialogDescription>
-            Add the selling context and OpenAI connection SalesFrame uses for research, transcription, guidance, and post-call outputs.
+            Add the selling context and OpenAI connection SalesFrame uses for research, guidance, and post-call outputs. Live transcription runs through SalesFrame's Deepgram connection.
           </DialogDescription>
         </DialogHeader>
 
@@ -6068,10 +5976,10 @@ function WorkspaceOnboardingDialog({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-sm font-medium">OpenAI API key</p>
-                <p className="text-sm text-muted-foreground">
-                  {hasSavedOpenAiKey
-                    ? "Your workspace key is connected. SalesFrame uses it for notes, realtime guidance, transcription, research, and post-call outputs."
-                    : "Add a workspace key so SalesFrame can create notes, realtime guidance, transcription, research, and post-call outputs."}
+                  <p className="text-sm text-muted-foreground">
+                    {hasSavedOpenAiKey
+                    ? "Your workspace key is connected. SalesFrame uses it for notes, live guidance, research, and post-call outputs."
+                    : "Add a workspace key so SalesFrame can create notes, live guidance, research, and post-call outputs."}
                 </p>
               </div>
               <Button variant="outline" size="sm" asChild>
@@ -9798,6 +9706,24 @@ function PlaybookMultiSelect({
 
     onChange(nextValue.length ? nextValue : selectedPlaybooks)
   }
+  const handleOptionsWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const container = event.currentTarget
+    const maxScrollTop = container.scrollHeight - container.clientHeight
+
+    event.stopPropagation()
+
+    if (maxScrollTop <= 0) return
+
+    const isScrollingDown = event.deltaY > 0
+    const isScrollingUp = event.deltaY < 0
+    const canScrollDown = isScrollingDown && container.scrollTop < maxScrollTop
+    const canScrollUp = isScrollingUp && container.scrollTop > 0
+
+    if (!canScrollDown && !canScrollUp) return
+
+    event.preventDefault()
+    container.scrollTop = Math.min(maxScrollTop, Math.max(0, container.scrollTop + event.deltaY))
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -9828,42 +9754,47 @@ function PlaybookMultiSelect({
         collisionPadding={12}
         role="listbox"
         aria-multiselectable="true"
-        className="z-[80] grid max-h-[min(18rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) min-w-64 gap-1 overflow-y-auto overscroll-contain rounded-lg p-1 shadow-lg"
+        className="z-[80] w-(--radix-popover-trigger-width) min-w-64 overflow-hidden rounded-lg p-0 shadow-lg"
         onEscapeKeyDown={(event) => {
           event.preventDefault()
           event.stopPropagation()
           setOpen(false)
         }}
       >
-        {callPlaybookOptions.map((playbook) => {
-          const isSelected = selectedPlaybooks.includes(playbook)
+        <div
+          className="grid max-h-[min(18rem,var(--radix-popover-content-available-height))] gap-1 overflow-y-auto overscroll-contain p-1"
+          onWheelCapture={handleOptionsWheel}
+        >
+          {callPlaybookOptions.map((playbook) => {
+            const isSelected = selectedPlaybooks.includes(playbook)
 
-          return (
-            <button
-              key={playbook}
-              type="button"
-              role="option"
-              aria-selected={isSelected}
-              className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => togglePlaybook(playbook)}
-            >
-              <span
-                className={cn(
-                  "mt-0.5 flex size-4 items-center justify-center rounded border",
-                  isSelected && "border-primary bg-primary text-primary-foreground"
-                )}
+            return (
+              <button
+                key={playbook}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => togglePlaybook(playbook)}
               >
-                {isSelected ? <CheckIcon className="size-3" /> : null}
-              </span>
-              <span className="min-w-0">
-                <span className="block text-sm font-medium">{playbook}</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  {callPlaybookDescriptions[playbook]}
+                <span
+                  className={cn(
+                    "mt-0.5 flex size-4 items-center justify-center rounded border",
+                    isSelected && "border-primary bg-primary text-primary-foreground"
+                  )}
+                >
+                  {isSelected ? <CheckIcon className="size-3" /> : null}
                 </span>
-              </span>
-            </button>
-          )
-        })}
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{playbook}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    {callPlaybookDescriptions[playbook]}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
       </PopoverContent>
     </Popover>
   )
@@ -11076,6 +11007,106 @@ function getCoachPopoutMessage({
   return "Waiting for the next live question."
 }
 
+type LiveCoachPopoutPlacement = {
+  height: number
+  left: number
+  mainHeight: number
+  mainLeft: number
+  mainTop: number
+  mainWidth: number
+  shouldDockMainWindow: boolean
+  top: number
+  width: number
+}
+
+function getLiveCoachPopoutPlacement(): LiveCoachPopoutPlacement {
+  const screenDetails = window.screen as Screen & {
+    availLeft?: number
+    availTop?: number
+  }
+  const availableLeft = screenDetails.availLeft ?? 0
+  const availableTop = screenDetails.availTop ?? 0
+  const availableWidth = window.screen.availWidth || window.outerWidth
+  const availableHeight = window.screen.availHeight || window.outerHeight
+  const margin = 12
+  const gutter = 12
+  const width = Math.min(430, Math.max(390, Math.round(availableWidth * 0.24)))
+  const height = Math.max(620, Math.min(window.outerHeight || 720, availableHeight - margin * 2))
+  const currentTop = Math.max(availableTop + margin, window.screenY)
+  const top = Math.min(currentTop, availableTop + availableHeight - height - margin)
+  const minimumMainWidth = 900
+  const hasSideBySideRoom = availableWidth >= minimumMainWidth + width + gutter + margin * 2
+
+  if (hasSideBySideRoom) {
+    const mainLeft = availableLeft + margin
+    const mainTop = Math.max(availableTop + margin, Math.min(window.screenY, availableTop + availableHeight - height - margin))
+    const mainWidth = Math.max(
+      minimumMainWidth,
+      Math.min(window.outerWidth || minimumMainWidth, availableWidth - width - gutter - margin * 2)
+    )
+    const mainHeight = height
+
+    return {
+      height,
+      left: mainLeft + mainWidth + gutter,
+      mainHeight,
+      mainLeft,
+      mainTop,
+      mainWidth,
+      shouldDockMainWindow: true,
+      top: mainTop,
+      width,
+    }
+  }
+
+  const preferredLeft = window.screenX + (window.outerWidth || availableWidth) + gutter
+  const maximumLeft = availableLeft + availableWidth - width - margin
+  const fallbackLeft = window.screenX + (window.outerWidth || availableWidth) - width - margin
+
+  return {
+    height,
+    left: Math.max(availableLeft + margin, Math.min(preferredLeft <= maximumLeft ? preferredLeft : fallbackLeft, maximumLeft)),
+    mainHeight: window.outerHeight || height,
+    mainLeft: window.screenX,
+    mainTop: window.screenY,
+    mainWidth: window.outerWidth || availableWidth,
+    shouldDockMainWindow: false,
+    top,
+    width,
+  }
+}
+
+function getLiveCoachPopoutFeatures(placement: LiveCoachPopoutPlacement) {
+  const features = {
+    height: Math.round(placement.height),
+    left: Math.round(placement.left),
+    location: "no",
+    menubar: "no",
+    popup: "yes",
+    resizable: "yes",
+    scrollbars: "yes",
+    status: "no",
+    toolbar: "no",
+    top: Math.round(placement.top),
+    width: Math.round(placement.width),
+  }
+
+  return Object.entries(features)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(",")
+}
+
+function placeMainWindowForCoachPopout(placement: LiveCoachPopoutPlacement) {
+  if (!placement.shouldDockMainWindow) return
+
+  try {
+    window.moveTo(Math.round(placement.mainLeft), Math.round(placement.mainTop))
+    window.resizeTo(Math.round(placement.mainWidth), Math.round(placement.mainHeight))
+  } catch {
+    // Some browsers only allow moving windows they created. The popout still opens as a sidecar.
+  }
+}
+
 function WorkspaceView({
   activeCallId,
   activeView,
@@ -11187,14 +11218,19 @@ function WorkspaceView({
   const [liveCoachError, setLiveCoachError] = React.useState("")
   const [liveCoachStatus, setLiveCoachStatus] = React.useState<LiveCoachStatus>("idle")
   const [liveCoachHeartbeatTick, setLiveCoachHeartbeatTick] = React.useState(0)
+  const [liveCoachRefreshTick, setLiveCoachRefreshTick] = React.useState(0)
   const [coachPopoutMessage, setCoachPopoutMessage] = React.useState("")
-  const liveCoachRequestRef = React.useRef(0)
+  const liveCoachQuestionRequestRef = React.useRef(0)
+  const liveCoachStateRequestRef = React.useRef(0)
   const liveCoachSignatureRef = React.useRef("")
   const liveCoachFeedbackCountRef = React.useRef(0)
   const liveCoachGuidanceTurnCountRef = React.useRef(0)
   const liveCoachHasGuidanceRef = React.useRef(false)
   const liveCoachHeartbeatHandledRef = React.useRef(0)
+  const liveCoachRefreshHandledRef = React.useRef(0)
   const liveCoachFullGuidanceInFlightRef = React.useRef(false)
+  const liveCoachPendingRefreshRef = React.useRef(false)
+  const liveCoachLastDecisionAtRef = React.useRef(0)
   const aiLiveGuidanceRef = React.useRef<LiveGuidance | null>(null)
   const coachPopoutChannelRef = React.useRef<BroadcastChannel | null>(null)
   const coachPopoutOpenedRef = React.useRef(false)
@@ -11422,15 +11458,12 @@ function WorkspaceView({
   const handleOpenCoachPopout = React.useCallback(() => {
     if (typeof window === "undefined") return
 
-    const width = 460
-    const height = 660
-    const left = Math.max(0, window.screenX + window.outerWidth - width - 24)
-    const top = Math.max(0, window.screenY + 80)
+    const placement = getLiveCoachPopoutPlacement()
     const popoutUrl = new URL(liveCoachPopoutRoute, window.location.origin)
     const popoutWindow = window.open(
       popoutUrl.toString(),
       "salesframe-live-coach",
-      `popup=yes,width=${width},height=${height},left=${left},top=${top}`
+      getLiveCoachPopoutFeatures(placement)
     )
 
     if (!popoutWindow) {
@@ -11440,6 +11473,7 @@ function WorkspaceView({
 
     coachPopoutOpenedRef.current = true
     setCoachPopoutMessage("")
+    placeMainWindowForCoachPopout(placement)
     popoutWindow.focus()
     publishCoachPopoutSnapshot(coachPopoutSnapshot)
     window.setTimeout(() => publishCoachPopoutSnapshot(coachPopoutSnapshot), 250)
@@ -11455,8 +11489,14 @@ function WorkspaceView({
     liveCoachSignatureRef.current = ""
     liveCoachFeedbackCountRef.current = 0
     liveCoachHeartbeatHandledRef.current = 0
+    liveCoachRefreshHandledRef.current = 0
     liveCoachFullGuidanceInFlightRef.current = false
+    liveCoachPendingRefreshRef.current = false
+    liveCoachQuestionRequestRef.current = 0
+    liveCoachStateRequestRef.current = 0
+    liveCoachLastDecisionAtRef.current = initialLiveGuidance ? Date.now() : 0
     setLiveCoachHeartbeatTick(0)
+    setLiveCoachRefreshTick(0)
   }, [activeCallId, initialLiveGuidance, opportunity.id])
 
   React.useEffect(() => {
@@ -11470,7 +11510,7 @@ function WorkspaceView({
 
     const intervalId = window.setInterval(() => {
       setLiveCoachHeartbeatTick((current) => current + 1)
-    }, LIVE_COACH_AI_RECHECK_MS)
+    }, LIVE_COACH_FAST_CHECK_MS)
 
     return () => window.clearInterval(intervalId)
   }, [activeCallId, captureStatus, isRecording])
@@ -11480,11 +11520,17 @@ function WorkspaceView({
     const feedbackCountChanged = manualCoach.feedbackSignals.length !== liveCoachFeedbackCountRef.current
     const heartbeatTickChanged =
       liveCoachHeartbeatTick > 0 && liveCoachHeartbeatTick !== liveCoachHeartbeatHandledRef.current
+    const refreshTickChanged =
+      liveCoachRefreshTick > 0 && liveCoachRefreshTick !== liveCoachRefreshHandledRef.current
     if (!activeCallId || !isRecording) return
-    if (aiTranscript.length === 0 && !feedbackCountChanged && !heartbeatTickChanged) return
+    if (aiTranscript.length === 0 && !feedbackCountChanged && !heartbeatTickChanged && !refreshTickChanged) return
     if (!account.id || !opportunity.id) return
     if (!["recording", "paused"].includes(captureStatus)) return
-    liveCoachFeedbackCountRef.current = manualCoach.feedbackSignals.length
+
+    const lastDecisionAt = liveCoachLastDecisionAtRef.current || 0
+    const questionAuditDue =
+      heartbeatTickChanged &&
+      (!liveCoachHasGuidanceRef.current || !lastDecisionAt || Date.now() - lastDecisionAt >= LIVE_COACH_AI_RECHECK_MS)
 
     const signature = buildLiveGuidanceSignature({
       activeCallId,
@@ -11497,17 +11543,19 @@ function WorkspaceView({
       transcript: aiTranscript,
     })
 
-    if (signature === liveCoachSignatureRef.current && !heartbeatTickChanged) return
-    if (heartbeatTickChanged && liveCoachFullGuidanceInFlightRef.current) return
-    liveCoachSignatureRef.current = signature
-    if (heartbeatTickChanged) liveCoachHeartbeatHandledRef.current = liveCoachHeartbeatTick
+    if (
+      signature === liveCoachSignatureRef.current &&
+      !feedbackCountChanged &&
+      !heartbeatTickChanged &&
+      !refreshTickChanged
+    ) {
+      return
+    }
 
-    const requestId = liveCoachRequestRef.current + 1
-    liveCoachRequestRef.current = requestId
-    const delay = feedbackCountChanged || heartbeatTickChanged ? 0 : transcript.length <= 1 ? 150 : 350
+    const delay = feedbackCountChanged || refreshTickChanged || questionAuditDue ? 0 : transcript.length <= 1 ? 150 : 350
 
     const timeoutId = window.setTimeout(() => {
-      setLiveCoachStatus("checking")
+      setLiveCoachStatus(feedbackCountChanged || refreshTickChanged || questionAuditDue ? "thinking" : "checking")
       setLiveCoachError("")
       let fullGuidanceRequested = false
       const turnsSinceLastFullGuidance = Math.max(0, aiTranscript.length - liveCoachGuidanceTurnCountRef.current)
@@ -11521,6 +11569,20 @@ function WorkspaceView({
             uiMode: currentGuidanceSnapshot.uiMode,
           }
         : null
+      const latestFeedback = manualCoach.feedbackSignals.at(-1)
+      const shouldRejectRepeatedQuestion = latestFeedback
+        ? ["asked", "skip", "too_soon", "softer"].includes(latestFeedback.action)
+        : false
+      const blockedQuestionTexts = shouldRejectRepeatedQuestion && latestFeedback?.question
+        ? [latestFeedback.question]
+        : []
+      const refreshReason = questionAuditDue
+        ? "periodic_30_second_ai_recheck"
+        : feedbackCountChanged
+          ? "seller_feedback"
+          : refreshTickChanged
+            ? "queued_refresh"
+            : "transcript_or_flow_change"
 
       const guidancePayload = {
         account: {
@@ -11557,29 +11619,47 @@ function WorkspaceView({
         playbooks: callPlaybooks,
         currentGuidance: visibleQuestion,
         refreshContext: {
-          reason: heartbeatTickChanged
-            ? "periodic_30_second_ai_recheck"
-            : feedbackCountChanged
-              ? "seller_feedback"
-              : "transcript_or_flow_change",
+          reason: refreshReason,
           cadenceSeconds: LIVE_COACH_AI_RECHECK_SECONDS,
+          elapsedSinceLastQuestionDecisionMs: liveCoachLastDecisionAtRef.current
+            ? Date.now() - liveCoachLastDecisionAtRef.current
+            : null,
           transcriptTurnCount: aiTranscript.length,
           turnsSinceLastFullGuidance,
           lastDisplayedQuestion: visibleQuestion,
+          latestFeedback,
+          blockedQuestionTexts,
         },
         sellerFeedback: manualCoach.feedbackSignals,
         transcript: aiTranscript,
       }
 
-      const requestFullGuidance = () => {
+      const requestLiveQuestionRefresh = (retryAvoidSameQuestion = false) => {
         if (fullGuidanceRequested) return
         fullGuidanceRequested = true
-        liveCoachFullGuidanceInFlightRef.current = true
         setLiveCoachStatus("thinking")
 
-        requestLiveGuidance(guidancePayload)
+        if (liveCoachFullGuidanceInFlightRef.current) {
+          liveCoachPendingRefreshRef.current = true
+          return
+        }
+
+        liveCoachFullGuidanceInFlightRef.current = true
+        const questionRequestId = liveCoachQuestionRequestRef.current + 1
+        liveCoachQuestionRequestRef.current = questionRequestId
+        const questionPayload = retryAvoidSameQuestion
+          ? {
+              ...guidancePayload,
+              refreshContext: {
+                ...guidancePayload.refreshContext,
+                retryAvoidSameQuestion: true,
+              },
+            }
+          : guidancePayload
+
+        requestLiveQuestion(questionPayload)
           .then((response) => {
-            if (requestId !== liveCoachRequestRef.current) return
+            if (questionRequestId !== liveCoachQuestionRequestRef.current) return
 
             const mappedGuidance = mapAiLiveGuidanceResponse(response)
             if (!mappedGuidance) {
@@ -11590,13 +11670,43 @@ function WorkspaceView({
               return
             }
 
+            if (shouldRejectRepeatedQuestion && latestFeedback?.question) {
+              const mappedQuestion = createManualQuestionFromGuidance(mappedGuidance)
+              const actedQuestionId = createManualQuestionId(
+                "live",
+                latestFeedback.target,
+                latestFeedback.question
+              )
+              const repeatedQuestion =
+                mappedQuestion.id === actedQuestionId ||
+                normalizeComparableText(mappedQuestion.question) === normalizeComparableText(latestFeedback.question)
+
+              if (repeatedQuestion && !retryAvoidSameQuestion) {
+                fullGuidanceRequested = false
+                liveCoachFullGuidanceInFlightRef.current = false
+                requestLiveQuestionRefresh(true)
+                return
+              }
+
+              if (repeatedQuestion) {
+                setLiveCoachStatus("error")
+                setLiveCoachError("SalesFrame heard that signal, but OpenAI repeated the same question. Try again in a moment.")
+                return
+              }
+            }
+
             liveCoachGuidanceTurnCountRef.current = aiTranscript.length
             liveCoachHasGuidanceRef.current = true
+            liveCoachSignatureRef.current = signature
+            liveCoachFeedbackCountRef.current = manualCoach.feedbackSignals.length
+            if (heartbeatTickChanged) liveCoachHeartbeatHandledRef.current = liveCoachHeartbeatTick
+            if (refreshTickChanged) liveCoachRefreshHandledRef.current = liveCoachRefreshTick
+            liveCoachLastDecisionAtRef.current = Date.now()
             setAiLiveGuidance(mappedGuidance)
             setLiveCoachStatus("ready")
           })
           .catch((caughtError: unknown) => {
-            if (requestId !== liveCoachRequestRef.current) return
+            if (questionRequestId !== liveCoachQuestionRequestRef.current) return
 
             const existingGuidance = aiLiveGuidanceRef.current
             const refreshMessage = getUserFacingErrorMessage(
@@ -11616,18 +11726,26 @@ function WorkspaceView({
             setLiveCoachError(refreshMessage)
           })
           .finally(() => {
-            if (requestId === liveCoachRequestRef.current) {
+            if (questionRequestId === liveCoachQuestionRequestRef.current) {
               liveCoachFullGuidanceInFlightRef.current = false
+              if (liveCoachPendingRefreshRef.current) {
+                liveCoachPendingRefreshRef.current = false
+                setLiveCoachRefreshTick((current) => current + 1)
+              }
             }
           })
       }
 
       const forceFullGuidanceRefresh =
         feedbackCountChanged ||
-        heartbeatTickChanged ||
+        refreshTickChanged ||
+        questionAuditDue ||
         !liveCoachHasGuidanceRef.current ||
         aiTranscript.length <= 1 ||
         turnsSinceLastFullGuidance >= LIVE_COACH_FORCE_REFRESH_TURNS
+
+      const stateRequestId = liveCoachStateRequestRef.current + 1
+      liveCoachStateRequestRef.current = stateRequestId
 
       void requestLiveState({
         accountId: account.id,
@@ -11638,7 +11756,7 @@ function WorkspaceView({
         transcript: aiTranscript,
       })
         .then((response) => {
-          if (requestId !== liveCoachRequestRef.current) return
+          if (stateRequestId !== liveCoachStateRequestRef.current) return
 
           const fastStateResponse = mapAiLiveStateResponse(response)
           if (!fastStateResponse) return
@@ -11657,8 +11775,11 @@ function WorkspaceView({
           )
 
           if (shouldRefreshQuestion) {
-            requestFullGuidance()
+            requestLiveQuestionRefresh()
           } else if (!fullGuidanceRequested) {
+            liveCoachSignatureRef.current = signature
+            if (heartbeatTickChanged) liveCoachHeartbeatHandledRef.current = liveCoachHeartbeatTick
+            if (refreshTickChanged) liveCoachRefreshHandledRef.current = liveCoachRefreshTick
             setLiveCoachStatus("ready")
           }
         })
@@ -11666,7 +11787,7 @@ function WorkspaceView({
           if (!fullGuidanceRequested) setLiveCoachStatus("ready")
         })
 
-      if (forceFullGuidanceRefresh) requestFullGuidance()
+      if (forceFullGuidanceRefresh) requestLiveQuestionRefresh()
     }, delay)
 
     return () => window.clearTimeout(timeoutId)
@@ -11680,6 +11801,7 @@ function WorkspaceView({
     customerResearch,
     isRecording,
     liveCoachHeartbeatTick,
+    liveCoachRefreshTick,
     manualCoach.feedbackSignals,
     opportunity,
     transcript,
@@ -12060,10 +12182,10 @@ function NextQuestionCard({
           ? "Checking if this still fits"
           : "Ready for your next call"
   const emptyGuidanceTitle = hasRecentManualAction
-    ? "Working on the next move"
+    ? "Finding the next move"
     : "Start a call when you are ready"
   const emptyGuidanceDescription = hasRecentManualAction
-    ? "SalesFrame heard that signal and is checking the conversation flow before it shows another question."
+    ? "SalesFrame heard that signal and is checking the flow before it shows the next question."
     : "SalesFrame will check audio, use the account context, opportunity history, call type, and selected playbooks, then bring back the first natural seller move before recording begins."
   return (
     <Card>
@@ -13453,16 +13575,25 @@ function CallReplayContent({
   const [replaySeconds, setReplaySeconds] = React.useState(0)
   const [replayVolume, setReplayVolume] = React.useState(0.85)
   const [isReplayPlaying, setIsReplayPlaying] = React.useState(false)
+  const [mediaReady, setMediaReady] = React.useState(false)
   const [lastReplayAction, setLastReplayAction] = React.useState(
     call.recordingStoragePath ? "Recording saved. Replay is getting ready." : "Replay ready"
   )
   const recordingLinkRequestRef = React.useRef(0)
   const recordingAutoRefreshAttemptRef = React.useRef(0)
   const replayPlayIntentRef = React.useRef(false)
+  const recordingStatus = normalizeRecordingLifecycleStatusForReplay(call)
+  const replayReadiness = getReplayReadiness({
+    hasRecordingSource: Boolean(call.recordingStoragePath || call.recordingUrl),
+    hasRecordingUrl: Boolean(recordingUrl),
+    linkStatus: recordingLinkStatus,
+    mediaReady,
+    recordingStatus,
+  })
   const displayedReplayProgress = Math.min(100, Math.max(0, (replaySeconds / replayDuration) * 100))
   const displayedReplayTime = formatTime(Math.round(replaySeconds))
   const hasPlayableRecording = Boolean(call.recordingStoragePath || call.recordingUrl)
-  const canPlayRecording = Boolean(recordingUrl) && recordingLinkStatus === "ready"
+  const canPlayRecording = Boolean(recordingUrl) && recordingLinkStatus === "ready" && mediaReady
   const isRecordingLinkLoading = recordingLinkStatus === "loading"
 
   const loadRecordingUrl = React.useCallback(
@@ -13499,7 +13630,7 @@ function CallReplayContent({
         setRecordingUrl(nextUrl)
         setRecordingLinkStatus("ready")
         setRecordingLinkError("")
-        setLastReplayAction(announce ? "Recording link refreshed" : "Recording ready")
+        setLastReplayAction(announce ? "Recording link refreshed. Preparing replay." : "Preparing replay")
         return nextUrl
       } catch (caughtError: unknown) {
         if (requestId !== recordingLinkRequestRef.current) return ""
@@ -13528,6 +13659,7 @@ function CallReplayContent({
     setRecordingLinkError("")
     setReplaySeconds(0)
     setIsReplayPlaying(false)
+    setMediaReady(false)
     recordingAutoRefreshAttemptRef.current = 0
     replayPlayIntentRef.current = false
     setLastReplayAction(
@@ -13549,6 +13681,7 @@ function CallReplayContent({
   React.useEffect(() => {
     if (audioRef.current) {
       if (recordingUrl && audioRef.current.src !== recordingUrl) {
+        setMediaReady(false)
         audioRef.current.src = recordingUrl
         audioRef.current.load()
       }
@@ -13580,10 +13713,24 @@ function CallReplayContent({
       return
     }
 
+    if (
+      recordingStatus === "uploading" ||
+      recordingStatus === "recording" ||
+      (recordingStatus === "processing" && !call.recordingStoragePath && !recordingUrl)
+    ) {
+      setLastReplayAction("Replay is getting ready.")
+      return
+    }
+
     let playableUrl = recordingUrl
     if (!canPlayRecording) {
       playableUrl = await loadRecordingUrl({ announce: true })
       if (!playableUrl) return
+    }
+
+    if (!mediaReady) {
+      setLastReplayAction("Replay is getting ready.")
+      return
     }
 
     if (audioRef.current) {
@@ -13604,7 +13751,7 @@ function CallReplayContent({
         setIsReplayPlaying(false)
         setRecordingLinkStatus("error")
         const message = getUserFacingErrorMessage(caughtError, "Replay needs another start attempt. Refresh the recording link and try again.")
-        setRecordingLinkError(message)
+        setRecordingLinkError(getAudioPlaybackErrorMessage(audioRef.current, message))
         setLastReplayAction(message)
       }
       return
@@ -13638,8 +13785,45 @@ function CallReplayContent({
     }
   }
 
+  const handleDownloadRecording = async () => {
+    if (!hasPlayableRecording) {
+      setOpenError("No recording is available for this call.")
+      return
+    }
+
+    setOpenError("")
+
+    try {
+      const nextUrl = recordingUrl || (await loadRecordingUrl({ announce: true }))
+      if (!nextUrl) throw new Error("No recording is available for this call.")
+
+      const link = document.createElement("a")
+      link.href = nextUrl
+      link.download = getRecordingDownloadFileName(call)
+      link.rel = "noopener noreferrer"
+      document.body.append(link)
+      link.click()
+      link.remove()
+      setLastReplayAction("Recording download started")
+    } catch (caughtError: unknown) {
+      setOpenError(getUserFacingErrorMessage(caughtError, "Recording needs another download attempt."))
+    }
+  }
+
   return (
     <div className="grid gap-4">
+        <div className="grid gap-2 rounded-lg bg-muted/30 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{replayReadiness.title}</p>
+              <p className="text-xs text-muted-foreground">{replayReadiness.description}</p>
+            </div>
+            {call.recordingSizeBytes ? (
+              <p className="shrink-0 text-xs text-muted-foreground">{formatBytes(call.recordingSizeBytes)}</p>
+            ) : null}
+          </div>
+          <Progress className="h-2" value={replayReadiness.progress} aria-label="Recording replay readiness" />
+        </div>
         {hasPlayableRecording ? (
           <audio
             aria-hidden="true"
@@ -13653,9 +13837,19 @@ function CallReplayContent({
             }}
             onLoadedMetadata={(event) => {
               const duration = event.currentTarget.duration
+              setMediaReady(true)
+              setRecordingLinkStatus("ready")
+              setRecordingLinkError("")
+              setLastReplayAction("Replay ready")
               if (Number.isFinite(duration) && duration > 0 && replaySeconds > duration) {
                 setReplaySeconds(duration)
               }
+            }}
+            onCanPlay={() => {
+              setMediaReady(true)
+              setRecordingLinkStatus("ready")
+              setRecordingLinkError("")
+              setLastReplayAction("Replay ready")
             }}
             onPause={() => {
               setIsReplayPlaying(false)
@@ -13663,6 +13857,7 @@ function CallReplayContent({
             onPlay={() => setIsReplayPlaying(true)}
             onError={() => {
               setIsReplayPlaying(false)
+              setMediaReady(false)
               const shouldResumePlayback = replayPlayIntentRef.current
               const shouldRefresh =
                 Boolean(call.recordingStoragePath) &&
@@ -13687,6 +13882,7 @@ function CallReplayContent({
 
                   try {
                     audioRef.current.src = nextUrl
+                    setMediaReady(false)
                     audioRef.current.load()
                     audioRef.current.volume = replayVolume
                     await audioRef.current.play()
@@ -13697,7 +13893,7 @@ function CallReplayContent({
                     setIsReplayPlaying(false)
                     setRecordingLinkStatus("error")
                     const message = getUserFacingErrorMessage(caughtError, "Replay needs another start attempt. Press Play to try again.")
-                    setRecordingLinkError(message)
+                    setRecordingLinkError(getAudioPlaybackErrorMessage(audioRef.current, message))
                     setLastReplayAction(message)
                   }
                 })
@@ -13714,8 +13910,12 @@ function CallReplayContent({
               }
 
               setRecordingLinkStatus("error")
-              setRecordingLinkError("Recording link needs a refresh. Press Retry playback, or open the recording in a new tab.")
-              setLastReplayAction("Recording link needs a refresh.")
+              const message = getAudioPlaybackErrorMessage(
+                audioRef.current,
+                "Recording link needs a refresh. Press Retry playback, or open the recording in a new tab."
+              )
+              setRecordingLinkError(message)
+              setLastReplayAction(message)
             }}
             onTimeUpdate={(event) => setReplaySeconds(event.currentTarget.currentTime)}
           />
@@ -13787,7 +13987,7 @@ function CallReplayContent({
             size="sm"
             className="w-full gap-2 sm:w-auto"
             aria-label={isReplayPlaying ? "Pause recording" : "Play recording"}
-            disabled={!hasPlayableRecording || isRecordingLinkLoading}
+            disabled={!hasPlayableRecording || isRecordingLinkLoading || replayReadiness.controlsDisabled}
             onClick={handlePlayPause}
           >
             {isReplayPlaying ? <PauseIcon /> : <PlayIcon />}
@@ -13808,6 +14008,16 @@ function CallReplayContent({
           >
             <ExternalLinkIcon />
             Open recording
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full gap-2 sm:w-auto"
+            disabled={!hasPlayableRecording || isRecordingLinkLoading}
+            onClick={() => void handleDownloadRecording()}
+          >
+            <DownloadIcon />
+            Download recording
           </Button>
           <div className="flex w-full items-center gap-2 rounded-lg bg-muted/30 px-3 py-2 sm:min-w-36 sm:flex-1 sm:justify-end sm:bg-transparent sm:px-0 sm:py-0">
             <Volume2Icon className="size-4 shrink-0 text-muted-foreground" />
@@ -13872,6 +14082,149 @@ function CallReplayContent({
   )
 }
 
+function normalizeRecordingLifecycleStatusForReplay(call: CallSummary): RecordingLifecycleStatus {
+  if (
+    call.recordingStatus === "none" ||
+    call.recordingStatus === "recording" ||
+    call.recordingStatus === "uploading" ||
+    call.recordingStatus === "processing" ||
+    call.recordingStatus === "ready" ||
+    call.recordingStatus === "failed"
+  ) {
+    return call.recordingStatus
+  }
+
+  return call.recordingStoragePath || call.recordingUrl ? "ready" : "none"
+}
+
+function getReplayReadiness({
+  hasRecordingSource,
+  hasRecordingUrl,
+  linkStatus,
+  mediaReady,
+  recordingStatus,
+}: {
+  hasRecordingSource: boolean
+  hasRecordingUrl: boolean
+  linkStatus: "idle" | "loading" | "ready" | "error"
+  mediaReady: boolean
+  recordingStatus: RecordingLifecycleStatus
+}) {
+  if (recordingStatus === "failed" || linkStatus === "error") {
+    return {
+      controlsDisabled: false,
+      description: "Replay needs attention. Retry playback, open the file, or download the recording.",
+      progress: 100,
+      title: "Recording needs attention",
+    }
+  }
+
+  if (recordingStatus === "recording") {
+    return {
+      controlsDisabled: true,
+      description: "SalesFrame is still capturing the call.",
+      progress: 35,
+      title: "Recording in progress",
+    }
+  }
+
+  if (recordingStatus === "uploading") {
+    return {
+      controlsDisabled: true,
+      description: "The recording is being saved to SalesFrame.",
+      progress: 60,
+      title: "Saving recording",
+    }
+  }
+
+  if (recordingStatus === "processing" || linkStatus === "loading" || (hasRecordingUrl && !mediaReady)) {
+    return {
+      controlsDisabled: recordingStatus !== "processing" || !hasRecordingSource || linkStatus === "loading",
+      description: hasRecordingSource
+        ? "SalesFrame is preparing the replay link and checking the audio file. You can retry playback if it feels stuck."
+        : "SalesFrame is preparing the replay link and checking the audio file.",
+      progress: 82,
+      title: "Preparing replay",
+    }
+  }
+
+  if (hasRecordingUrl && mediaReady) {
+    return {
+      controlsDisabled: false,
+      description: "The recording is ready to play.",
+      progress: 100,
+      title: "Replay ready",
+    }
+  }
+
+  if (hasRecordingSource && !hasRecordingUrl) {
+    return {
+      controlsDisabled: false,
+      description: "The recording is saved. Press Play when you are ready and SalesFrame will refresh the replay link.",
+      progress: 90,
+      title: "Recording saved",
+    }
+  }
+
+  return {
+    controlsDisabled: true,
+    description: "There is no saved recording for this call yet.",
+    progress: 0,
+    title: "No recording available",
+  }
+}
+
+function getAudioPlaybackErrorMessage(audio: HTMLAudioElement | null, fallback: string) {
+  const mediaError = audio?.error
+  if (!mediaError) return fallback
+
+  if (mediaError.code === 4) {
+    return "The recording was saved, but this browser cannot play the audio format. Download or open the recording while SalesFrame prepares a better replay path."
+  }
+
+  if (mediaError.code === 2) {
+    return "SalesFrame needs another moment to load the recording link. Retry playback, then open or download the recording if it still does not play."
+  }
+
+  if (mediaError.code === 3) {
+    return "This browser needs another format for the recording. Download the recording, or try again after SalesFrame refreshes the replay."
+  }
+
+  return fallback
+}
+
+function getRecordingDownloadFileName(call: CallSummary) {
+  const extension = getRecordingExtensionFromMimeType(call.recordingMimeType)
+  const name = call.title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+
+  return `${name || "salesframe-call-recording"}.${extension}`
+}
+
+function getRecordingExtensionFromMimeType(mimeType: string | null) {
+  if (!mimeType) return "webm"
+  if (mimeType.includes("mp4")) return "m4a"
+  if (mimeType.includes("mpeg")) return "mp3"
+  if (mimeType.includes("ogg")) return "ogg"
+  if (mimeType.includes("wav")) return "wav"
+  if (mimeType.includes("aac")) return "aac"
+  if (mimeType.includes("flac")) return "flac"
+
+  return "webm"
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B"
+  const units = ["B", "KB", "MB", "GB"]
+  const unitIndex = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)))
+  const amount = value / 1024 ** unitIndex
+
+  return `${amount >= 10 || unitIndex === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unitIndex]}`
+}
+
 function getAudioHealthIndicators({
   audioPreflight,
   capturePermissionState,
@@ -13900,20 +14253,20 @@ function getAudioHealthIndicators({
         ? { label: "Customer audio", tone: isLive ? "live" : "building", value: isLive ? "Two channels" : "Connected" }
         : { label: "Customer audio", tone: needsAttention ? "error" : "warning", value: "Not detected" }
       : audioPreflight.mixedRoomReady
-        ? { label: "Customer audio", tone: isLive ? "live" : "building", value: isLive ? "One channel" : "Connected" }
+        ? { label: "Customer audio", tone: isLive ? "warning" : "building", value: isLive ? "Inferred" : "One channel" }
         : { label: "Customer audio", tone: "muted", value: "One channel" }
     : isStarting
       ? { label: "Customer audio", tone: "building", value: "Checking" }
       : { label: "Customer audio", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
-  const aiGuidance: CaptureSignalIndicator = guidance
-    ? { label: "AI guidance", tone: "live", value: isLive ? "Reading flow" : "Ready" }
+  const liveTranscript: CaptureSignalIndicator = guidance
+    ? { label: "Live transcript", tone: "live", value: isLive ? "Deepgram live" : "Ready" }
     : isLive
-      ? { label: "AI guidance", tone: "building", value: "Building" }
+      ? { label: "Live transcript", tone: "building", value: "Connecting" }
       : isStarting
-        ? { label: "AI guidance", tone: "building", value: "Preflight" }
-        : { label: "AI guidance", tone: needsAttention ? "warning" : "muted", value: "Preflight" }
+        ? { label: "Live transcript", tone: "building", value: "Preflight" }
+        : { label: "Live transcript", tone: needsAttention ? "warning" : "muted", value: "Preflight" }
 
-  return [sellerMic, customerAudio, aiGuidance]
+  return [sellerMic, customerAudio, liveTranscript]
 }
 
 function getCaptureStatusLabel(status: CallCaptureStatus) {
@@ -16058,7 +16411,7 @@ function CustomFrameworkEditor({
           </div>
           <EditableTextareaField
             id="custom-framework-live-guidance"
-            label="Realtime guidance"
+            label="Live guidance"
             value={draft.liveGuidance}
             onChange={(value) => onDraftChange("liveGuidance", value)}
           />
@@ -17472,7 +17825,7 @@ function SettingsView({
                 ) : null}
               </div>
               <p className="text-sm text-muted-foreground">
-                Your key is used to power AI-assisted transcription, notes, and question guidance for this workspace.
+                Your key powers live questions, notes, enrichment, and post-call outputs for this workspace. SalesFrame handles live transcription separately.
               </p>
             </div>
 
@@ -17497,7 +17850,7 @@ function SettingsView({
                   <p className="mt-1 text-sm text-muted-foreground">
                     {hasSavedKey
                       ? "AI-assisted workflows can use this connection for enabled features."
-                      : "Add your key to power transcription, notes, and question guidance for this workspace."}
+                      : "Add your key to power live questions, notes, enrichment, and post-call outputs for this workspace."}
                   </p>
                 </div>
               </div>
@@ -17539,8 +17892,8 @@ function SettingsView({
 
             <div className="grid gap-3 md:grid-cols-2">
               {[
-                ["Realtime guidance", "Next best question and methodology gap detection during calls."],
-                ["Transcription", "Speaker-aware transcript processing for captured calls."],
+                ["Live guidance", "Next best question and methodology gap detection during calls."],
+                ["Deepgram live transcript", "Speaker-aware transcript turns for captured calls."],
                 ["AI notes", "Structured discovery notes and evidence snippets."],
                 ["Post-call outputs", "Follow-up email, next-call plan, and account/opportunity field updates."],
               ].map(([label, value]) => (
@@ -17577,7 +17930,7 @@ function SettingsView({
               </div>
               <DialogTitle>Remove OpenAI key?</DialogTitle>
               <DialogDescription>
-                SalesFrame will stop using this workspace key for live questions, transcription, notes, enrichment, and post-call outputs until a new key is saved.
+                SalesFrame will stop using this workspace key for live questions, notes, enrichment, and post-call outputs until a new key is saved.
               </DialogDescription>
             </DialogHeader>
             {savedKeyState ? (

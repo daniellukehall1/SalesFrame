@@ -213,9 +213,9 @@ export function LiveCoachPopoutWindow({ darkMode }: { darkMode: boolean }) {
   }, [snapshot.activeCallId])
 
   return (
-    <div className="h-svh overflow-hidden bg-background p-3 text-foreground">
-      <div className="mx-auto flex h-[calc(100svh-1.5rem)] max-w-lg flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b p-4">
+    <div className="h-svh overflow-hidden bg-muted/30 p-2 text-foreground sm:p-3">
+      <div className="mx-auto flex h-[calc(100svh-1rem)] w-full max-w-[430px] flex-col overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-border sm:h-[calc(100svh-1.5rem)]">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b p-3">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#0f0f10] text-white">
               <AudioLinesIcon aria-hidden="true" className="size-5" />
@@ -230,16 +230,16 @@ export function LiveCoachPopoutWindow({ darkMode }: { darkMode: boolean }) {
           </div>
         </header>
 
-        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+        <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
           {shouldShowCallContext ? (
-            <div className="rounded-lg bg-muted/30 p-3">
+            <div className="rounded-lg bg-muted/30 px-3 py-2">
               <p className="truncate text-sm font-medium">{snapshot.accountName}</p>
               <p className="truncate text-xs text-muted-foreground">{snapshot.opportunityName}</p>
             </div>
           ) : null}
 
           <section
-            className="flex min-h-[250px] flex-1 flex-col justify-center gap-4 rounded-xl bg-muted/20 p-4"
+            className="flex min-h-[220px] flex-1 flex-col justify-center gap-3 rounded-xl bg-muted/20 p-4"
             aria-label="Live coach recommendation"
             aria-live="polite"
             aria-atomic="true"
@@ -257,7 +257,7 @@ export function LiveCoachPopoutWindow({ darkMode }: { darkMode: boolean }) {
 
             {question ? (
               <div className="grid gap-3">
-                <p className="text-2xl font-semibold leading-tight">
+                <p className="text-[1.65rem] font-semibold leading-tight tracking-normal">
                   "{question.question}"
                 </p>
                 {question.reason ? (
@@ -266,14 +266,14 @@ export function LiveCoachPopoutWindow({ darkMode }: { darkMode: boolean }) {
               </div>
             ) : (
               <div className="grid gap-3">
-                <p className="text-2xl font-semibold leading-tight">Stay with the conversation.</p>
+                <p className="text-[1.65rem] font-semibold leading-tight tracking-normal">Stay with the conversation.</p>
                 <p className="text-sm leading-relaxed text-muted-foreground">{snapshot.message}</p>
               </div>
             )}
           </section>
         </main>
 
-        <footer className="grid shrink-0 gap-2 border-t bg-card p-4">
+        <footer className="grid shrink-0 gap-2 border-t bg-card p-3">
           {actionMessage ? (
             <p className="text-center text-xs text-muted-foreground" role="status" aria-live="polite">
               {actionMessage}

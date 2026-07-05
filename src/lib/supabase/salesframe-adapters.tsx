@@ -21,6 +21,7 @@ import {
   type NextCallBrief,
   type Opportunity,
   type OpportunityDraft,
+  type RecordingLifecycleStatus,
   type SellerResearchProfile,
   type TranscriptSpeaker,
 } from "@/lib/salesframe-core"
@@ -191,12 +192,36 @@ export function mapCallRowsToSummaries(calls: CallRow[]): CallSummary[] {
     date: formatCallDate(call.started_at ?? call.created_at),
     duration: formatCallDuration(call.duration_seconds),
     durationSeconds: call.duration_seconds ?? 0,
+    recordingError: call.recording_error,
+    recordingMimeType: call.recording_mime_type,
+    recordingReadyAt: call.recording_ready_at,
+    recordingSizeBytes: call.recording_size_bytes,
+    recordingStatus: normalizeRecordingLifecycleStatus(call.recording_status, call.recording_storage_path, call.recording_url),
     recordingStoragePath: call.recording_storage_path,
     recordingUrl: call.recording_url,
     startedAt: call.started_at,
     type: call.call_type,
     status: formatCallStatus(call.status),
   }))
+}
+
+function normalizeRecordingLifecycleStatus(
+  value: string | null | undefined,
+  recordingStoragePath: string | null,
+  recordingUrl: string | null
+): RecordingLifecycleStatus {
+  if (
+    value === "none" ||
+    value === "recording" ||
+    value === "uploading" ||
+    value === "processing" ||
+    value === "ready" ||
+    value === "failed"
+  ) {
+    return value
+  }
+
+  return recordingStoragePath || recordingUrl ? "ready" : "none"
 }
 
 export function mapOpportunityRowToDraft({

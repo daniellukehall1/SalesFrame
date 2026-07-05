@@ -20,11 +20,30 @@ type RecentTranscriptLine = {
   time?: string
 }
 
+type PriorTurnPayload = {
+  endMs?: number
+  sourceKind?: string
+  speaker?: string
+  startMs?: number
+  text?: string
+}
+
+type SegmentSignalsPayload = {
+  answerLike?: boolean
+  followsQuestion?: boolean
+  oneChannel?: boolean
+  questionLike?: boolean
+  sourceKind?: string
+}
+
 type SpeakerAttributionPayload = {
   callId?: string
   elapsedMs?: number
+  priorTurn?: PriorTurnPayload | null
   recentTranscript?: RecentTranscriptLine[]
   segmentText?: string
+  segmentSignals?: SegmentSignalsPayload
+  silenceGapMs?: number | null
   sourceHint?: string
 }
 
@@ -53,7 +72,7 @@ const speakerAttributionSchema = {
     confidence: { type: "number", minimum: 0, maximum: 1 },
     needsReview: { type: "boolean" },
     reason: { type: "string" },
-    source: { type: "string", enum: ["model_realtime"] },
+    source: { type: "string", enum: ["model_live_role"] },
   },
 }
 
@@ -77,6 +96,34 @@ function cleanTranscript(value: unknown) {
         })
         .filter((line) => line.text)
     : []
+}
+
+function cleanPriorTurn(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+
+  const record = value as Record<string, unknown>
+
+  return {
+    endMs: typeof record.endMs === "number" && Number.isFinite(record.endMs) ? record.endMs : null,
+    sourceKind: cleanText(record.sourceKind),
+    speaker: cleanText(record.speaker, "Unknown"),
+    startMs: typeof record.startMs === "number" && Number.isFinite(record.startMs) ? record.startMs : null,
+    text: cleanText(record.text),
+  }
+}
+
+function cleanSegmentSignals(value: unknown) {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+
+  return {
+    answerLike: record.answerLike === true,
+    followsQuestion: record.followsQuestion === true,
+    oneChannel: record.oneChannel === true,
+    questionLike: record.questionLike === true,
+    sourceKind: cleanText(record.sourceKind),
+  }
 }
 
 function requiredText(value: unknown, message: string, code: string) {
@@ -121,7 +168,7 @@ function assertSpeakerAttributionResult(value: SpeakerAttributionResult, sourceH
 
   const confidence = normalizeConfidence(value.confidence)
   const source = requiredText(value.source, "Speaker attribution did not return a source.", "openai_empty_speaker_source")
-  if (source !== "model_realtime") {
+  if (source !== "model_live_role") {
     throw upstreamFailure("Speaker attribution returned an invalid source.", "openai_invalid_speaker_source")
   }
 
@@ -168,7 +215,7 @@ export default async (request: Request, _context: Context) => {
         schema: speakerAttributionSchema,
         schemaName: "salesframe_speaker_attribution",
         system:
-          "You label one transcript segment from a B2B sales call. Return only schema-valid JSON. Default to the normal two-person call: Seller and Customer. Use audio source hints, turn-taking, question/answer intent, sales wording, and recent context. sourceHint seller_mic means the computer microphone and must be Seller. sourceHint meeting_audio means shared window, tab, app, or system audio and must be the buyer side: Customer by default, or Customer 2/Customer 3 only when recent context strongly suggests a different customer-side voice. Do not label meeting_audio as Seller. sourceHint mixed_audio or in_person_microphone means one microphone is hearing everyone; still use Seller and Customer as the default labels, and use Customer 2 or Customer 3 only when a distinct additional buyer voice is strongly implied. Do not use generic Speaker 1 or Speaker 2 labels. Keep uncertain labels reviewable. Do not return Unknown unless the segment cannot be responsibly attributed from the audio source and recent context. Mark needsReview true when confidence is below 0.72, when the source is mixed_audio or in_person_microphone, when speaker identity is ambiguous, or when speakerLabel is Unknown.",
+          "You label one transcript segment from a B2B sales call. Return only schema-valid JSON. Default to the normal two-person call: Seller and Customer. Use audio source hints, turn-taking, question/answer intent, sales wording, recent context, priorTurn, silenceGapMs, and segmentSignals. sourceHint seller_mic means the computer microphone and must be Seller. sourceHint meeting_audio means shared window, tab, app, or system audio and must be the buyer side: Customer by default, or Customer 2/Customer 3 only when recent context strongly suggests a different customer-side voice. Do not label meeting_audio as Seller. sourceHint mixed_audio or in_person_microphone means one microphone is hearing everyone; still use Seller and Customer as the default labels, and use Customer 2 or Customer 3 only when a distinct additional buyer voice is strongly implied. For one-channel audio, if priorTurn.speaker is Seller or Unknown, priorTurn is a sales question, segmentSignals.answerLike is true, and silenceGapMs is meaningful, prefer Customer even if the text alone could be seller wording. Do not use generic Speaker 1 or Speaker 2 labels. Keep uncertain labels reviewable. Do not return Unknown unless the segment cannot be responsibly attributed from the audio source and recent context. Mark needsReview true when confidence is below 0.72, when the source is mixed_audio or in_person_microphone, when speaker identity is ambiguous, or when speakerLabel is Unknown.",
         input: JSON.stringify({
           call: {
             id: call.id,
@@ -176,8 +223,11 @@ export default async (request: Request, _context: Context) => {
             opportunityId: call.opportunity_id,
           },
           elapsedMs: Number.isFinite(payload.elapsedMs) ? payload.elapsedMs : null,
+          priorTurn: cleanPriorTurn(payload.priorTurn),
           recentTranscript: cleanTranscript(payload.recentTranscript),
           segmentText,
+          segmentSignals: cleanSegmentSignals(payload.segmentSignals),
+          silenceGapMs: Number.isFinite(payload.silenceGapMs) ? payload.silenceGapMs : null,
           sourceHint,
         }),
       }),

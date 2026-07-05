@@ -1,10 +1,6 @@
 import * as React from "react"
 
-import {
-  requestCallDiarization,
-  requestSpeakerAttribution,
-  type CallDiarizationResponse,
-} from "@/lib/server-functions"
+import { requestSpeakerAttribution } from "@/lib/server-functions"
 import {
   runAudioPreflight,
   summarizeAudioSource,
@@ -13,12 +9,12 @@ import {
   type CapturedAudioSource,
 } from "@/lib/call-audio-preflight"
 import {
-  connectRealtimeTranscription,
-  flushRealtimeAudioBuffers,
-  sourceTranscriptionDelay,
-  waitForRealtimeFlush,
-  type RealtimeTranscriptEvent,
-} from "@/lib/realtime-transcription"
+  connectDeepgramLiveTranscription,
+  flushDeepgramAudioBuffers,
+  waitForDeepgramFlush,
+  type DeepgramTranscriptionConnection,
+  type DeepgramTranscriptEvent,
+} from "@/lib/deepgram-live-transcription"
 import {
   createCallRecordingSignedUrl,
   ensureCallSpeaker,
@@ -28,14 +24,19 @@ import {
   updateTranscriptSegment,
   uploadCallRecording,
 } from "@/lib/supabase/salesframe-data"
-import type { CallAudioCaptureMode, TranscriptSpeaker } from "@/lib/salesframe-core"
+import type { CallAudioCaptureMode, RecordingLifecycleStatus, TranscriptSpeaker } from "@/lib/salesframe-core"
 import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
 import {
   appendTranscriptDelta,
   canContinueTranscriptTurn,
+  isAnswerLikeTranscript,
+  isOneChannelAudioSource,
+  isQuestionLikeTranscript,
   joinTranscriptText,
+  oneChannelQuestionAnswerBoundaryMs,
   rememberFinalTranscriptEvent,
   shouldSuppressFinalTranscript,
+  shouldInferOneChannelCustomerTurn,
   type RecentFinalTranscriptEvent,
 } from "@/lib/turn-assembler"
 
@@ -58,9 +59,16 @@ export type CallCapturePermissionState =
   | "capture-unavailable"
 
 export type CallCaptureTranscriptLine = {
+  audioSourceKind?: AudioSourceKind
   clientId?: string
+  diarizationSpeaker?: string
+  endOfTurnConfidence?: number
   id?: string
   isPartial?: boolean
+  languageDetected?: string
+  providerEventId?: string
+  providerSessionId?: string
+  providerTurnIndex?: number
   speaker: TranscriptSpeaker
   speakerAttributionReason?: string
   speakerConfidence?: number
@@ -71,15 +79,13 @@ export type CallCaptureTranscriptLine = {
   speakerSource?: string
   time: string
   text: string
+  wordConfidence?: number
 }
-
-export type CallCaptureDiarizationResult = CallDiarizationResponse
 
 type StartCallCaptureConfig = {
   abortSignal?: AbortSignal
   audioCaptureMode: CallAudioCaptureMode
   callId: string
-  onDiarization?: (result: CallCaptureDiarizationResult) => void
   startedAt: string
   workspaceId: string
   onTranscript?: (line: CallCaptureTranscriptLine) => void
@@ -90,6 +96,11 @@ export type CallCaptureStopResult = {
   callId: string
   durationSeconds: number
   endedAt: string
+  recordingError: string | null
+  recordingMimeType: string | null
+  recordingReadyAt: string | null
+  recordingSizeBytes: number | null
+  recordingStatus: RecordingLifecycleStatus
   recordingStoragePath: string | null
   recordingUrl: string | null
 }
@@ -106,22 +117,27 @@ type TranscriptTurn = {
   attribution: SpeakerAttribution
   clientId: string
   displayName: string
+  diarizationSpeaker?: string
   endMs: number
+  endOfTurnConfidence?: number
+  languageDetected?: string
   lastActivityMs: number
   openaiItemId?: string
   openaiSegmentId?: string
+  providerEventId?: string
+  providerSessionId?: string
+  providerTurnIndex?: number
   qualityFlags: string[]
   segmentId: string
   sourceKind: AudioSourceKind
   speakerId: string
   startMs: number
   text: string
-  transcriptionDelay: string
+  transcriptionDelay?: string
+  wordConfidence?: number
   turnSequence: number
 }
 
-const rollingDiarizationWindowMs = 30000
-const enableRollingDiarization = false
 const callStartCancelledMessage = "Call start was cancelled."
 
 function throwIfCallStartCancelled(signal?: AbortSignal) {
@@ -140,34 +156,25 @@ export function useCallCapture() {
   const activeConfigRef = React.useRef<StartCallCaptureConfig | null>(null)
   const chunksRef = React.useRef<Blob[]>([])
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null)
+  const recordingStreamCleanupRef = React.useRef<(() => void) | null>(null)
   const partialTranscriptLinesRef = React.useRef<Map<string, CallCaptureTranscriptLine>>(new Map())
   const partialTranscriptTextRef = React.useRef<Map<string, string>>(new Map())
-  const realtimeDataChannelsRef = React.useRef<RTCDataChannel[]>([])
-  const realtimeCommitCleanupsRef = React.useRef<(() => void)[]>([])
-  const realtimeCommitTimersRef = React.useRef<number[]>([])
-  const rollingDiarizationChunksRef = React.useRef<Blob[]>([])
-  const rollingDiarizationInFlightRef = React.useRef(false)
-  const rollingDiarizationStartedAtMsRef = React.useRef(0)
-  const peerConnectionsRef = React.useRef<RTCPeerConnection[]>([])
+  const deepgramConnectionsRef = React.useRef<DeepgramTranscriptionConnection[]>([])
   const sourceStreamsRef = React.useRef<MediaStream[]>([])
   const persistedTranscriptKeysRef = React.useRef<Set<string>>(new Set())
   const recentFinalTranscriptEventsRef = React.useRef<RecentFinalTranscriptEvent[]>([])
   const recentTranscriptRef = React.useRef<CallCaptureTranscriptLine[]>([])
   const activeTranscriptTurnsRef = React.useRef<Map<AudioSourceKind, TranscriptTurn>>(new Map())
-  const realtimeSegmentedItemsRef = React.useRef<Set<string>>(new Set())
-  const realtimeSpeakerLabelsRef = React.useRef<Map<string, TranscriptSpeaker>>(new Map())
+  const deepgramSpeakerLabelsRef = React.useRef<Map<string, TranscriptSpeaker>>(new Map())
   const stopInFlightRef = React.useRef(false)
   const transcriptTurnSequenceRef = React.useRef(0)
 
   const cleanup = React.useCallback(() => {
-    realtimeCommitTimersRef.current.forEach((timer) => window.clearInterval(timer))
-    realtimeCommitTimersRef.current = []
-    realtimeCommitCleanupsRef.current.forEach((cleanupTurnCommitter) => cleanupTurnCommitter())
-    realtimeCommitCleanupsRef.current = []
-    realtimeDataChannelsRef.current = []
+    deepgramConnectionsRef.current.forEach((connection) => connection.close())
+    deepgramConnectionsRef.current = []
 
-    peerConnectionsRef.current.forEach((connection) => connection.close())
-    peerConnectionsRef.current = []
+    recordingStreamCleanupRef.current?.()
+    recordingStreamCleanupRef.current = null
 
     sourceStreamsRef.current.forEach((stream) => {
       stream.getTracks().forEach((track) => track.stop())
@@ -189,11 +196,7 @@ export function useCallCapture() {
       partialTranscriptLinesRef.current = new Map()
       partialTranscriptTextRef.current = new Map()
       activeTranscriptTurnsRef.current = new Map()
-      realtimeSegmentedItemsRef.current = new Set()
-      realtimeSpeakerLabelsRef.current = new Map()
-      rollingDiarizationChunksRef.current = []
-      rollingDiarizationInFlightRef.current = false
-      rollingDiarizationStartedAtMsRef.current = 0
+      deepgramSpeakerLabelsRef.current = new Map()
       transcriptTurnSequenceRef.current = 0
       recentTranscriptRef.current = []
       chunksRef.current = []
@@ -213,26 +216,20 @@ export function useCallCapture() {
         })
         throwIfCallStartCancelled(config.abortSignal)
 
+        await updateCall(config.callId, {
+          recording_error: null,
+          recording_status: "recording",
+        }).catch(() => undefined)
+
         const recordingStream = createRecordingStream(sources)
-        const diarizationSourceHint = getDiarizationSourceHint(sources, config.audioCaptureMode)
-        const recorder = createRecorder(recordingStream, (chunk) => {
+        recordingStreamCleanupRef.current = recordingStream.cleanup
+        const recorder = createRecorder(recordingStream.stream, (chunk) => {
           if (chunk.size > 0) chunksRef.current.push(chunk)
-          if (enableRollingDiarization && chunk.size > 0) {
-            collectRollingDiarizationChunk({
-              chunk,
-              config,
-              sourceHint: diarizationSourceHint,
-              startedAtMs: new Date(config.startedAt).getTime(),
-              rollingChunksRef: rollingDiarizationChunksRef,
-              rollingInFlightRef: rollingDiarizationInFlightRef,
-              rollingStartedAtRef: rollingDiarizationStartedAtMsRef,
-            })
-          }
         })
         mediaRecorderRef.current = recorder
 
         const persistTranscriptEvent = async (
-          event: RealtimeTranscriptEvent,
+          event: DeepgramTranscriptEvent,
           source: CapturedAudioSource
         ) => {
           const elapsedMs = Math.max(
@@ -242,16 +239,7 @@ export function useCallCapture() {
           const itemKey = event.itemId
             ? `${source.kind}-${event.itemId}`
             : `${source.kind}-${Math.round(elapsedMs / 1000)}`
-          const segmentKey = event.segmentId ? `${source.kind}-${event.segmentId}` : itemKey
-          const transcriptEventKey = event.eventKind === "segment" ? segmentKey : itemKey
-
-          if (event.eventKind === "segment") {
-            realtimeSegmentedItemsRef.current.add(itemKey)
-          } else if (event.eventKind === "completed" && realtimeSegmentedItemsRef.current.has(itemKey)) {
-            partialTranscriptLinesRef.current.delete(itemKey)
-            partialTranscriptTextRef.current.delete(itemKey)
-            return
-          }
+          const transcriptEventKey = event.segmentId ? `${source.kind}-${event.segmentId}` : itemKey
 
           if (!event.isFinal) {
             const previousText = partialTranscriptTextRef.current.get(itemKey) ?? ""
@@ -265,7 +253,7 @@ export function useCallCapture() {
             const existingLine = partialTranscriptLinesRef.current.get(itemKey)
             const initialAttribution = activeTurn?.attribution ?? getSourceAttribution(source)
             const shouldContinuePartialTurn = Boolean(
-              activeTurn && canContinueTurn(activeTurn, initialAttribution, elapsedMs, displayText)
+              activeTurn && canContinueTurn(activeTurn, initialAttribution, elapsedMs, displayText, source.kind)
             )
             const clientId = existingLine?.clientId ?? (activeTurn && shouldContinuePartialTurn
               ? activeTurn.clientId
@@ -331,50 +319,83 @@ export function useCallCapture() {
 
           const eventStartMs = event.startMs ?? elapsedMs
           const eventEndMs = event.endMs ?? elapsedMs
-          const segmentAttribution = getRealtimeSegmentAttribution({
+          const activeTurn = activeTranscriptTurnsRef.current.get(source.kind)
+          const segmentAttribution = getDeepgramSegmentAttribution({
             rawSpeaker: event.speaker,
             source,
-            speakerLabels: realtimeSpeakerLabelsRef.current,
+            speakerLabels: deepgramSpeakerLabelsRef.current,
           })
           const initialAttribution = segmentAttribution ?? getSourceAttribution(source)
-          const attribution = segmentAttribution ?? await resolveTurnAttribution({
+          const modelAttribution = segmentAttribution ?? await resolveTurnAttribution({
+            activeTurn,
             config,
             elapsedMs,
+            eventEndMs,
+            eventStartMs,
             initialAttribution,
             recentTranscript: recentTranscriptRef.current,
             segmentText: finalText,
             source,
           })
-          const activeTurn = activeTranscriptTurnsRef.current.get(source.kind)
+          const attribution = inferOneChannelTurnAttribution({
+            activeTurn,
+            attribution: modelAttribution,
+            elapsedMs: eventEndMs,
+            finalText,
+            source,
+          })
           const shouldContinueTurn = activeTurn
-            ? canContinueTurn(activeTurn, attribution, eventEndMs, finalText)
+            ? canContinueTurn(activeTurn, attribution, eventEndMs, finalText, source.kind)
             : false
           const matchingPartialLine =
             partialTranscriptLinesRef.current.get(itemKey) ??
             partialTranscriptLinesRef.current.get(transcriptEventKey)
+          const preferredClientId =
+            !shouldContinueTurn && activeTurn && matchingPartialLine?.clientId === activeTurn.clientId
+              ? itemKey
+              : matchingPartialLine?.clientId ?? itemKey
+          const finalQualityFlags = [
+            ...turnDecision.qualityFlags,
+            ...getTurnAssemblyQualityFlags({
+              activeTurn,
+              attribution,
+              finalText,
+              shouldContinueTurn,
+              source,
+            }),
+          ]
           const turn = shouldContinueTurn && activeTurn
             ? await updateTranscriptTurn({
                 attribution,
                 config,
                 elapsedMs: eventEndMs,
+                endOfTurnConfidence: event.endOfTurnConfidence,
                 finalText,
-                openaiItemId: event.itemId,
-                openaiSegmentId: event.segmentId,
-                qualityFlags: turnDecision.qualityFlags,
+                languageDetected: event.languageDetected,
+                providerEventId: event.providerEventId,
+                providerSessionId: event.providerSessionId,
+                providerTurnIndex: event.providerTurnIndex,
+                qualityFlags: finalQualityFlags,
                 turn: activeTurn,
+                wordConfidence: event.wordConfidence,
               })
             : await createTranscriptTurn({
                 attribution,
                 config,
+                diarizationSpeaker: event.diarizationSpeaker,
                 elapsedMs: eventEndMs,
+                endOfTurnConfidence: event.endOfTurnConfidence,
                 finalText,
-                openaiItemId: event.itemId,
-                openaiSegmentId: event.segmentId,
-                preferredClientId: matchingPartialLine?.clientId ?? itemKey,
-                qualityFlags: turnDecision.qualityFlags,
+                languageDetected: event.languageDetected,
+                preferredClientId,
+                providerEventId: event.providerEventId,
+                providerSessionId: event.providerSessionId,
+                providerTurnIndex: event.providerTurnIndex,
+                qualityFlags: finalQualityFlags,
                 source,
                 startMs: eventStartMs,
                 turnSequenceRef: transcriptTurnSequenceRef,
+                wordConfidence: event.wordConfidence,
               })
 
           activeTranscriptTurnsRef.current.set(source.kind, turn)
@@ -410,21 +431,12 @@ export function useCallCapture() {
           }
         }
 
-        const connections: RTCPeerConnection[] = []
+        const connections: DeepgramTranscriptionConnection[] = []
         for (const source of sources) {
           throwIfCallStartCancelled(config.abortSignal)
           try {
-            const connection = await connectRealtimeTranscription({
+            const connection = await connectDeepgramLiveTranscription({
               callId: config.callId,
-              onCommitTimer: (timer) => {
-                realtimeCommitTimersRef.current.push(timer)
-              },
-              onCommitCleanup: (cleanupTurnCommitter) => {
-                realtimeCommitCleanupsRef.current.push(cleanupTurnCommitter)
-              },
-              onDataChannel: (dataChannel) => {
-                realtimeDataChannelsRef.current.push(dataChannel)
-              },
               onTranscriptError: (caughtError) => {
                 if (isRecoverableTranscriptDuplicateError(caughtError)) return
 
@@ -436,14 +448,15 @@ export function useCallCapture() {
               stream: source.stream,
             })
             connections.push(connection)
-            peerConnectionsRef.current = connections
+            deepgramConnectionsRef.current = connections
             throwIfCallStartCancelled(config.abortSignal)
           } catch (caughtError: unknown) {
-            if (connections.length === 0 && sources.length === 1) throw caughtError
-            setError(
+            connections.forEach((connection) => connection.close())
+            deepgramConnectionsRef.current = []
+            throw new Error(
               `${getAudioSourceLabel(source.kind)} transcription needs another connection attempt. ${getUserFacingErrorMessage(
                 caughtError,
-                "SalesFrame is continuing with the audio it can hear."
+                "SalesFrame needs live transcription before this call can start."
               )}`
             )
           }
@@ -453,7 +466,7 @@ export function useCallCapture() {
           throw new Error("SalesFrame needs another transcription connection attempt before it can capture this call.")
         }
 
-        peerConnectionsRef.current = connections
+        deepgramConnectionsRef.current = connections
 
         throwIfCallStartCancelled(config.abortSignal)
         recorder.start(1000)
@@ -513,22 +526,12 @@ export function useCallCapture() {
 
     try {
       try {
-        flushRealtimeAudioBuffers(realtimeDataChannelsRef.current)
-        await waitForRealtimeFlush()
+        flushDeepgramAudioBuffers(deepgramConnectionsRef.current)
+        await waitForDeepgramFlush()
       } catch (caughtError: unknown) {
         setError(getUserFacingErrorMessage(caughtError, "SalesFrame may need a moment to finish the last transcript lines."))
       }
 
-      if (enableRollingDiarization) {
-        void sendRollingDiarizationChunk({
-          config,
-          force: true,
-          sourceHint: getDiarizationSourceHintFromMode(config.audioCaptureMode),
-          rollingChunksRef: rollingDiarizationChunksRef,
-          rollingInFlightRef: rollingDiarizationInFlightRef,
-          rollingStartedAtRef: rollingDiarizationStartedAtMsRef,
-        })
-      }
       blob = await stopRecorder(mediaRecorderRef.current, chunksRef.current)
     } catch (caughtError: unknown) {
       setError(getUserFacingErrorMessage(caughtError, "The call ended, and the audio recording needs another preparation attempt."))
@@ -559,24 +562,67 @@ export function useCallCapture() {
     let uploadFailed = false
     let recordingStoragePath: string | null = null
     let recordingUrl: string | null = null
+    let recordingError: string | null = null
+    let recordingMimeType: string | null = null
+    let recordingReadyAt: string | null = null
+    let recordingSizeBytes: number | null = null
+    let recordingStatus: RecordingLifecycleStatus = "none"
     if (blob.size > 0) {
       try {
+        recordingStatus = "uploading"
+        await updateCall(config.callId, {
+          recording_error: null,
+          recording_mime_type: getBlobContentType(blob),
+          recording_size_bytes: blob.size,
+          recording_status: "uploading",
+        }).catch(() => undefined)
         const upload = await uploadCallRecording({
           callId: config.callId,
           file: blob,
           workspaceId: config.workspaceId,
         })
         recordingStoragePath = upload.path
+        recordingMimeType = upload.contentType
+        recordingSizeBytes = upload.sizeBytes
+        recordingStatus = "processing"
 
         try {
           recordingUrl = await createCallRecordingSignedUrl(upload.path)
+          recordingReadyAt = new Date().toISOString()
+          recordingStatus = "ready"
+          await updateCall(config.callId, {
+            recording_error: null,
+            recording_ready_at: recordingReadyAt,
+            recording_status: "ready",
+          })
         } catch (caughtError: unknown) {
-          setError(getUserFacingErrorMessage(caughtError, "Recording was saved, but the replay link needs to be refreshed."))
+          recordingError = getUserFacingErrorMessage(caughtError, "Recording was saved, but the replay link needs to be refreshed.")
+          await updateCall(config.callId, {
+            recording_error: recordingError,
+            recording_status: "processing",
+          }).catch(() => undefined)
+          setError(recordingError)
         }
       } catch (caughtError: unknown) {
         uploadFailed = true
-        setError(getUserFacingErrorMessage(caughtError, "Transcript is saved. The audio recording needs another upload attempt."))
+        recordingStatus = "failed"
+        recordingError = getUserFacingErrorMessage(caughtError, "Transcript is saved. The audio recording needs another upload attempt.")
+        await updateCall(config.callId, {
+          recording_error: recordingError,
+          recording_status: "failed",
+        }).catch(() => undefined)
+        setError(recordingError)
       }
+    } else {
+      recordingStatus = "failed"
+      recordingError = "Recording was empty."
+      await updateCall(config.callId, {
+        recording_error: recordingError,
+        recording_mime_type: getBlobContentType(blob),
+        recording_size_bytes: 0,
+        recording_status: "failed",
+      }).catch(() => undefined)
+      setError("Transcript is saved. The audio recording was empty.")
     }
 
     setStatus(uploadFailed ? "upload-failed" : "stopped")
@@ -586,6 +632,11 @@ export function useCallCapture() {
       callId: config.callId,
       durationSeconds,
       endedAt,
+      recordingError,
+      recordingMimeType,
+      recordingReadyAt,
+      recordingSizeBytes,
+      recordingStatus,
       recordingStoragePath,
       recordingUrl,
     }
@@ -655,10 +706,69 @@ export function useCallCapture() {
   }
 }
 
-function createRecordingStream(sources: CapturedAudioSource[]) {
-  return new MediaStream(
-    sources.flatMap((source) => source.stream.getAudioTracks())
-  )
+type RecordingStreamBundle = {
+  cleanup: () => void
+  stream: MediaStream
+}
+
+type WindowWithWebkitAudioContext = Window &
+  typeof globalThis & {
+    webkitAudioContext?: typeof AudioContext
+  }
+
+function createRecordingStream(sources: CapturedAudioSource[]): RecordingStreamBundle {
+  const audioTracks = sources.flatMap((source) => source.stream.getAudioTracks())
+
+  if (audioTracks.length <= 1) {
+    return {
+      cleanup: () => undefined,
+      stream: new MediaStream(audioTracks),
+    }
+  }
+
+  const AudioContextConstructor =
+    typeof window === "undefined"
+      ? undefined
+      : window.AudioContext ?? (window as WindowWithWebkitAudioContext).webkitAudioContext
+
+  if (!AudioContextConstructor) {
+    return {
+      cleanup: () => undefined,
+      stream: new MediaStream(audioTracks),
+    }
+  }
+
+  const audioContext = new AudioContextConstructor()
+  const destination = audioContext.createMediaStreamDestination()
+  const sourceNodes = sources
+    .map((source) => {
+      const sourceAudioTracks = source.stream.getAudioTracks()
+      if (sourceAudioTracks.length === 0) return null
+
+      const stream = new MediaStream(sourceAudioTracks)
+      const sourceNode = audioContext.createMediaStreamSource(stream)
+      const gainNode = audioContext.createGain()
+      gainNode.gain.value = 1
+      sourceNode.connect(gainNode)
+      gainNode.connect(destination)
+
+      return { gainNode, sourceNode }
+    })
+    .filter((node): node is { gainNode: GainNode; sourceNode: MediaStreamAudioSourceNode } => Boolean(node))
+
+  return {
+    cleanup: () => {
+      sourceNodes.forEach(({ gainNode, sourceNode }) => {
+        sourceNode.disconnect()
+        gainNode.disconnect()
+      })
+      destination.stream.getTracks().forEach((track) => track.stop())
+      if (audioContext.state !== "closed") {
+        void audioContext.close()
+      }
+    },
+    stream: destination.stream,
+  }
 }
 
 function createRecorder(stream: MediaStream, onData: (chunk: Blob) => void) {
@@ -677,121 +787,44 @@ function createRecorder(stream: MediaStream, onData: (chunk: Blob) => void) {
 
 function getRecorderOptions() {
   const preferredTypes = [
+    "audio/mp4",
     "audio/webm;codecs=opus",
     "audio/webm",
-    "audio/mp4",
   ]
-  const mimeType = preferredTypes.find((type) => MediaRecorder.isTypeSupported(type))
+  const mimeType = preferredTypes.find((type) => isRecordableAndPlayableMimeType(type))
 
   return mimeType ? { mimeType } : undefined
 }
 
-function collectRollingDiarizationChunk({
-  chunk,
-  config,
-  rollingChunksRef,
-  rollingInFlightRef,
-  rollingStartedAtRef,
-  sourceHint,
-  startedAtMs,
-}: {
-  chunk: Blob
-  config: StartCallCaptureConfig
-  rollingChunksRef: React.MutableRefObject<Blob[]>
-  rollingInFlightRef: React.MutableRefObject<boolean>
-  rollingStartedAtRef: React.MutableRefObject<number>
-  sourceHint: string
-  startedAtMs: number
-}) {
-  const elapsedMs = Math.max(0, Date.now() - startedAtMs)
-  if (rollingChunksRef.current.length === 0) {
-    rollingStartedAtRef.current = elapsedMs
-  }
+function isRecordableAndPlayableMimeType(mimeType: string) {
+  if (!MediaRecorder.isTypeSupported(mimeType)) return false
+  if (typeof document === "undefined") return true
 
-  rollingChunksRef.current.push(chunk)
-
-  if (elapsedMs - rollingStartedAtRef.current < rollingDiarizationWindowMs) return
-
-  void sendRollingDiarizationChunk({
-    config,
-    force: false,
-    rollingChunksRef,
-    rollingInFlightRef,
-    rollingStartedAtRef,
-    sourceHint,
-  })
+  const audio = document.createElement("audio")
+  const baseType = mimeType.split(";")[0]?.trim() ?? mimeType
+  return Boolean(audio.canPlayType(mimeType) || audio.canPlayType(baseType))
 }
 
-async function sendRollingDiarizationChunk({
-  config,
-  force,
-  rollingChunksRef,
-  rollingInFlightRef,
-  rollingStartedAtRef,
-  sourceHint,
-}: {
-  config: StartCallCaptureConfig
-  force: boolean
-  rollingChunksRef: React.MutableRefObject<Blob[]>
-  rollingInFlightRef: React.MutableRefObject<boolean>
-  rollingStartedAtRef: React.MutableRefObject<number>
-  sourceHint: string
-}) {
-  if (rollingInFlightRef.current) return
-  if (rollingChunksRef.current.length === 0) return
-  if (!force && rollingChunksRef.current.length < 8) return
-
-  const chunks = rollingChunksRef.current
-  const chunkStartedAtMs = rollingStartedAtRef.current
-  const type = chunks.find((chunk) => chunk.type)?.type || "audio/webm"
-
-  rollingChunksRef.current = []
-  rollingStartedAtRef.current = 0
-  rollingInFlightRef.current = true
-
-  try {
-    const result = await requestCallDiarization({
-      audio: new Blob(chunks, { type }),
-      callId: config.callId,
-      chunkStartedAtMs,
-      sourceHint,
-    })
-
-    config.onDiarization?.(result)
-  } catch {
-    if (force) {
-      // Live notes should stay focused on the conversation; post-call cleanup can retry without adding system text.
-    }
-  } finally {
-    rollingInFlightRef.current = false
-  }
-}
-
-function getDiarizationSourceHint(sources: CapturedAudioSource[], mode: CallAudioCaptureMode) {
-  if (mode === "in_person_microphone") return "in_person_microphone"
-  if (sources.length > 1) return "separate_seller_and_meeting_audio"
-  if (sources.some((source) => source.kind === "meeting_audio")) return "meeting_audio"
-
-  return getDiarizationSourceHintFromMode(mode)
-}
-
-function getDiarizationSourceHintFromMode(mode: CallAudioCaptureMode) {
-  if (mode === "meeting_audio") return "meeting_audio"
-  if (mode === "in_person_microphone") return "in_person_microphone"
-
-  return "mixed_audio"
+function getBlobContentType(blob: Blob) {
+  return blob.type.split(";")[0]?.trim().toLowerCase() || "audio/webm"
 }
 
 async function resolveTurnAttribution({
+  activeTurn,
   config,
   elapsedMs,
+  eventEndMs,
+  eventStartMs,
   initialAttribution,
   recentTranscript,
   segmentText,
   source,
 }: {
+  activeTurn?: TranscriptTurn
   config: StartCallCaptureConfig
   elapsedMs: number
+  eventEndMs: number
+  eventStartMs: number
   initialAttribution: SpeakerAttribution
   recentTranscript: CallCaptureTranscriptLine[]
   segmentText: string
@@ -803,8 +836,25 @@ async function resolveTurnAttribution({
     const response = await requestSpeakerAttribution({
       callId: config.callId,
       elapsedMs,
+      priorTurn: activeTurn
+        ? {
+            endMs: activeTurn.endMs,
+            sourceKind: activeTurn.sourceKind,
+            speaker: activeTurn.attribution.speakerLabel,
+            startMs: activeTurn.startMs,
+            text: activeTurn.text,
+          }
+        : null,
       recentTranscript,
       segmentText,
+      segmentSignals: {
+        answerLike: isAnswerLikeTranscript(segmentText),
+        followsQuestion: Boolean(activeTurn && isQuestionLikeTranscript(activeTurn.text)),
+        oneChannel: isOneChannelAudioSource(source.kind),
+        questionLike: isQuestionLikeTranscript(segmentText),
+        sourceKind: source.kind,
+      },
+      silenceGapMs: activeTurn ? Math.max(0, eventStartMs - activeTurn.lastActivityMs, eventEndMs - activeTurn.lastActivityMs) : null,
       sourceHint: source.kind,
     })
 
@@ -825,27 +875,37 @@ function shouldRefineBeforeTurn(source: CapturedAudioSource) {
 async function createTranscriptTurn({
   attribution,
   config,
+  diarizationSpeaker,
   elapsedMs,
+  endOfTurnConfidence,
   finalText,
-  openaiItemId,
-  openaiSegmentId,
+  languageDetected,
   preferredClientId,
+  providerEventId,
+  providerSessionId,
+  providerTurnIndex,
   qualityFlags,
   source,
   startMs,
   turnSequenceRef,
+  wordConfidence,
 }: {
   attribution: SpeakerAttribution
   config: StartCallCaptureConfig
+  diarizationSpeaker?: string
   elapsedMs: number
+  endOfTurnConfidence?: number
   finalText: string
-  openaiItemId?: string
-  openaiSegmentId?: string
+  languageDetected?: string
   preferredClientId?: string
+  providerEventId?: string
+  providerSessionId?: string
+  providerTurnIndex?: number
   qualityFlags: string[]
   source: CapturedAudioSource
   startMs?: number
   turnSequenceRef: React.MutableRefObject<number>
+  wordConfidence?: number
 }): Promise<TranscriptTurn> {
   const resolvedStartMs = startMs ?? elapsedMs
   turnSequenceRef.current += 1
@@ -870,12 +930,17 @@ async function createTranscriptTurn({
     speaker_confidence: attribution.confidence,
     speaker_needs_review: attribution.needsReview,
     speaker_source: source.kind,
-    openai_item_id: openaiItemId ?? null,
-    openai_segment_id: openaiSegmentId ?? null,
     audio_source_kind: source.kind,
     client_turn_id: clientTurnId,
+    diarization_speaker: diarizationSpeaker ?? null,
+    end_of_turn_confidence: endOfTurnConfidence ?? null,
+    language_detected: languageDetected ?? null,
+    provider_event_id: providerEventId ?? null,
+    provider_session_id: providerSessionId ?? null,
+    provider_turn_index: providerTurnIndex ?? null,
+    transcription_provider: "deepgram_flux",
     turn_sequence: turnSequence,
-    transcription_delay: sourceTranscriptionDelay[source.kind],
+    word_confidence: wordConfidence ?? null,
     quality_flags: qualityFlags,
   })
   const resolvedClientTurnId = segment.client_turn_id ?? clientTurnId
@@ -884,18 +949,23 @@ async function createTranscriptTurn({
   return {
     attribution,
     clientId: resolvedClientTurnId,
+    diarizationSpeaker: segment.diarization_speaker ?? diarizationSpeaker,
     displayName: speaker.display_name || speaker.label,
     endMs: segment.end_ms ?? elapsedMs,
+    endOfTurnConfidence: segment.end_of_turn_confidence ?? endOfTurnConfidence,
+    languageDetected: segment.language_detected ?? languageDetected,
     lastActivityMs: segment.end_ms ?? elapsedMs,
-    openaiItemId: segment.openai_item_id ?? openaiItemId,
-    openaiSegmentId: segment.openai_segment_id ?? openaiSegmentId,
+    providerEventId: segment.provider_event_id ?? providerEventId,
+    providerSessionId: segment.provider_session_id ?? providerSessionId,
+    providerTurnIndex: segment.provider_turn_index ?? providerTurnIndex,
     qualityFlags,
     segmentId: segment.id,
     sourceKind: (segment.audio_source_kind as AudioSourceKind | null) ?? source.kind,
     speakerId: segment.speaker_id ?? speaker.id,
     startMs: segment.start_ms ?? resolvedStartMs,
     text: segment.text || finalText,
-    transcriptionDelay: segment.transcription_delay ?? sourceTranscriptionDelay[source.kind],
+    transcriptionDelay: segment.transcription_delay ?? undefined,
+    wordConfidence: segment.word_confidence ?? wordConfidence,
     turnSequence: resolvedTurnSequence,
   }
 }
@@ -904,20 +974,28 @@ async function updateTranscriptTurn({
   attribution,
   config,
   elapsedMs,
+  endOfTurnConfidence,
   finalText,
-  openaiItemId,
-  openaiSegmentId,
+  languageDetected,
+  providerEventId,
+  providerSessionId,
+  providerTurnIndex,
   qualityFlags,
   turn,
+  wordConfidence,
 }: {
   attribution: SpeakerAttribution
   config: StartCallCaptureConfig
   elapsedMs: number
+  endOfTurnConfidence?: number
   finalText: string
-  openaiItemId?: string
-  openaiSegmentId?: string
+  languageDetected?: string
+  providerEventId?: string
+  providerSessionId?: string
+  providerTurnIndex?: number
   qualityFlags: string[]
   turn: TranscriptTurn
+  wordConfidence?: number
 }): Promise<TranscriptTurn> {
   const nextText = joinTranscriptText(turn.text, finalText)
   const shouldUpdateSpeaker = attribution.speakerLabel !== turn.attribution.speakerLabel
@@ -940,12 +1018,17 @@ async function updateTranscriptTurn({
     speaker_confidence: attribution.confidence,
     speaker_needs_review: attribution.needsReview,
     speaker_source: turn.sourceKind,
-    openai_item_id: openaiItemId ?? turn.openaiItemId ?? null,
-    openai_segment_id: openaiSegmentId ?? turn.openaiSegmentId ?? null,
     audio_source_kind: turn.sourceKind,
     client_turn_id: turn.clientId,
+    end_of_turn_confidence: endOfTurnConfidence ?? turn.endOfTurnConfidence ?? null,
+    language_detected: languageDetected ?? turn.languageDetected ?? null,
+    provider_event_id: providerEventId ?? turn.providerEventId ?? null,
+    provider_session_id: providerSessionId ?? turn.providerSessionId ?? null,
+    provider_turn_index: providerTurnIndex ?? turn.providerTurnIndex ?? null,
+    transcription_provider: "deepgram_flux",
     turn_sequence: turn.turnSequence,
     transcription_delay: turn.transcriptionDelay,
+    word_confidence: wordConfidence ?? turn.wordConfidence ?? null,
     quality_flags: [...new Set([...turn.qualityFlags, ...qualityFlags])],
   })
 
@@ -954,12 +1037,17 @@ async function updateTranscriptTurn({
     attribution,
     displayName: speaker?.display_name || speaker?.label || turn.displayName,
     endMs: elapsedMs,
+    endOfTurnConfidence: endOfTurnConfidence ?? turn.endOfTurnConfidence,
+    diarizationSpeaker: turn.diarizationSpeaker,
+    languageDetected: languageDetected ?? turn.languageDetected,
     lastActivityMs: elapsedMs,
-    openaiItemId: openaiItemId ?? turn.openaiItemId,
-    openaiSegmentId: openaiSegmentId ?? turn.openaiSegmentId,
+    providerEventId: providerEventId ?? turn.providerEventId,
+    providerSessionId: providerSessionId ?? turn.providerSessionId,
+    providerTurnIndex: providerTurnIndex ?? turn.providerTurnIndex,
     qualityFlags: [...new Set([...turn.qualityFlags, ...qualityFlags])],
     speakerId: nextSpeakerId,
     text: nextText,
+    wordConfidence: wordConfidence ?? turn.wordConfidence,
   }
 }
 
@@ -967,21 +1055,94 @@ function canContinueTurn(
   turn: TranscriptTurn,
   attribution: SpeakerAttribution,
   elapsedMs: number,
-  nextText: string
+  nextText: string,
+  sourceKind: AudioSourceKind
 ) {
   return canContinueTranscriptTurn({
     attributionSpeaker: attribution.speakerLabel,
     elapsedMs,
     nextText,
+    sourceKind,
     turn,
   })
 }
 
+function inferOneChannelTurnAttribution({
+  activeTurn,
+  attribution,
+  elapsedMs,
+  finalText,
+  source,
+}: {
+  activeTurn?: TranscriptTurn
+  attribution: SpeakerAttribution
+  elapsedMs: number
+  finalText: string
+  source: CapturedAudioSource
+}): SpeakerAttribution {
+  if (!activeTurn || !isOneChannelAudioSource(source.kind)) return attribution
+
+  const pauseMs = Math.max(0, elapsedMs - activeTurn.lastActivityMs)
+  const shouldInferCustomer = shouldInferOneChannelCustomerTurn({
+    nextText: finalText,
+    pauseMs,
+    sourceKind: source.kind,
+    turn: activeTurn,
+  })
+
+  if (!shouldInferCustomer) return attribution
+
+  return {
+    ...attribution,
+    confidence: Math.max(attribution.confidence, 0.74),
+    needsReview: true,
+    reason:
+      `One-channel speaker split inferred from a seller question followed by an answer after ${Math.round(pauseMs)}ms of pause. Review if the room audio was ambiguous.`,
+    speakerLabel: "Customer",
+    source: "one_channel_turn_context",
+  }
+}
+
+function getTurnAssemblyQualityFlags({
+  activeTurn,
+  attribution,
+  finalText,
+  shouldContinueTurn,
+  source,
+}: {
+  activeTurn?: TranscriptTurn
+  attribution: SpeakerAttribution
+  finalText: string
+  shouldContinueTurn: boolean
+  source: CapturedAudioSource
+}) {
+  const flags: string[] = []
+  if (!isOneChannelAudioSource(source.kind)) return flags
+
+  flags.push("one_channel_mixed_audio")
+  if (source.level > 0 && source.level < 0.018) flags.push("one_channel_low_preflight_level")
+  if (attribution.source === "one_channel_turn_context") flags.push("one_channel_contextual_speaker_split")
+  if (activeTurn && !shouldContinueTurn) flags.push("one_channel_new_turn_boundary")
+  if (activeTurn && shouldContinueTurn) flags.push("one_channel_merged_same_speaker")
+  if (activeTurn && isQuestionLikeTranscript(activeTurn.text) && isAnswerLikeTranscript(finalText)) {
+    flags.push("one_channel_question_answer_pattern")
+  }
+
+  return flags
+}
+
 function createTranscriptLineFromTurn(turn: TranscriptTurn): CallCaptureTranscriptLine {
   return {
+    audioSourceKind: turn.sourceKind,
     clientId: turn.clientId,
+    diarizationSpeaker: turn.diarizationSpeaker,
+    endOfTurnConfidence: turn.endOfTurnConfidence,
     id: turn.segmentId,
     isPartial: false,
+    languageDetected: turn.languageDetected,
+    providerEventId: turn.providerEventId,
+    providerSessionId: turn.providerSessionId,
+    providerTurnIndex: turn.providerTurnIndex,
     speaker: turn.attribution.speakerLabel,
     speakerAttributionReason: turn.attribution.reason,
     speakerConfidence: turn.attribution.confidence,
@@ -992,6 +1153,7 @@ function createTranscriptLineFromTurn(turn: TranscriptTurn): CallCaptureTranscri
     speakerSource: turn.attribution.source,
     time: formatElapsedTime(turn.startMs),
     text: turn.text,
+    wordConfidence: turn.wordConfidence,
   }
 }
 
@@ -1096,7 +1258,7 @@ function getSourceAttribution(source: CapturedAudioSource): SpeakerAttribution {
   }
 }
 
-function getRealtimeSegmentAttribution({
+function getDeepgramSegmentAttribution({
   rawSpeaker,
   source,
   speakerLabels,
@@ -1107,7 +1269,7 @@ function getRealtimeSegmentAttribution({
 }): SpeakerAttribution | null {
   if (!rawSpeaker?.trim()) return null
 
-  const speakerLabel = getRealtimeSegmentSpeakerLabel({
+  const speakerLabel = getDeepgramSegmentSpeakerLabel({
     rawSpeaker,
     source,
     speakerLabels,
@@ -1118,16 +1280,16 @@ function getRealtimeSegmentAttribution({
     needsReview: source.kind === "mixed_audio" || source.kind === "in_person_microphone",
     reason:
       source.kind === "seller_mic"
-        ? "OpenAI realtime segment matched the dedicated seller microphone stream."
+        ? "Deepgram speaker metadata matched the dedicated seller microphone stream."
         : source.kind === "meeting_audio"
-          ? "OpenAI realtime segment labelled this customer-side speaker from meeting audio."
-          : "OpenAI realtime segment labelled this speaker from mixed room audio; review if needed.",
+          ? "Deepgram speaker metadata labelled this customer-side speaker from meeting audio."
+          : "Deepgram speaker metadata labelled this speaker from mixed room audio; review if needed.",
     speakerLabel,
-    source: "openai_realtime_segment",
+    source: "deepgram_flux_diarization",
   }
 }
 
-function getRealtimeSegmentSpeakerLabel({
+function getDeepgramSegmentSpeakerLabel({
   rawSpeaker,
   source,
   speakerLabels,
@@ -1172,7 +1334,7 @@ function normalizeAttribution(value: unknown, source: CapturedAudioSource): Spea
         ? record.reason.trim()
         : "Speaker refined from source stream and recent conversation context.",
     speakerLabel,
-    source: typeof record.source === "string" && record.source.trim() ? record.source.trim() : "model_realtime",
+    source: typeof record.source === "string" && record.source.trim() ? record.source.trim() : "model_live_role",
   }
 }
 
@@ -1254,6 +1416,11 @@ function stopRecorder(recorder: MediaRecorder | null, chunks: Blob[]) {
       },
       { once: true }
     )
+    try {
+      recorder.requestData()
+    } catch {
+      // Some browsers throw if no data is pending. Stopping still flushes what is available.
+    }
     recorder.stop()
   })
 }
@@ -1280,7 +1447,11 @@ function isRecoverableTranscriptDuplicateError(error: unknown) {
   return (
     error instanceof Error &&
     error.message.includes("duplicate key value violates unique constraint") &&
-    error.message.includes("transcript_segments_call_source_openai_segment_unique_idx")
+    (
+      error.message.includes("transcript_segments_call_source_openai_segment_unique_idx") ||
+      error.message.includes("transcript_segments_call_provider_turn_unique_idx") ||
+      error.message.includes("transcript_segments_call_provider_event_unique_idx")
+    )
   )
 }
 

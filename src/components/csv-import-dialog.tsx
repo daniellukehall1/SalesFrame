@@ -831,7 +831,7 @@ function getEnrichmentDetailMessage(summary: CsvImportSummary) {
   }
 
   if (summary.enrichment.status === "unavailable") {
-    return "The import succeeded. SalesFrame could not update the enrichment queue yet, so check Data import again in a moment."
+    return "The import succeeded. SalesFrame needs another moment to update the enrichment queue, so check Data import again shortly."
   }
 
   return "No new accounts needed enrichment from this import."

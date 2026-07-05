@@ -11,6 +11,7 @@ SalesFrame uses browser-safe Supabase variables in the Vite app and server-only 
 | `VITE_LOGO_DEV_PUBLISHABLE_KEY` | Browser + Functions | Logo.dev publishable key | Safe to expose. Set for both Builds and Functions so account enrichment can save logo metadata and the browser can render it. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Functions only | Supabase project API settings | Secret. Never add a `VITE_` prefix. |
 | `OPENAI_KEY_ENCRYPTION_SECRET` | Functions only | Generated app secret | Secret used to encrypt each seller's OpenAI key before storing it. |
+| `DEEPGRAM_API_KEY` | Functions only | Deepgram project settings | Secret. Used only by Netlify Functions to mint short-lived Flux tokens. |
 
 Before running the CLI commands below, link this repo to a Netlify project:
 
@@ -48,19 +49,26 @@ Generate the OpenAI key encryption secret once and keep it stable:
 ```bash
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
 netlify env:set OPENAI_KEY_ENCRYPTION_SECRET "<generated-secret>" --secret
+netlify env:set DEEPGRAM_API_KEY "<deepgram-api-key>" --secret
 ```
 
 Changing `OPENAI_KEY_ENCRYPTION_SECRET` after users save keys will make existing encrypted OpenAI keys unreadable. If it ever must rotate, build a key-rotation flow first.
+
+Rotate any Deepgram key that has appeared outside Netlify before production. The browser never receives the raw key; it receives only a short-lived token from `/api/deepgram/token`.
 
 ## Optional Function Defaults
 
 ```bash
 netlify env:set OPENAI_TEXT_MODEL "gpt-5.4-mini"
 netlify env:set OPENAI_LIVE_STATE_MODEL "gpt-5.4-nano"
+netlify env:set OPENAI_LIVE_QUESTION_MODEL "gpt-5.4-mini"
 netlify env:set OPENAI_LIVE_COACH_MODEL "gpt-5.4-mini"
 netlify env:set OPENAI_ACCOUNT_ENRICHMENT_MODEL "gpt-5.4-mini"
-netlify env:set OPENAI_REALTIME_TRANSCRIPTION_MODEL "gpt-realtime-whisper"
 netlify env:set OPENAI_RESEARCH_WEB_SEARCH "true"
+netlify env:set DEEPGRAM_FLUX_MODEL "flux-general-en"
+netlify env:set DEEPGRAM_FLUX_EAGER_EOT_THRESHOLD "0.4"
+netlify env:set DEEPGRAM_FLUX_EOT_THRESHOLD "0.75"
+netlify env:set DEEPGRAM_FLUX_EOT_TIMEOUT_MS "5000"
 ```
 
 ## Local Development
@@ -73,9 +81,10 @@ VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_miosbt6oQM8gT-IPp32u3Q_2_9yEzaP
 VITE_LOGO_DEV_PUBLISHABLE_KEY=<logo-dev-publishable-key>
 SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-key>
 OPENAI_KEY_ENCRYPTION_SECRET=<generated-secret>
+DEEPGRAM_API_KEY=<deepgram-api-key>
 ```
 
-Use Netlify Dev when testing function-backed actions like Save Key, customer research, realtime transcription session creation, and post-call outputs.
+Use Netlify Dev when testing function-backed actions like Save Key, customer research, Deepgram token creation, and post-call outputs.
 
 ```bash
 netlify dev

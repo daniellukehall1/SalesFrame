@@ -21,6 +21,10 @@ export const callAudioCaptureModes = ["microphone", "in_person_microphone", "mee
 
 export type CallAudioCaptureMode = (typeof callAudioCaptureModes)[number]
 
+export const recordingLifecycleStatuses = ["none", "recording", "uploading", "processing", "ready", "failed"] as const
+
+export type RecordingLifecycleStatus = (typeof recordingLifecycleStatuses)[number]
+
 export const currencyOptions = [
   "AUD",
   "USD",
@@ -124,6 +128,11 @@ export type CallSummary = {
   date: string
   duration: string
   durationSeconds: number
+  recordingError: string | null
+  recordingMimeType: string | null
+  recordingReadyAt: string | null
+  recordingSizeBytes: number | null
+  recordingStatus: RecordingLifecycleStatus
   recordingStoragePath: string | null
   recordingUrl: string | null
   startedAt: string | null
@@ -271,9 +280,16 @@ export type Opportunity = {
   }[]
   notes: string[]
   transcript: {
+    audioSourceKind?: string
     clientId?: string
+    diarizationSpeaker?: string
+    endOfTurnConfidence?: number
     id?: string
     isPartial?: boolean
+    languageDetected?: string
+    providerEventId?: string
+    providerSessionId?: string
+    providerTurnIndex?: number
     speaker: TranscriptSpeaker
     speakerAttributionReason?: string
     speakerConfidence?: number
@@ -284,6 +300,7 @@ export type Opportunity = {
     speakerSource?: string
     time: string
     text: string
+    wordConfidence?: number
   }[]
 }
 

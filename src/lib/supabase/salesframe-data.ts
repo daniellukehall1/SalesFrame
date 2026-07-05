@@ -728,6 +728,40 @@ async function findExistingTranscriptSegment(
   supabase: SalesFrameClient
 ) {
   const sourceKind = values.audio_source_kind ?? values.speaker_source ?? null
+  const transcriptionProvider = values.transcription_provider ?? null
+
+  if (sourceKind && transcriptionProvider && values.provider_session_id && typeof values.provider_turn_index === "number") {
+    const existingSegment = await selectFirstTranscriptSegment(
+      supabase
+      .from("transcript_segments")
+      .select("*")
+      .eq("call_id", values.call_id)
+      .eq("audio_source_kind", sourceKind)
+      .eq("transcription_provider", transcriptionProvider)
+      .eq("provider_session_id", values.provider_session_id)
+      .eq("provider_turn_index", values.provider_turn_index)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+    )
+
+    if (existingSegment) return existingSegment
+  }
+
+  if (sourceKind && transcriptionProvider && values.provider_event_id) {
+    const existingSegment = await selectFirstTranscriptSegment(
+      supabase
+      .from("transcript_segments")
+      .select("*")
+      .eq("call_id", values.call_id)
+      .eq("audio_source_kind", sourceKind)
+      .eq("transcription_provider", transcriptionProvider)
+      .eq("provider_event_id", values.provider_event_id)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+    )
+
+    if (existingSegment) return existingSegment
+  }
 
   if (sourceKind && values.openai_segment_id) {
     const existingSegment = await selectFirstTranscriptSegment(
@@ -860,7 +894,14 @@ function wait(delayMs: number) {
 }
 
 function hasTranscriptIdentityValues(values: TablesUpdate<"transcript_segments">) {
-  return Boolean(values.openai_item_id || values.openai_segment_id || values.client_turn_id)
+  return Boolean(
+    values.openai_item_id ||
+      values.openai_segment_id ||
+      values.client_turn_id ||
+      values.provider_event_id ||
+      values.provider_session_id ||
+      typeof values.provider_turn_index === "number"
+  )
 }
 
 function omitTranscriptIdentityValues(values: TablesUpdate<"transcript_segments">) {
@@ -868,6 +909,10 @@ function omitTranscriptIdentityValues(values: TablesUpdate<"transcript_segments"
     client_turn_id: _clientTurnId,
     openai_item_id: _openaiItemId,
     openai_segment_id: _openaiSegmentId,
+    provider_event_id: _providerEventId,
+    provider_session_id: _providerSessionId,
+    provider_turn_index: _providerTurnIndex,
+    transcription_provider: _transcriptionProvider,
     ...safeValues
   } = values
 
@@ -993,6 +1038,18 @@ export async function uploadCallRecording({
   const contentType = getRecordingContentType(file)
   const fileName = getRecordingFileName(file)
   const path = createCallStoragePath({ callId, fileName, workspaceId })
+  const sizeBytes = file.size
+
+  if (sizeBytes <= 0) {
+    await updateCall(callId, {
+      recording_error: "Recording was empty.",
+      recording_mime_type: contentType,
+      recording_size_bytes: 0,
+      recording_status: "failed",
+    }, supabase).catch(() => undefined)
+    throw new Error("Recording was empty.")
+  }
+
   const uploadResponse = await supabase.storage
     .from("call-recordings")
     .upload(path, file, {
@@ -1003,7 +1060,17 @@ export async function uploadCallRecording({
 
   if (uploadResponse.error) throw new Error(uploadResponse.error.message)
 
-  await updateCall(callId, { recording_storage_path: path }, supabase)
+  await updateCall(callId, {
+    recording_error: null,
+    recording_mime_type: contentType,
+    recording_size_bytes: sizeBytes,
+    recording_status: "processing",
+    recording_storage_path: path,
+  }, supabase)
 
-  return uploadResponse.data
+  return {
+    ...uploadResponse.data,
+    contentType,
+    sizeBytes,
+  }
 }

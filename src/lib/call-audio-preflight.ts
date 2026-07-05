@@ -316,13 +316,14 @@ function getMicrophoneAudioConstraints({
 }): MediaTrackConstraints {
   const isDedicatedSellerMic = hasMeetingAudio
   const shouldUseEchoCancellation = isDedicatedSellerMic || mode === "microphone"
+  const isOneChannelRoomMic = mode === "in_person_microphone" && !hasMeetingAudio
 
   return getSupportedAudioConstraints({
-    autoGainControl: false,
+    autoGainControl: isOneChannelRoomMic,
     channelCount: 1,
     echoCancellation: shouldUseEchoCancellation,
     latency: mode === "in_person_microphone" ? 0.08 : 0.06,
-    noiseSuppression: true,
+    noiseSuppression: !isOneChannelRoomMic,
     sampleRate: 48000,
     sampleSize: 16,
   })

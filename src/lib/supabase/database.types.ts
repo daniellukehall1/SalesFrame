@@ -356,6 +356,11 @@ export type Database = {
           started_at: string | null
           ended_at: string | null
           duration_seconds: number | null
+          recording_error: string | null
+          recording_mime_type: string | null
+          recording_ready_at: string | null
+          recording_size_bytes: number | null
+          recording_status: string
           recording_storage_path: string | null
           recording_url: string | null
           audio_preflight: Json
@@ -377,6 +382,11 @@ export type Database = {
           started_at?: string | null
           ended_at?: string | null
           duration_seconds?: number | null
+          recording_error?: string | null
+          recording_mime_type?: string | null
+          recording_ready_at?: string | null
+          recording_size_bytes?: number | null
+          recording_status?: string
           recording_storage_path?: string | null
           recording_url?: string | null
           audio_preflight?: Json
@@ -398,6 +408,11 @@ export type Database = {
           started_at?: string | null
           ended_at?: string | null
           duration_seconds?: number | null
+          recording_error?: string | null
+          recording_mime_type?: string | null
+          recording_ready_at?: string | null
+          recording_size_bytes?: number | null
+          recording_status?: string
           recording_storage_path?: string | null
           recording_url?: string | null
           audio_preflight?: Json
@@ -466,6 +481,14 @@ export type Database = {
           openai_segment_id: string | null
           audio_source_kind: string | null
           client_turn_id: string | null
+          transcription_provider: string | null
+          provider_session_id: string | null
+          provider_turn_index: number | null
+          provider_event_id: string | null
+          end_of_turn_confidence: number | null
+          word_confidence: number | null
+          language_detected: string | null
+          diarization_speaker: string | null
           turn_sequence: number | null
           transcription_delay: string | null
           quality_flags: Json
@@ -489,6 +512,14 @@ export type Database = {
           openai_segment_id?: string | null
           audio_source_kind?: string | null
           client_turn_id?: string | null
+          transcription_provider?: string | null
+          provider_session_id?: string | null
+          provider_turn_index?: number | null
+          provider_event_id?: string | null
+          end_of_turn_confidence?: number | null
+          word_confidence?: number | null
+          language_detected?: string | null
+          diarization_speaker?: string | null
           turn_sequence?: number | null
           transcription_delay?: string | null
           quality_flags?: Json
@@ -512,6 +543,14 @@ export type Database = {
           openai_segment_id?: string | null
           audio_source_kind?: string | null
           client_turn_id?: string | null
+          transcription_provider?: string | null
+          provider_session_id?: string | null
+          provider_turn_index?: number | null
+          provider_event_id?: string | null
+          end_of_turn_confidence?: number | null
+          word_confidence?: number | null
+          language_detected?: string | null
+          diarization_speaker?: string | null
           turn_sequence?: number | null
           transcription_delay?: string | null
           quality_flags?: Json

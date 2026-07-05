@@ -20,6 +20,8 @@ export type TurnAssemblerDecision = {
 }
 
 export const speakerTurnPauseWindowMs = 5200
+export const oneChannelSpeakerTurnPauseWindowMs = 2200
+export const oneChannelQuestionAnswerBoundaryMs = 900
 export const maxMergedTurnCharacters = 900
 export const duplicateTranscriptWindowMs = 9000
 export const exactDuplicateTranscriptWindowMs = 90000
@@ -51,7 +53,7 @@ export function shouldSuppressFinalTranscript({
     normalizedText,
     qualityFlags: [
       ...qualityFlags,
-      ...(duplicate ? ["duplicate_realtime_event"] : []),
+      ...(duplicate ? ["duplicate_provider_turn"] : []),
     ],
   }
 }
@@ -60,18 +62,91 @@ export function canContinueTranscriptTurn({
   attributionSpeaker,
   elapsedMs,
   nextText,
+  sourceKind,
   turn,
 }: {
   attributionSpeaker: string
   elapsedMs: number
   nextText: string
+  sourceKind?: string
   turn: TranscriptTurnLike
 }) {
+  const pauseMs = Math.max(0, elapsedMs - turn.lastActivityMs)
+
   if (turn.attribution.speakerLabel !== attributionSpeaker) return false
-  if (elapsedMs - turn.lastActivityMs > speakerTurnPauseWindowMs) return false
+  if (isOneChannelAudioSource(sourceKind)) {
+    if (shouldSplitOneChannelQuestionAnswerTurn({ nextText, pauseMs, turn })) return false
+    if (pauseMs > oneChannelSpeakerTurnPauseWindowMs) return false
+  } else if (pauseMs > speakerTurnPauseWindowMs) {
+    return false
+  }
   if (turn.text.length + nextText.length > maxMergedTurnCharacters) return false
 
   return true
+}
+
+export function shouldInferOneChannelCustomerTurn({
+  nextText,
+  pauseMs,
+  sourceKind,
+  turn,
+}: {
+  nextText: string
+  pauseMs: number
+  sourceKind?: string
+  turn: TranscriptTurnLike | null | undefined
+}) {
+  if (!turn || !isOneChannelAudioSource(sourceKind)) return false
+  if (pauseMs < oneChannelQuestionAnswerBoundaryMs) return false
+  if (!isQuestionLikeTranscript(turn.text)) return false
+  if (!isAnswerLikeTranscript(nextText)) return false
+
+  return turn.attribution.speakerLabel === "Seller" || turn.attribution.speakerLabel === "Unknown"
+}
+
+export function shouldSplitOneChannelQuestionAnswerTurn({
+  nextText,
+  pauseMs,
+  turn,
+}: {
+  nextText: string
+  pauseMs: number
+  turn: TranscriptTurnLike
+}) {
+  return shouldInferOneChannelCustomerTurn({
+    nextText,
+    pauseMs,
+    sourceKind: "in_person_microphone",
+    turn,
+  })
+}
+
+export function isOneChannelAudioSource(sourceKind?: string) {
+  return sourceKind === "mixed_audio" || sourceKind === "in_person_microphone"
+}
+
+export function isQuestionLikeTranscript(value: string) {
+  const text = value.trim()
+  if (!text) return false
+  if (/[?？]\s*$/.test(text)) return true
+
+  return /^(what|why|how|when|where|who|which|can|could|would|do|does|did|is|are|was|were|have|has|had|tell me|walk me|help me understand)\b/i.test(text)
+}
+
+export function isAnswerLikeTranscript(value: string) {
+  const text = value.trim()
+  if (!text || isQuestionLikeTranscript(text)) return false
+
+  const normalized = normalizeTranscriptForComparison(text)
+  if (!normalized) return false
+  if (/^(yes|yeah|yep|yup|no|nah|not really|correct|exactly|probably|maybe|sure|right|currently|because)\b/.test(normalized)) {
+    return true
+  }
+  if (/^(we|we re|we are|we ve|we have|we use|our|i|i m|i am|i ve|i have|it|it s|it is|that|that s|the|this)\b/.test(normalized)) {
+    return true
+  }
+
+  return normalized.split(/\s+/).length >= 3
 }
 
 export function rememberFinalTranscriptEvent({

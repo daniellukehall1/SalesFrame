@@ -20,6 +20,25 @@ export type LiveGuidanceFunctionResponse = {
   guidance: unknown
 }
 
+export type LiveQuestionFunctionResponse = {
+  guidance: unknown
+}
+
+export type DeepgramTranscriptionTokenResponse = {
+  accessToken: string
+  config: {
+    diarizeModel: string
+    eagerEotThreshold: number
+    encoding: string
+    eotThreshold: number
+    eotTimeoutMs: number
+    model: string
+    sampleRate: number
+  }
+  expiresIn: number
+  websocketUrl: string
+}
+
 export type SpeakerAttributionResponse = {
   attribution: {
     confidence: number
@@ -28,17 +47,6 @@ export type SpeakerAttributionResponse = {
     speakerLabel: string
     source: string
   }
-}
-
-export type CallDiarizationResponse = {
-  chunkStartedAtMs: number
-  segments: {
-    endMs: number
-    speaker: string
-    startMs: number
-    text: string
-  }[]
-  sourceHint: string
 }
 
 export type SellerDomainResearchResponse = {
@@ -300,39 +308,6 @@ function createClientRequestId() {
   return `sf_${Date.now().toString(36)}_${randomPart}`
 }
 
-async function callMultipartFunction<T>(path: string, formData: FormData): Promise<T> {
-  const supabase = createClient()
-  const {
-    data: { session },
-    error,
-  } = await supabase.auth.getSession()
-
-  if (error) throw new Error(error.message)
-  if (!session?.access_token) throw new Error("Sign in before using this feature.")
-
-  const response = await fetch(path, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: formData,
-  })
-  const payload = await readFunctionPayload<T>(response)
-
-  if (!response.ok) {
-    throw new SalesFrameFunctionError(getFunctionErrorMessage(payload), {
-      ...getFunctionErrorDetails(payload),
-      status: response.status,
-    })
-  }
-
-  if (payload && typeof payload === "object" && "data" in payload) {
-    return payload.data as T
-  }
-
-  return payload as T
-}
-
 export function getOpenAiKeyStatus(workspaceId: string) {
   return callFunction<OpenAiKeyStatus>(`/api/openai/key?workspaceId=${encodeURIComponent(workspaceId)}`)
 }
@@ -350,13 +325,14 @@ export function deleteOpenAiKey(workspaceId: string) {
   })
 }
 
-export function createRealtimeTranscriptionSession(
+export function createDeepgramTranscriptionToken(
   callId: string,
-  options: { sourceKind?: string; transcriptionDelay?: string } = {}
+  options: { sourceKind?: string } = {}
 ) {
-  return callFunction<unknown>("/api/openai/realtime-transcription", {
+  return callFunction<DeepgramTranscriptionTokenResponse>("/api/deepgram/token", {
     method: "POST",
     body: { callId, ...options },
+    timeoutMs: 8000,
   })
 }
 
@@ -404,10 +380,27 @@ export function requestLiveGuidance(
   })
 }
 
-export function requestLiveState(body: Record<string, unknown>) {
+export function requestLiveQuestion(
+  body: Record<string, unknown>,
+  options: Pick<FunctionRequestOptions, "signal" | "timeoutMs"> = {}
+) {
+  return callFunction<LiveQuestionFunctionResponse>("/api/openai/live-question", {
+    method: "POST",
+    body,
+    signal: options.signal,
+    timeoutMs: options.timeoutMs ?? 12000,
+  })
+}
+
+export function requestLiveState(
+  body: Record<string, unknown>,
+  options: Pick<FunctionRequestOptions, "signal" | "timeoutMs"> = {}
+) {
   return callFunction<unknown>("/api/openai/live-state", {
     method: "POST",
     body,
+    signal: options.signal,
+    timeoutMs: options.timeoutMs ?? 6000,
   })
 }
 
@@ -416,26 +409,6 @@ export function requestSpeakerAttribution(body: Record<string, unknown>) {
     method: "POST",
     body,
   })
-}
-
-export function requestCallDiarization({
-  audio,
-  callId,
-  chunkStartedAtMs,
-  sourceHint,
-}: {
-  audio: Blob
-  callId: string
-  chunkStartedAtMs: number
-  sourceHint: string
-}) {
-  const formData = new FormData()
-  formData.set("callId", callId)
-  formData.set("chunkStartedAtMs", String(Math.max(0, Math.round(chunkStartedAtMs))))
-  formData.set("sourceHint", sourceHint)
-  formData.set("audio", audio, `salesframe-${callId}-${Date.now()}.webm`)
-
-  return callMultipartFunction<CallDiarizationResponse>("/api/openai/call-diarization", formData)
 }
 
 export function requestAccountCsvImport(body: CsvImportRequestPayload) {

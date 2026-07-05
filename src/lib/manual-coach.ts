@@ -34,6 +34,6 @@ export function getDisplayedLiveCoachQuestion({
   return manualCoach.activeQuestion ?? liveQuestion
 }
 
-function createManualQuestionId(source: string, target: string, question: string) {
+export function createManualQuestionId(source: string, target: string, question: string) {
   return `${source}-${normalizeComparableText(`${target}-${question}`).slice(0, 72)}`
 }

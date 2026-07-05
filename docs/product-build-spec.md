@@ -105,7 +105,7 @@ When Start Call is confirmed:
 
 ## Live Call Capture And Guidance Pipeline
 
-Realtime transcription must feel like a clean human conversation, not raw subtitle fragments.
+Live transcription must feel like a clean human conversation, not raw subtitle fragments.
 
 - Start Call must run a mandatory audio preflight before the cockpit opens:
   - Seller mic is required for every call.
@@ -113,17 +113,17 @@ Realtime transcription must feel like a clean human conversation, not raw subtit
   - Mixed room audio is required for in-person/iPhone mode.
   - If remote meeting mode cannot hear buyer audio, block start and explain that SalesFrame can hear the mic but not the buyer.
 - Store preflight output on the call as `audio_preflight`, `audio_source_summary`, and `guidance_readiness` so poor transcript quality can be diagnosed later.
-- OpenAI realtime transcription sessions use `gpt-realtime-whisper` by default, with an English language hint. Dedicated seller mic and meeting/tab audio default to `high` delay for extra context and cleaner words; one-channel microphone capture defaults to `xhigh` delay because mixed sources need the most audio context.
-- `turn_detection` remains `null` for `gpt-realtime-whisper`; SalesFrame commits the audio buffer from browser-side speech activity rather than on a fixed timer.
+- Deepgram Flux is the live transcription and turn-taking provider. The browser requests a short-lived token from `/api/deepgram/token`, then opens `wss://api.deepgram.com/v2/listen` using `flux-general-en`, `linear16`, `16000` Hz audio, and 80ms PCM chunks.
+- Deepgram `StartOfTurn`, `Update`, `EagerEndOfTurn`, `TurnResumed`, and `EndOfTurn` events drive the transcript state machine. `Update` only refreshes the live row; `EndOfTurn` is the only event that persists a durable transcript turn.
 - Never reintroduce a blind fixed-interval transcript commit loop. It chops speakers mid-thought and causes duplicate fragments.
-- Browser audio is committed when speech has lasted long enough and then reached a silence boundary, with a max-turn guard for long monologues.
-- Commit timing is source-aware: dedicated seller mic and meeting/tab audio still feel live, but they use slightly longer speech windows than before; one-channel microphone capture waits longer for a natural speech boundary so OpenAI receives enough context for accurate words. Browser-side speech detection also tracks the ambient noise floor and requires short sustained voice activity before committing audio so background noise is less likely to create transcript fragments.
-- Transcript events are reconciled by OpenAI `item_id`/segment identity from official delta, segment, and completed events only. Unknown transcription-like events should not become UI rows.
+- Two-channel capture opens separate Deepgram streams for seller mic and shared customer/system audio. Source separation is the primary truth: `seller_mic` defaults to Seller and `meeting_audio` defaults to Customer.
+- One-channel capture uses a mixed mic stream with Deepgram streaming diarization metadata where available. Those labels remain editable because mixed-room diarization is lower confidence than source separation.
+- Transcript events are reconciled by provider-neutral identity: `transcription_provider`, `provider_session_id`, `provider_turn_index`, and `provider_event_id`. Old OpenAI reconciliation columns remain for historical calls.
 - Live transcript rows are durable conversation turns:
   - Deltas update a temporary live row and must be joined with word-boundary logic so transcript text never renders as squashed words.
   - Partial deltas are never inserted as durable transcript rows.
   - Completed/final events persist or update the durable turn.
-  - Saved rows include OpenAI reconciliation metadata: `openai_item_id`, `openai_segment_id`, `audio_source_kind`, `client_turn_id`, `turn_sequence`, `transcription_delay`, and `quality_flags`.
+  - Saved rows include provider-neutral Deepgram metadata: `transcription_provider`, `provider_session_id`, `provider_turn_index`, `provider_event_id`, `audio_source_kind`, `client_turn_id`, `turn_sequence`, `end_of_turn_confidence`, `word_confidence`, `language_detected`, `diarization_speaker`, and `quality_flags`. Historical OpenAI columns stay nullable for old calls only.
   - Duplicate final events within the same source/time window are suppressed.
   - Adjacent same-speaker turns are merged when they occur inside the turn-continuity window.
 - Seller-facing audio setup uses `One channel`, `Two channels`, and a disabled `Meeting bot` option. Internally, V1 keeps `microphone`, `in_person_microphone`, and `meeting_audio` for compatibility; new one-channel selections prefer `in_person_microphone`, while `microphone` remains a legacy fallback.
@@ -142,6 +142,8 @@ Realtime transcription must feel like a clean human conversation, not raw subtit
   - Every visible seller-editable account and opportunity field must be available to live guidance either through `recordContext` or, for methodology/framework selection, through selected playbooks and playbook fields. Adding a new seller-editable field requires updating the live-guidance context contract and tests deliberately.
   - Guidance refreshes from meaningful final turns or explicit seller feedback, not partial transcript fragments. Seller turns can also make the currently displayed recommendation stale if the seller asks a different question or moves the conversation forward.
   - A fast flow-decision lane classifies conversation stage, buyer mood, topic shift, active intent status, and whether the displayed question should refresh before the full polished question is requested. It receives a compact `liveStateContext` with seller-visible account, opportunity, and call fields only; it must not send workspace IDs, owner IDs, raw database rows, storage paths, or other implementation internals to OpenAI.
+  - The visible `Ask this next` card uses the low-latency `/api/openai/live-question` path. It returns only the card recommendation, short reason, lifecycle, confidence, target intent, compact also-covers, and context-used fields.
+  - The heavier `/api/openai/live-guidance` path remains for first-question readiness, evidence-rich guidance events, methodology updates, parked intents, and background detail; it must not block live in-call question replacement.
   - Candidate ranking must consider conversation stage, buyer mood, what was just answered, methodology gap value, naturalness, information gain, and risk of sounding abrupt.
   - Candidate ranking must separate methodology value from ask-now fit. A high-value methodology gap can be parked when asking it would be awkward in the current flow.
   - Every AI guidance response includes a formal question lifecycle: active, asked, answered, stale, parked, revisit before close, or dropped.
@@ -150,8 +152,8 @@ Realtime transcription must feel like a clean human conversation, not raw subtit
   - If the conversation has moved on, the coach should follow the customer thread and park the original intent rather than forcing an awkward methodology question.
   - Near wrap-up, the coach can recover the top one or two high-value parked intents with soft bridge wording.
   - When a previous recommended question was asked and the buyer answered it, the next AI guidance event must advance the conversation rather than repeating the same question.
-  - If one meaningful final turn has passed since the last full guidance event, the app must force a flow-decision or full guidance refresh so the visible question cannot stay stale. The 30-second audit is a backup heartbeat, not the normal update path.
-  - While a call is recording or paused, the browser also forces an OpenAI live-guidance recheck every 30 seconds using the current transcript, current visible question, and seller feedback. This is an AI refresh cadence, not a local fallback question.
+  - If one meaningful final turn has passed since the last question decision, the app must force a live-question refresh so the visible question cannot stay stale. The 30-second audit is a backup heartbeat, not the normal update path.
+  - While a call is recording or paused, the browser runs a fast OpenAI state check roughly every 10 seconds and forces a live-question audit every 30 seconds since the last successful question decision. This is an AI refresh cadence, not a local fallback question.
   - The initial first-question request must not overwrite newer live guidance once transcript has started.
   - Post-call correction is the transcript source-of-truth cleanup layer and should regenerate evidence, notes, follow-up, and next-call brief from corrected turns.
 - Desktop live calls can expose a Live Coach popout window:
@@ -314,7 +316,7 @@ Display:
 - The call cockpit rail should show the active recording status/control first. When capture is active, the recording control is a destructive/red button that stops the recording and finalises the call.
 - Live capture should sit directly underneath the recording status/control.
 - Live capture includes transcript, AI notes, and evidence tabs, with transcript first and selected by default.
-- Live transcript must consume OpenAI realtime transcription delta events (`conversation.item.input_audio_transcription.delta`) and update partial lines immediately. With `gpt-realtime-whisper`, browser audio buffers are committed frequently so text appears while the person is still speaking, then final transcript segments replace the partial lines after persistence.
+  - Live transcript must consume Deepgram Flux `Update` events to update the active message immediately, then persist exactly one row on `EndOfTurn`. `EagerEndOfTurn` can trigger speculative AI state checks; `TurnResumed` cancels speculative finalization for that turn.
 - Recording replay belongs on the post-call surface, not the live call cockpit.
 - Recording replay should be represented as a scrub bar with timestamp markers, not a fake waveform, until actual audio amplitude data exists. Replay controls need play/pause, position scrubber, and volume controls everywhere replay appears.
 - Replay markers should jump to transcript, AI-note, and methodology evidence moments. Marker badges use the first letter of the required field or evidence category being answered, not a generic "Note" label.
@@ -492,7 +494,7 @@ The Custom framework playbook remains labelled as `Custom framework`, but each w
 
 - Required fields.
 - Evidence standard.
-- Realtime guidance.
+- Live guidance.
 - Exit criteria.
 
 Saving the Custom framework writes a workspace-owned `playbooks` row with `slug = custom` and replaces its `playbook_fields` rows. The app still treats that row as the canonical `Custom framework` for opportunity and call selection even when the user-facing framework name is changed.
@@ -804,10 +806,9 @@ Model choices should be revalidated against current official OpenAI API docs bef
 
 Expected AI services:
 
-- Real-time transcription and turn detection.
-- Speaker diarization or speaker role assignment. Browser V1 captures meeting/tab audio and seller microphone separately where possible, uses source streams for instant labels, runs `/api/openai/speaker-attribution` for realtime Seller/Customer/Customer 2/Customer 3 attribution with confidence, keeps low-confidence rows editable, and reprocesses the full transcript during `/api/openai/post-call-outputs` for post-call speaker correction. iPhone Safari and in-person meetings use one-channel room capture; the seller must keep Safari open and the device awake, and speaker labels should be treated as lower-confidence because seller and customer audio arrive in one stream.
+- Deepgram Flux live transcription, turn detection, EOT confidence, word confidence, and streaming diarization metadata.
+- Speaker diarization or speaker role assignment. Browser V1 captures meeting/tab audio and seller microphone separately where possible, uses source streams for instant labels, uses Deepgram speaker metadata where available, runs `/api/openai/speaker-attribution` only as a text-based Seller/Customer/Customer 2/Customer 3 role classifier with confidence, keeps low-confidence rows editable, and reprocesses the saved transcript during `/api/openai/post-call-outputs` for post-call speaker correction. iPhone Safari and in-person meetings use one-channel room capture; the seller must keep Safari open and the device awake, and speaker labels should be treated as lower-confidence because seller and customer audio arrive in one stream.
 - Sellers do not need to record an onboarding voice sample to begin. Live calls use call-scoped provisional labels (`Speaker 1`, `Speaker 2`, `Seller`, `Customer`) and a cockpit speaker map where the seller can rename a speaker to a person or mark that speaker as `Me`. These aliases update the visible transcript and future live lines for the active call, persist to the call speaker row, and are not treated as cross-call biometric voice references.
-- Rolling 30-second audio windows are sent to `/api/openai/call-diarization`, which uses OpenAI diarized audio transcription and returns timestamped speaker segments without storing the temporary chunk. The client conservatively reconciles those diarized segments back into matching transcript lines by timing/text. No reference voices are stored beyond the individual call in this implementation path.
 - Live intent detection against selected playbook fields.
 - Next best question generation.
 - AI notes.
@@ -903,9 +904,8 @@ Database-backed search should preserve the same behaviour while moving larger da
 - Browser-to-function calls live in `src/lib/server-functions.ts`.
 - Netlify Functions live in `netlify/functions/*`:
   - `/api/openai/key` manages encrypted OpenAI key save/status/delete.
-  - `/api/openai/realtime-transcription` creates an OpenAI Realtime transcription session.
+  - `/api/deepgram/token` authorizes the signed-in seller against the call and mints a short-lived Deepgram Flux token for live transcription. The raw Deepgram key stays server-side.
   - `/api/openai/speaker-attribution` labels final transcript segments as Seller, Customer, Customer 2, or Customer 3 using source stream hints, turn-taking, and recent transcript context.
-  - `/api/openai/call-diarization` accepts a temporary rolling audio chunk for a call, authorizes the signed-in seller against that call, sends the chunk to OpenAI diarized transcription, and returns speaker/timestamp segments for call-scoped reconciliation. It does not persist the submitted chunk or store reusable voice references.
   - `/api/openai/customer-research` generates and stores customer research using fixed trusted source guidance.
   - `/api/openai/post-call-outputs` first performs a post-call speaker correction pass, then generates and stores follow-up email, next-call plan, missing info, opportunity/account updates, and next-call brief.
 - Function environment variables are documented in `.env.example` and `docs/netlify-env-setup.md`. Netlify must set `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_KEY_ENCRYPTION_SECRET`; `/api/system/env` reports missing configuration without exposing secret values.
