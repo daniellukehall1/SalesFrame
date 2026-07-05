@@ -6,6 +6,7 @@ import {
   TargetIcon,
 } from "lucide-react"
 
+import { getPlaybookIconComponent } from "@/data/playbook-icons"
 import { NavMain, type NavMainItem } from "@/components/nav-main"
 import { NavProjects, type AccountNavItem } from "@/components/nav-projects"
 import { NavUser } from "@/components/nav-user"
@@ -71,7 +72,16 @@ const sidebarPlaybookItems = [
     id: "custom",
     title: "Custom framework",
   },
-].sort((firstPlaybook, secondPlaybook) => firstPlaybook.title.localeCompare(secondPlaybook.title))
+]
+  .sort((firstPlaybook, secondPlaybook) => firstPlaybook.title.localeCompare(secondPlaybook.title))
+  .map((playbook) => {
+    const Icon = getPlaybookIconComponent(playbook.id)
+
+    return {
+      ...playbook,
+      icon: <Icon className="size-3.5 text-muted-foreground" />,
+    }
+  })
 
 export function AppSidebar({
   accounts,

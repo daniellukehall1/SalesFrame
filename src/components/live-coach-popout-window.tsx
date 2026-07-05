@@ -213,9 +213,9 @@ export function LiveCoachPopoutWindow({ darkMode }: { darkMode: boolean }) {
   }, [snapshot.activeCallId])
 
   return (
-    <div className="min-h-svh bg-background p-3 text-foreground">
-      <div className="mx-auto flex min-h-[calc(100svh-1.5rem)] max-w-md flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
-        <header className="flex items-center justify-between gap-3 border-b p-4">
+    <div className="h-svh overflow-hidden bg-background p-3 text-foreground">
+      <div className="mx-auto flex h-[calc(100svh-1.5rem)] max-w-lg flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b p-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#0f0f10] text-white">
               <AudioLinesIcon aria-hidden="true" className="size-5" />
@@ -230,7 +230,7 @@ export function LiveCoachPopoutWindow({ darkMode }: { darkMode: boolean }) {
           </div>
         </header>
 
-        <main className="flex flex-1 flex-col gap-4 p-4">
+        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
           {shouldShowCallContext ? (
             <div className="rounded-lg bg-muted/30 p-3">
               <p className="truncate text-sm font-medium">{snapshot.accountName}</p>
@@ -239,7 +239,7 @@ export function LiveCoachPopoutWindow({ darkMode }: { darkMode: boolean }) {
           ) : null}
 
           <section
-            className="flex flex-1 flex-col justify-center gap-4 rounded-xl bg-muted/20 p-4"
+            className="flex min-h-[250px] flex-1 flex-col justify-center gap-4 rounded-xl bg-muted/20 p-4"
             aria-label="Live coach recommendation"
             aria-live="polite"
             aria-atomic="true"
@@ -273,7 +273,7 @@ export function LiveCoachPopoutWindow({ darkMode }: { darkMode: boolean }) {
           </section>
         </main>
 
-        <footer className="grid gap-2 border-t p-4">
+        <footer className="grid shrink-0 gap-2 border-t bg-card p-4">
           {actionMessage ? (
             <p className="text-center text-xs text-muted-foreground" role="status" aria-live="polite">
               {actionMessage}

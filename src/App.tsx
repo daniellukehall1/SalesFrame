@@ -84,6 +84,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/components/ui/drawer"
 import { DialogActions } from "@/components/ui/dialog-actions"
 import {
   DropdownMenu,
@@ -121,6 +129,14 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { PlaybookIcon } from "@/data/playbook-icons"
 import { playbooks } from "@/data/playbook-reference-data"
 import type { LegalPageId } from "@/data/legal-documents"
 import {
@@ -129,6 +145,7 @@ import {
   type CallCapturePermissionState,
   type CallCaptureStatus,
 } from "@/hooks/use-call-capture"
+import { useIsMobile } from "@/hooks/use-mobile"
 import type { AudioPreflightResult } from "@/lib/call-audio-preflight"
 import { sectionCards, viewLabels } from "@/data/navigation-content"
 import { formatCurrencyAmount } from "@/lib/currency-utils"
@@ -291,7 +308,6 @@ import {
   type OpportunityDraft,
   type OpportunitySort,
   type PendingDeleteRecord,
-  type PlaybookFocusFilter,
   type SavedOpenAiKeyState,
   type SellerResearchProfile,
   type StartCallPreparationStepId,
@@ -6950,6 +6966,7 @@ function StartRecordingDialog({
   triggerLabel?: string
   triggerVariant?: React.ComponentProps<typeof Button>["variant"]
 }) {
+  const isMobile = useIsMobile()
   const [open, setOpen] = React.useState(false)
   const [step, setStep] = React.useState<1 | 2 | 3 | 4>(1)
   const [accountMode, setAccountMode] = React.useState<"existing" | "new">("existing")
@@ -7455,29 +7472,17 @@ function StartRecordingDialog({
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant={triggerVariant} className="h-11 min-h-11 gap-2 px-4 md:h-7 md:min-h-7 md:px-2.5">
-          {triggerIcon}
-          {triggerLabel}
-        </Button>
-      </DialogTrigger>
-      <DialogContent
-        className="grid max-h-[calc(100svh-2rem)] min-w-0 overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:gap-3 max-sm:p-3 max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-3xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
-        onEscapeKeyDown={(event) => event.preventDefault()}
-        onInteractOutside={(event) => event.preventDefault()}
-        onPointerDownOutside={(event) => event.preventDefault()}
-      >
-        <DialogHeader>
-          <DialogTitle>Start call</DialogTitle>
-          <DialogDescription>
-            {startSubmitting
-              ? "SalesFrame is preparing the live coach before opening the cockpit."
-              : "Attach the call to the right context before live guidance begins."}
-          </DialogDescription>
-        </DialogHeader>
-
+  const startCallTrigger = (
+    <Button size="sm" variant={triggerVariant} className="h-11 min-h-11 gap-2 px-4 md:h-7 md:min-h-7 md:px-2.5">
+      {triggerIcon}
+      {triggerLabel}
+    </Button>
+  )
+  const startCallDescription = startSubmitting
+    ? "SalesFrame is preparing the live coach before opening the cockpit."
+    : "Attach the call to the right context before live guidance begins."
+  const startCallContent = (
+    <>
         {startSubmitting ? (
           <>
             <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
@@ -7492,6 +7497,7 @@ function StartRecordingDialog({
               />
             </div>
             <DialogActions
+              className="max-sm:-mx-3 max-sm:-mb-3"
               onCancel={handleCancelStart}
               primaryAction={
                 <Button disabled className="gap-2">
@@ -7781,7 +7787,7 @@ function StartRecordingDialog({
                     </div>
                   ) : null}
 
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex min-w-0 items-center gap-2">
                       <SearchIcon className="size-4 text-muted-foreground" />
                       <div className="min-w-0">
@@ -7791,7 +7797,7 @@ function StartRecordingDialog({
                         </p>
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-2 sm:shrink-0">
                       <Label htmlFor="customer-research-toggle" className="text-sm text-muted-foreground">
                         Use research
                       </Label>
@@ -7803,29 +7809,31 @@ function StartRecordingDialog({
                     </div>
                   </div>
 
-                  <div className="grid gap-3">
-                    <div className="grid gap-3">
+                  <div className="grid min-w-0 max-w-full gap-3">
+                    <div className="grid min-w-0 max-w-full gap-3">
                       <div className="grid gap-1">
                         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Seller context</p>
                         <p className="text-xs text-muted-foreground">Your company and offer shape how SalesFrame frames the opener.</p>
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="grid gap-2">
+                      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                        <div className="grid min-w-0 gap-2">
                           <Label htmlFor="seller-domain">Your company domain</Label>
                           <Input
                             id="seller-domain"
                             value={sellerDomain}
                             disabled={!customerResearchEnabled}
+                            className="min-w-0"
                             placeholder="e.g. salesframe.ai"
                             onChange={(event) => handleSellerDomainChange(event.currentTarget.value)}
                           />
                         </div>
-                        <div className="grid gap-2">
+                        <div className="grid min-w-0 gap-2">
                           <Label htmlFor="seller-company">Your company</Label>
                           <Input
                             id="seller-company"
                             value={sellerCompany}
                             disabled={!customerResearchEnabled}
+                            className="min-w-0"
                             placeholder="e.g. SalesFrame"
                             onChange={(event) => setSellerCompany(event.currentTarget.value)}
                           />
@@ -7836,36 +7844,38 @@ function StartRecordingDialog({
                         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Buyer context</p>
                         <p className="text-xs text-muted-foreground">Optional details help the question fit the person you are meeting.</p>
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="grid gap-2">
+                      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                        <div className="grid min-w-0 gap-2">
                           <Label htmlFor="customer-contact">Customer contact</Label>
                           <Input
                             id="customer-contact"
                             value={customerContact}
                             disabled={!customerResearchEnabled}
+                            className="min-w-0"
                             placeholder="Optional"
                             onChange={(event) => setCustomerContact(event.currentTarget.value)}
                           />
                         </div>
-                        <div className="grid gap-2">
+                        <div className="grid min-w-0 gap-2">
                           <Label htmlFor="customer-role">Customer role</Label>
                           <Input
                             id="customer-role"
                             value={customerRole}
                             disabled={!customerResearchEnabled}
+                            className="min-w-0"
                             placeholder="Optional"
                             onChange={(event) => setCustomerRole(event.currentTarget.value)}
                           />
                         </div>
                       </div>
 
-                      <div className="grid gap-2">
+                      <div className="grid min-w-0 gap-2">
                         <Label htmlFor="product-context">What you sell</Label>
                         <Textarea
                           id="product-context"
                           value={productContext}
                           disabled={!customerResearchEnabled || researchProfileStatus === "loading"}
-                          className="min-h-20 resize-none"
+                          className="min-h-20 min-w-0 resize-none"
                           placeholder={
                             researchProfileStatus === "loading"
                               ? "Looking up your company..."
@@ -7900,6 +7910,7 @@ function StartRecordingDialog({
             </div>
 
         <DialogActions
+          className="max-sm:-mx-3 max-sm:-mb-3"
           leftActions={
             <div className="grid gap-2 sm:flex sm:flex-row">
               <Button variant="outline" onClick={handleCancelStart}>
@@ -7947,6 +7958,38 @@ function StartRecordingDialog({
         />
           </>
         )}
+    </>
+  )
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={handleOpenChange} showSwipeHandle>
+        <DrawerTrigger asChild>{startCallTrigger}</DrawerTrigger>
+        <DrawerContent className="grid max-h-[92svh] min-h-[min(640px,92svh)] min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] overflow-hidden px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-0 text-left data-[vaul-drawer-direction=bottom]:max-h-[92svh] [&_[data-slot=button]]:min-h-11 [&_[data-slot=button]]:px-4 [&_[data-slot=input]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11">
+          <DrawerHeader className="px-0 pb-0 pt-3 text-left group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
+            <DrawerTitle>Start call</DrawerTitle>
+            <DrawerDescription>{startCallDescription}</DrawerDescription>
+          </DrawerHeader>
+          {startCallContent}
+        </DrawerContent>
+      </Drawer>
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger asChild>{startCallTrigger}</DialogTrigger>
+      <DialogContent
+        className="grid max-h-[calc(100svh-2rem)] min-w-0 overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:gap-3 max-sm:p-3 max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-3xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>Start call</DialogTitle>
+          <DialogDescription>{startCallDescription}</DialogDescription>
+        </DialogHeader>
+        {startCallContent}
       </DialogContent>
     </Dialog>
   )
@@ -11371,8 +11414,8 @@ function WorkspaceView({
   const handleOpenCoachPopout = React.useCallback(() => {
     if (typeof window === "undefined") return
 
-    const width = 420
-    const height = 560
+    const width = 460
+    const height = 660
     const left = Math.max(0, window.screenX + window.outerWidth - width - 24)
     const top = Math.max(0, window.screenY + 80)
     const popoutUrl = new URL(liveCoachPopoutRoute, window.location.origin)
@@ -15282,8 +15325,6 @@ function PlaybooksView({
   onNavigate: (view: string) => void
   onSaveCustomFramework?: (draft: EditableCustomFramework) => Promise<EditableCustomFramework | void>
 }) {
-  const [query, setQuery] = React.useState("")
-  const [focusFilter, setFocusFilter] = React.useState<PlaybookFocusFilter>("all")
   const workspaceCustomFramework = React.useMemo(() => {
     const customPlaybookRow = getCustomPlaybookRow(playbookRows)
     const customPlaybookFields = customPlaybookRow
@@ -15324,30 +15365,7 @@ function PlaybooksView({
     [customDraft]
   )
   const selectedPlaybook = playbookCatalog.find((playbook) => playbook.id === activeView)
-  const visiblePlaybooks = getFuzzyMatches(
-    playbookCatalog.filter((playbook) => {
-      if (focusFilter === "all") return true
-      if (focusFilter === "qualification") return ["meddicc", "meddpicc", "bant"].includes(playbook.id)
-      if (focusFilter === "discovery") return ["spin", "sandler", "gap-selling", "spiced"].includes(playbook.id)
-      if (focusFilter === "value") return ["force-management", "challenger", "value-selling"].includes(playbook.id)
-      if (focusFilter === "commercial")
-        return ["sandler", "bant", "challenger", "gap-selling", "strategic-selling", "spiced"].includes(playbook.id)
-      return playbook.id === "custom"
-    }),
-    query,
-    (playbook) =>
-      [
-        playbook.name,
-        playbook.description,
-        playbook.bestFor,
-        playbook.evidenceStandard,
-        playbook.liveGuidance,
-        playbook.id === "custom" ? "Custom framework" : "",
-        ...playbook.fields.flatMap(([field, detail]) => [field, detail]),
-        ...playbook.exitCriteria,
-      ].join(" ")
-  )
-  const hasPlaybookFilters = Boolean(query.trim()) || focusFilter !== "all"
+  const visiblePlaybooks = playbookCatalog
   const hasCustomChanges = JSON.stringify(customDraft) !== JSON.stringify(savedCustomFramework)
 
   React.useEffect(() => {
@@ -15478,66 +15496,22 @@ function PlaybooksView({
           </div>
         </div>
 
-        <Card>
-          <CardContent className="grid gap-2 pt-6 md:grid-cols-[minmax(0,1fr)_220px_auto]">
-            <div className="relative">
-              <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                aria-label="Search playbooks, required fields, or evidence standards"
-                value={query}
-                className="pl-9"
-                placeholder="Search playbooks, required fields, or evidence standards"
-                onChange={(event) => setQuery(event.currentTarget.value)}
-              />
-            </div>
-            <Select value={focusFilter} onValueChange={(value) => setFocusFilter(value as PlaybookFocusFilter)}>
-              <SelectTrigger className="w-full" aria-label="Filter playbooks by use case">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All use cases</SelectItem>
-                <SelectItem value="qualification">Qualification</SelectItem>
-                <SelectItem value="discovery">Discovery coaching</SelectItem>
-                <SelectItem value="value">Value messaging</SelectItem>
-                <SelectItem value="commercial">Commercial process</SelectItem>
-                <SelectItem value="custom">Custom frameworks</SelectItem>
-              </SelectContent>
-            </Select>
-            {hasPlaybookFilters ? (
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => {
-                  setQuery("")
-                  setFocusFilter("all")
-                }}
-              >
-                <FilterIcon />
-                Reset
-              </Button>
-            ) : null}
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-3 lg:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {visiblePlaybooks.map((playbook) => (
             <div
               key={playbook.id}
-              className="grid gap-4 rounded-lg bg-muted/30 p-4"
+              className="grid min-h-44 gap-4 rounded-lg bg-muted/20 p-4 transition-colors duration-150 hover:bg-muted/30"
             >
-              <div>
-                <div className="mb-3 flex size-9 items-center justify-center rounded-lg bg-background/70">
-                  <BookOpenCheckIcon className="size-4" />
+              <div className="grid gap-3">
+                <div className="flex items-start gap-3">
+                  <PlaybookIcon playbookId={playbook.id} />
+                  <div className="min-w-0">
+                    <p className="font-medium leading-snug">{playbook.name}</p>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-medium">{playbook.name}</p>
-                  {playbook.id === "custom" ? (
-                    <span className="text-xs text-muted-foreground">Custom framework</span>
-                  ) : null}
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">{playbook.description}</p>
+                <p className="text-sm leading-relaxed text-muted-foreground">{playbook.description}</p>
               </div>
-              <div className="flex items-center justify-between gap-3 pt-1 text-sm">
+              <div className="mt-auto flex items-center justify-between gap-3 pt-1 text-sm">
                 <span className="text-muted-foreground">{playbook.fields.length} required fields</span>
                 <OpenButton onClick={() => onNavigate(playbook.id)} />
               </div>
@@ -15548,7 +15522,7 @@ function PlaybooksView({
               <ListEmptyState
                 icon={<BookOpenCheckIcon />}
                 title="Nothing matches that view"
-                message="Try a broader search, or switch the use-case filter back to all playbooks."
+                message="Playbooks will appear here once the workspace has methodology access."
               />
             </div>
           ) : null}
@@ -15567,7 +15541,6 @@ function PlaybooksView({
         saveTone={customSaveTone}
         onAddCriterion={addCustomCriterion}
         onAddField={addCustomField}
-        onBack={() => onNavigate("playbooks")}
         onDraftChange={updateCustomDraft}
         onFieldChange={updateCustomField}
         onRemoveCriterion={removeCustomCriterion}
@@ -15581,65 +15554,105 @@ function PlaybooksView({
 
   return (
     <div className="grid gap-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{selectedPlaybook.name}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{selectedPlaybook.description}</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => onNavigate("playbooks")}>
-            All playbooks
-          </Button>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <PlaybookIcon playbookId={selectedPlaybook.id} className="size-11 bg-muted/40" iconClassName="size-5" />
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl font-semibold tracking-tight">{selectedPlaybook.name}</h1>
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{selectedPlaybook.description}</p>
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Required fields</CardTitle>
-            <CardDescription>What SalesFrame will listen for as the deal moves forward</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            {selectedPlaybook.fields.map(([field, detail]) => (
-              <div key={field} className="grid gap-2 rounded-lg bg-muted/20 p-3">
-                <div className="flex items-center gap-2">
-                  <ListChecksIcon className="size-4 text-muted-foreground" />
-                  <p className="text-sm font-medium">{field}</p>
-                </div>
-                <p className="text-sm leading-relaxed text-muted-foreground">{detail}</p>
+      <Tabs defaultValue="overview" className="gap-4">
+        <TabsList className="w-full justify-start sm:w-fit">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="fields">Fields</TabsTrigger>
+          <TabsTrigger value="exit-criteria">Exit criteria</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="m-0 grid gap-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            {[
+              ["Origin", selectedPlaybook.origin],
+              ["Why use it", selectedPlaybook.whyUse],
+              ["Where it fits", selectedPlaybook.bestFor],
+              ["Adoption pattern", selectedPlaybook.adoption],
+            ].map(([label, value]) => (
+              <div key={label} className="grid gap-2 rounded-lg bg-muted/20 p-4">
+                <p className="text-sm font-medium">{label}</p>
+                <p className="text-sm leading-relaxed text-muted-foreground">{value}</p>
               </div>
             ))}
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-4">
+          </div>
           <Card>
             <CardHeader>
-              <CardTitle>Usage</CardTitle>
-              <CardDescription>{selectedPlaybook.bestFor}</CardDescription>
+              <CardTitle>How SalesFrame applies it</CardTitle>
+              <CardDescription>
+                The framework stays strict in the background while the seller gets one natural next move.
+              </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
               <ContextRow label="Evidence standard" value={selectedPlaybook.evidenceStandard} />
-              <ContextRow label="Realtime guidance" value={selectedPlaybook.liveGuidance} />
+              <ContextRow label="Live question behavior" value={selectedPlaybook.liveGuidance} />
             </CardContent>
           </Card>
+        </TabsContent>
 
+        <TabsContent value="fields" className="m-0">
+          <Card>
+            <CardHeader>
+              <CardTitle>Required fields</CardTitle>
+              <CardDescription>What SalesFrame listens for before it treats the framework as covered.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="max-h-[560px] pr-3">
+                <Accordion
+                  type="single"
+                  collapsible
+                  className="w-full"
+                  defaultValue={selectedPlaybook.fields[0] ? "field-0" : undefined}
+                >
+                  {selectedPlaybook.fields.map(([field, detail], index) => (
+                    <AccordionItem key={field} value={`field-${index}`}>
+                      <AccordionTrigger>
+                        <span className="flex min-w-0 items-center gap-3">
+                          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/40 text-muted-foreground">
+                            <ListChecksIcon className="size-3.5" />
+                          </span>
+                          <span className="truncate">{field}</span>
+                        </span>
+                      </AccordionTrigger>
+                      <AccordionContent className="pl-10 text-muted-foreground">
+                        {detail}
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="exit-criteria" className="m-0">
           <Card>
             <CardHeader>
               <CardTitle>Exit criteria</CardTitle>
-              <CardDescription>Signals that the framework has enough usable evidence</CardDescription>
+              <CardDescription>Signals that this playbook has enough usable customer evidence.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
               {selectedPlaybook.exitCriteria.map((criteria) => (
-                <div key={criteria} className="flex items-start gap-2 text-sm">
-                  <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-                  <span className="min-w-0">{criteria}</span>
+                <div key={criteria} className="flex min-w-0 items-start gap-3 rounded-lg bg-muted/20 p-3 text-sm">
+                  <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                    <CheckIcon className="size-3.5" />
+                  </span>
+                  <span className="min-w-0 leading-relaxed">{criteria}</span>
                 </div>
               ))}
             </CardContent>
           </Card>
-        </div>
-      </div>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
@@ -15650,7 +15663,6 @@ function CustomFrameworkEditor({
   isSaving,
   onAddCriterion,
   onAddField,
-  onBack,
   onCriterionChange,
   onDraftChange,
   onFieldChange,
@@ -15666,7 +15678,6 @@ function CustomFrameworkEditor({
   isSaving: boolean
   onAddCriterion: () => void
   onAddField: () => void
-  onBack: () => void
   onCriterionChange: (criterionId: string, text: string) => void
   onDraftChange: <Field extends keyof EditableCustomFramework>(
     field: Field,
@@ -15682,14 +15693,14 @@ function CustomFrameworkEditor({
 }) {
   return (
     <div className="grid gap-4" data-testid="custom-framework-editor">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{draft.frameworkName}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{draft.description}</p>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <PlaybookIcon playbookId="custom" className="size-11 bg-muted/40" iconClassName="size-5" />
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl font-semibold tracking-tight break-words">{draft.frameworkName}</h1>
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{draft.description}</p>
+          </div>
         </div>
-        <Button variant="outline" size="sm" onClick={onBack}>
-          All playbooks
-        </Button>
       </div>
 
       <Card>

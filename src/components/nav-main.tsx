@@ -23,6 +23,7 @@ export type NavMainItem = {
   isActive?: boolean
   items?: {
     id: string
+    icon?: React.ReactNode
     title: string
   }[]
 }
@@ -86,6 +87,7 @@ export function NavMain({
                           isActive={activeView === subItem.id}
                           onClick={() => onNavigate(subItem.id)}
                         >
+                          {subItem.icon}
                           <span>{subItem.title}</span>
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>
