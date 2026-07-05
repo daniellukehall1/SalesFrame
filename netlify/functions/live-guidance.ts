@@ -1857,7 +1857,7 @@ export default async (request: Request, context: Context) => {
             "Ask only one thing.",
             "Use the customer's latest words when possible.",
             "Selected playbooks and intent clusters decide what must be learned; account and opportunity record fields only shape wording, sequencing, and timing.",
-            "Use recordContext.account fields such as current tools, strategic initiatives, competitors, notes, industry, size, region, and website to make the question specific without sounding scripted.",
+            "Use recordContext.account fields such as current tools, strategic initiatives, competitors, notes, industry, size, location, and website to make the question specific without sounding scripted.",
             "Use recordContext.opportunity fields such as stage, amount, close date, pain, decision process, next step, manual notes, and call type to choose question depth and avoid asking what the seller already captured.",
             "Early or qualification-stage opportunities should stay lighter and avoid heavy budget, economic-buyer, procurement, metrics, or hard decision-process questions unless the buyer raises them.",
             "Later-stage opportunities may prioritize decision process, metrics, stakeholder risk, timing, next step, or commercial clarity when it naturally follows the conversation.",

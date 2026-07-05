@@ -2,7 +2,9 @@ import * as React from "react"
 import type { SupabaseClient, User } from "@supabase/supabase-js"
 import {
   ArrowLeftIcon,
+  ArrowDownIcon,
   ArrowRightIcon,
+  ArrowUpIcon,
   AudioLinesIcon,
   BookOpenCheckIcon,
   BotIcon,
@@ -639,6 +641,8 @@ const emptyAccount: AccountNavItem = {
   name: "No account selected",
   description: "Create an account to begin",
   website: "",
+  createdAt: "Not set",
+  createdAtIso: null,
   currency: defaultCurrencyCode,
   logoDomain: "",
   logoStatus: "missing",
@@ -8451,7 +8455,7 @@ function CreateAccountDialog({
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="create-account-region">Region</Label>
+                <Label htmlFor="create-account-region">Location</Label>
                 <Input
                   id="create-account-region"
                   value={region}
@@ -9029,7 +9033,7 @@ function EditAccountDialog({
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-account-region">Region</Label>
+              <Label htmlFor="edit-account-region">Location</Label>
               <Input
                 id="edit-account-region"
                 value={region}
@@ -10495,6 +10499,10 @@ function AccountView({
                   value={accountDraft.website}
                   onChange={(value) => onAccountDraftChange("website", value)}
                 />
+                <div className="grid gap-2">
+                  <Label htmlFor="account-created-date">Created date</Label>
+                  <Input id="account-created-date" value={account.createdAt} readOnly />
+                </div>
                 <EditableTextField
                   id="account-industry"
                   label="Industry"
@@ -10509,7 +10517,7 @@ function AccountView({
                 />
                 <EditableTextField
                   id="account-region"
-                  label="Region"
+                  label="Location"
                   value={accountDraft.region}
                   onChange={(value) => onAccountDraftChange("region", value)}
                 />
@@ -12716,7 +12724,7 @@ function AccountRecordPanel({
     ["Website", accountDraft.website],
     ["Industry", accountDraft.industry || account.description],
     ["Employees", accountDraft.employeeCount],
-    ["Region", accountDraft.region],
+    ["Location", accountDraft.region],
     ["Currency", accountDraft.currency],
   ]
   const accountContextRows = [
@@ -14024,6 +14032,10 @@ function OpportunityProfile({
             value={opportunityDraft.source}
             onChange={(value) => onOpportunityDraftChange("source", value)}
           />
+          <div className="grid gap-2">
+            <Label htmlFor="opportunity-created-date">Created date</Label>
+            <Input id="opportunity-created-date" value={opportunity.createdAt} readOnly />
+          </div>
           <div className="grid gap-2 xl:col-span-2">
             <Label htmlFor="opportunity-frameworks">Frameworks</Label>
             <PlaybookMultiSelect
@@ -14470,6 +14482,187 @@ function PostCallPanel({
   )
 }
 
+type SortDirection = "asc" | "desc"
+type OpportunityTableSortKey = "opportunity" | "account" | "created" | "coverage" | "missing" | "close" | "value" | "gaps"
+type OpportunityTableSort = {
+  key: OpportunityTableSortKey
+  direction: SortDirection
+}
+type OpportunitySortSelectValue =
+  | OpportunitySort
+  | "opportunity-asc"
+  | "opportunity-desc"
+  | "account-asc"
+  | "account-desc"
+  | "missing-asc"
+  | "created-asc"
+  | "created-desc"
+type CallTableSortKey = "call" | "account" | "status" | "duration" | "date"
+type CallTableSort = {
+  key: CallTableSortKey
+  direction: SortDirection
+}
+
+const defaultOpportunityTableSort = {
+  key: "gaps",
+  direction: "desc",
+} satisfies OpportunityTableSort
+
+const defaultCallTableSort = {
+  key: "date",
+  direction: "desc",
+} satisfies CallTableSort
+
+function SortableHeaderButton({
+  active,
+  align = "left",
+  direction,
+  label,
+  onClick,
+}: {
+  active: boolean
+  align?: "left" | "right"
+  direction: SortDirection
+  label: string
+  onClick: () => void
+}) {
+  const SortIcon = direction === "asc" ? ArrowUpIcon : ArrowDownIcon
+
+  return (
+    <button
+      type="button"
+      className={cn(
+        "group inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground transition-[background-color,color,opacity] duration-100 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active && "text-foreground",
+        align === "right" && "justify-self-end text-right"
+      )}
+      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
+      onClick={onClick}
+    >
+      <span>{label}</span>
+      {active ? (
+        <SortIcon className="size-3.5" aria-hidden="true" />
+      ) : (
+        <ArrowDownIcon className="size-3.5 opacity-0 transition-opacity duration-100 group-hover:opacity-40" aria-hidden="true" />
+      )}
+    </button>
+  )
+}
+
+function getNextSortDirection<TSortKey extends string>({
+  currentDirection,
+  currentKey,
+  defaultDirection,
+  nextKey,
+}: {
+  currentDirection: SortDirection
+  currentKey: TSortKey
+  defaultDirection: SortDirection
+  nextKey: TSortKey
+}) {
+  if (currentKey !== nextKey) return defaultDirection
+
+  return currentDirection === "asc" ? "desc" : "asc"
+}
+
+function getOpportunitySortSelectValue(sort: OpportunityTableSort): OpportunitySortSelectValue {
+  if (sort.key === "opportunity") return sort.direction === "asc" ? "opportunity-asc" : "opportunity-desc"
+  if (sort.key === "account") return sort.direction === "asc" ? "account-asc" : "account-desc"
+  if (sort.key === "created") return sort.direction === "asc" ? "created-asc" : "created-desc"
+  if (sort.key === "coverage") return sort.direction === "asc" ? "coverage-asc" : "coverage-desc"
+  if (sort.key === "value") return "value-desc"
+  if (sort.key === "close") return "close-date"
+  if (sort.key === "missing") return sort.direction === "asc" ? "missing-asc" : "gaps"
+
+  return "gaps"
+}
+
+function getOpportunitySortFromSelectValue(value: OpportunitySortSelectValue): OpportunityTableSort {
+  if (value === "opportunity-asc") return { key: "opportunity", direction: "asc" }
+  if (value === "opportunity-desc") return { key: "opportunity", direction: "desc" }
+  if (value === "account-asc") return { key: "account", direction: "asc" }
+  if (value === "account-desc") return { key: "account", direction: "desc" }
+  if (value === "created-asc") return { key: "created", direction: "asc" }
+  if (value === "created-desc") return { key: "created", direction: "desc" }
+  if (value === "coverage-asc") return { key: "coverage", direction: "asc" }
+  if (value === "coverage-desc") return { key: "coverage", direction: "desc" }
+  if (value === "value-desc") return { key: "value", direction: "desc" }
+  if (value === "close-date") return { key: "close", direction: "asc" }
+  if (value === "missing-asc") return { key: "missing", direction: "asc" }
+
+  return defaultOpportunityTableSort
+}
+
+function sortOpportunityTableRows(
+  opportunities: Opportunity[],
+  sort: OpportunityTableSort,
+  accountById: Map<string, AccountNavItem>
+) {
+  return [...opportunities].sort((left, right) => {
+    const leftAccount = accountById.get(left.accountId)
+    const rightAccount = accountById.get(right.accountId)
+    const isDateSort = sort.key === "close" || sort.key === "created"
+    const result = sort.key === "close" ? compareDates(left.closeDate, right.closeDate, sort.direction) :
+      sort.key === "created" ? compareDates(left.createdAtIso ?? left.createdAt, right.createdAtIso ?? right.createdAt, sort.direction) :
+      sort.key === "opportunity" ? compareStrings(left.name, right.name) :
+        sort.key === "account" ? compareStrings(leftAccount?.name, rightAccount?.name) :
+          sort.key === "coverage" ? left.coverage - right.coverage :
+            sort.key === "missing" || sort.key === "gaps" ? left.missing + left.weak - (right.missing + right.weak) :
+              parseOpportunityAmount(left.amount) - parseOpportunityAmount(right.amount)
+
+    return (isDateSort ? result : applySortDirection(result, sort.direction)) || compareStrings(left.name, right.name)
+  })
+}
+
+function sortCallTableRows(
+  calls: CallSummary[],
+  sort: CallTableSort,
+  accountById: Map<string, AccountNavItem>,
+  opportunityById: Map<string, Opportunity>,
+  activeCallId: string
+) {
+  return [...calls].sort((left, right) => {
+    const leftOpportunity = opportunityById.get(left.opportunityId)
+    const rightOpportunity = opportunityById.get(right.opportunityId)
+    const leftAccount = leftOpportunity ? accountById.get(leftOpportunity.accountId) : undefined
+    const rightAccount = rightOpportunity ? accountById.get(rightOpportunity.accountId) : undefined
+    const result = sort.key === "date" ? compareDates(left.startedAt ?? left.date, right.startedAt ?? right.date, sort.direction) :
+      sort.key === "call" ? compareStrings(left.title, right.title) :
+        sort.key === "account" ? compareStrings(leftAccount?.name, rightAccount?.name) :
+          sort.key === "status" ? compareStrings(getCallDisplayStatus(left, activeCallId), getCallDisplayStatus(right, activeCallId)) :
+            left.durationSeconds - right.durationSeconds
+
+    return (sort.key === "date" ? result : applySortDirection(result, sort.direction)) || compareStrings(left.title, right.title)
+  })
+}
+
+function compareStrings(left?: string | null, right?: string | null) {
+  return (left ?? "").localeCompare(right ?? "", undefined, { numeric: true, sensitivity: "base" })
+}
+
+function compareDates(left: string | null | undefined, right: string | null | undefined, direction: SortDirection) {
+  const leftValue = getSortableDateValue(left)
+  const rightValue = getSortableDateValue(right)
+
+  if (leftValue === null && rightValue === null) return 0
+  if (leftValue === null) return 1
+  if (rightValue === null) return -1
+
+  return direction === "asc" ? leftValue - rightValue : rightValue - leftValue
+}
+
+function getSortableDateValue(value?: string | null) {
+  if (!value) return null
+
+  const parsed = Date.parse(value)
+
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function applySortDirection(value: number, direction: SortDirection) {
+  return direction === "asc" ? value : value * -1
+}
+
 function OpportunitiesView({
   accounts,
   opportunities,
@@ -14492,7 +14685,7 @@ function OpportunitiesView({
   const [query, setQuery] = React.useState("")
   const [stageFilter, setStageFilter] = React.useState("all")
   const [coverageFilter, setCoverageFilter] = React.useState<OpportunityCoverageFilter>("all")
-  const [sort, setSort] = React.useState<OpportunitySort>("gaps")
+  const [sort, setSort] = React.useState<OpportunityTableSort>(defaultOpportunityTableSort)
   const [page, setPage] = React.useState(1)
   const pageSize = 15
   const accountById = React.useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
@@ -14512,7 +14705,7 @@ function OpportunitiesView({
     [opportunities, opportunityDrafts, playbookFields, playbookRows]
   )
   const stages = Array.from(new Set(displayOpportunities.map((item) => item.stage))).sort()
-  const visibleOpportunities = sortOpportunities(
+  const visibleOpportunities = sortOpportunityTableRows(
     getFuzzyMatches(
       displayOpportunities
         .filter((item) => stageFilter === "all" || item.stage === stageFilter)
@@ -14520,7 +14713,8 @@ function OpportunitiesView({
       query,
       (item) => getOpportunitySearchText(item, accountById.get(item.accountId), opportunityDrafts[item.id])
     ),
-    sort
+    sort,
+    accountById
   )
   const pageCount = Math.max(1, Math.ceil(visibleOpportunities.length / pageSize))
   const currentPage = Math.min(page, pageCount)
@@ -14532,6 +14726,18 @@ function OpportunitiesView({
   React.useEffect(() => {
     setPage(1)
   }, [query, stageFilter, coverageFilter, sort])
+
+  const updateOpportunitySort = React.useCallback((key: OpportunityTableSortKey, defaultDirection: SortDirection = "asc") => {
+    setSort((currentSort) => ({
+      key,
+      direction: getNextSortDirection({
+        currentDirection: currentSort.direction,
+        currentKey: currentSort.key,
+        defaultDirection,
+        nextKey: key,
+      }),
+    }))
+  }, [])
 
   React.useEffect(() => {
     if (page > pageCount) setPage(pageCount)
@@ -14588,16 +14794,23 @@ function OpportunitiesView({
                 <SelectItem value="high">High coverage</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={sort} onValueChange={(value) => setSort(value as OpportunitySort)}>
+            <Select value={getOpportunitySortSelectValue(sort)} onValueChange={(value) => setSort(getOpportunitySortFromSelectValue(value as OpportunitySortSelectValue))}>
               <SelectTrigger className="w-full" aria-label="Sort opportunities">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="opportunity-asc">Opportunity A-Z</SelectItem>
+                <SelectItem value="opportunity-desc">Opportunity Z-A</SelectItem>
+                <SelectItem value="account-asc">Account A-Z</SelectItem>
+                <SelectItem value="account-desc">Account Z-A</SelectItem>
                 <SelectItem value="gaps">Most gaps</SelectItem>
+                <SelectItem value="missing-asc">Fewest gaps</SelectItem>
                 <SelectItem value="coverage-asc">Lowest coverage</SelectItem>
                 <SelectItem value="coverage-desc">Highest coverage</SelectItem>
                 <SelectItem value="value-desc">Highest value</SelectItem>
                 <SelectItem value="close-date">Close date</SelectItem>
+                <SelectItem value="created-desc">Newest created</SelectItem>
+                <SelectItem value="created-asc">Oldest created</SelectItem>
               </SelectContent>
             </Select>
             {hasOpportunityFilters ? (
@@ -14608,7 +14821,7 @@ function OpportunitiesView({
                   setQuery("")
                   setStageFilter("all")
                   setCoverageFilter("all")
-                  setSort("gaps")
+                  setSort(defaultOpportunityTableSort)
                   setPage(1)
                 }}
               >
@@ -14620,14 +14833,45 @@ function OpportunitiesView({
           <div className="grid gap-3">
             {paginatedOpportunities.length > 0 ? (
               <div
-                className="hidden px-4 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_150px_110px_110px_112px] md:items-center"
-                aria-hidden="true"
+                className="hidden px-4 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_110px_150px_110px_110px_112px] md:items-center"
+                role="row"
               >
-                <span>Opportunity</span>
-                <span>Account</span>
-                <span>Coverage</span>
-                <span>Missing</span>
-                <span>Close</span>
+                <SortableHeaderButton
+                  active={sort.key === "opportunity"}
+                  direction={sort.direction}
+                  label="Opportunity"
+                  onClick={() => updateOpportunitySort("opportunity")}
+                />
+                <SortableHeaderButton
+                  active={sort.key === "account"}
+                  direction={sort.direction}
+                  label="Account"
+                  onClick={() => updateOpportunitySort("account")}
+                />
+                <SortableHeaderButton
+                  active={sort.key === "created"}
+                  direction={sort.direction}
+                  label="Created"
+                  onClick={() => updateOpportunitySort("created", "desc")}
+                />
+                <SortableHeaderButton
+                  active={sort.key === "coverage"}
+                  direction={sort.direction}
+                  label="Coverage"
+                  onClick={() => updateOpportunitySort("coverage", "desc")}
+                />
+                <SortableHeaderButton
+                  active={sort.key === "missing" || sort.key === "gaps"}
+                  direction={sort.direction}
+                  label="Missing"
+                  onClick={() => updateOpportunitySort("missing", "desc")}
+                />
+                <SortableHeaderButton
+                  active={sort.key === "close"}
+                  direction={sort.direction}
+                  label="Close"
+                  onClick={() => updateOpportunitySort("close")}
+                />
                 <span className="text-right">Actions</span>
               </div>
             ) : null}
@@ -14637,7 +14881,7 @@ function OpportunitiesView({
               return (
                 <div
                   key={opportunity.id}
-                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_150px_110px_110px_112px] md:items-center"
+                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_110px_150px_110px_110px_112px] md:items-center"
                   tabIndex={0}
                   aria-label={`Open ${opportunity.name}`}
                   onClick={() => onOpportunitySelect(opportunity.id)}
@@ -14668,6 +14912,10 @@ function OpportunitiesView({
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground md:hidden">Account</p>
                     <p className="truncate text-sm font-medium">{account?.name ?? "No account linked"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground md:hidden">Created</p>
+                    <p className="truncate text-sm font-medium">{opportunity.createdAt}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground md:hidden">Coverage</p>
@@ -14805,6 +15053,7 @@ function CallsView({
   const [query, setQuery] = React.useState("")
   const [typeFilter, setTypeFilter] = React.useState("all")
   const [statusFilter, setStatusFilter] = React.useState("all")
+  const [callSort, setCallSort] = React.useState<CallTableSort>(defaultCallTableSort)
   const [callsPage, setCallsPage] = React.useState(1)
   const accountById = React.useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
   const opportunityById = React.useMemo(
@@ -14818,27 +15067,34 @@ function CallsView({
   )
   const visibleCalls = React.useMemo(
     () =>
-      getFuzzyMatches(
-        calls
-          .filter((call) => typeFilter === "all" || call.type === typeFilter)
-          .filter((call) => statusFilter === "all" || getCallDisplayStatus(call, activeCallId) === statusFilter),
-        query,
-        (call) => {
-          const relatedOpportunity = opportunityById.get(call.opportunityId)
-          const relatedAccount = relatedOpportunity ? accountById.get(relatedOpportunity.accountId) : undefined
+      sortCallTableRows(
+        getFuzzyMatches(
+          calls
+            .filter((call) => typeFilter === "all" || call.type === typeFilter)
+            .filter((call) => statusFilter === "all" || getCallDisplayStatus(call, activeCallId) === statusFilter),
+          query,
+          (call) => {
+            const relatedOpportunity = opportunityById.get(call.opportunityId)
+            const relatedAccount = relatedOpportunity ? accountById.get(relatedOpportunity.accountId) : undefined
 
-          return getCallSearchText({
-            account: relatedAccount,
-            call,
-            opportunity: relatedOpportunity,
-            opportunityDraft: relatedOpportunity ? opportunityDrafts[relatedOpportunity.id] : undefined,
-            transcript: transcriptsByCallId[call.id] ?? relatedOpportunity?.transcript ?? [],
-          })
-        }
+            return getCallSearchText({
+              account: relatedAccount,
+              call,
+              opportunity: relatedOpportunity,
+              opportunityDraft: relatedOpportunity ? opportunityDrafts[relatedOpportunity.id] : undefined,
+              transcript: transcriptsByCallId[call.id] ?? relatedOpportunity?.transcript ?? [],
+            })
+          }
+        ),
+        callSort,
+        accountById,
+        opportunityById,
+        activeCallId
       ),
     [
       accountById,
       activeCallId,
+      callSort,
       calls,
       opportunityById,
       opportunityDrafts,
@@ -14859,7 +15115,19 @@ function CallsView({
   const hasCallFilters = Boolean(query.trim()) || typeFilter !== "all" || statusFilter !== "all"
   React.useEffect(() => {
     setCallsPage(1)
-  }, [query, statusFilter, typeFilter])
+  }, [callSort, query, statusFilter, typeFilter])
+
+  const updateCallSort = React.useCallback((key: CallTableSortKey, defaultDirection: SortDirection = "asc") => {
+    setCallSort((currentSort) => ({
+      key,
+      direction: getNextSortDirection({
+        currentDirection: currentSort.direction,
+        currentKey: currentSort.key,
+        defaultDirection,
+        nextKey: key,
+      }),
+    }))
+  }, [])
 
   React.useEffect(() => {
     if (callsPage > totalCallPages) setCallsPage(totalCallPages)
@@ -14934,6 +15202,7 @@ function CallsView({
                   setQuery("")
                   setTypeFilter("all")
                   setStatusFilter("all")
+                  setCallSort(defaultCallTableSort)
                   setCallsPage(1)
                 }}
               >
@@ -14946,13 +15215,38 @@ function CallsView({
             {paginatedCalls.length > 0 ? (
               <div
                 className="hidden px-4 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_140px_110px_110px_112px] md:items-center"
-                aria-hidden="true"
+                role="row"
               >
-                <span>Call</span>
-                <span>Account</span>
-                <span>Status</span>
-                <span>Duration</span>
-                <span>Date</span>
+                <SortableHeaderButton
+                  active={callSort.key === "call"}
+                  direction={callSort.direction}
+                  label="Call"
+                  onClick={() => updateCallSort("call")}
+                />
+                <SortableHeaderButton
+                  active={callSort.key === "account"}
+                  direction={callSort.direction}
+                  label="Account"
+                  onClick={() => updateCallSort("account")}
+                />
+                <SortableHeaderButton
+                  active={callSort.key === "status"}
+                  direction={callSort.direction}
+                  label="Status"
+                  onClick={() => updateCallSort("status")}
+                />
+                <SortableHeaderButton
+                  active={callSort.key === "duration"}
+                  direction={callSort.direction}
+                  label="Duration"
+                  onClick={() => updateCallSort("duration", "desc")}
+                />
+                <SortableHeaderButton
+                  active={callSort.key === "date"}
+                  direction={callSort.direction}
+                  label="Date"
+                  onClick={() => updateCallSort("date", "desc")}
+                />
                 <span className="text-right">Actions</span>
               </div>
             ) : null}
@@ -16172,7 +16466,7 @@ function PersonalAccountView({
             />
             <EditableTextField
               id="personal-region"
-              label="Region"
+              label="Location"
               value={draft.region}
               onChange={(value) => updateDraft("region", value)}
             />

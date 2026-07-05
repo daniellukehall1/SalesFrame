@@ -40,6 +40,8 @@ export type AccountNavItem = {
   name: string
   description: string
   website: string
+  createdAt: string
+  createdAtIso: string | null
   currency: CurrencyCode
   logoDomain: string
   logoStatus: "resolved" | "fallback" | "missing"
@@ -136,6 +138,25 @@ export function NavProjects({
     })
   }
 
+  const handleAccountButtonClick = (account: AccountNavItem) => {
+    if (account.opportunities.length) {
+      setExpandedAccountIds((currentIds) => {
+        const nextIds = new Set(currentIds)
+        const shouldCollapse = account.id === activeAccountId && nextIds.has(account.id)
+
+        if (shouldCollapse) {
+          nextIds.delete(account.id)
+        } else {
+          nextIds.add(account.id)
+        }
+
+        return nextIds
+      })
+    }
+
+    onAccountSelect(account.id)
+  }
+
   const handleToggleAllAccounts = () => {
     setExpandedAccountIds((currentIds) => {
       const nextIds = new Set(currentIds)
@@ -194,7 +215,7 @@ export function NavProjects({
                     size="lg"
                     className="h-11 py-2"
                     isActive={account.id === activeAccountId}
-                    onClick={() => onAccountSelect(account.id)}
+                    onClick={() => handleAccountButtonClick(account)}
                   >
                     {account.icon}
                     <div className="grid flex-1 gap-0.5 text-left">

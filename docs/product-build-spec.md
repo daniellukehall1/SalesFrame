@@ -185,7 +185,7 @@ Steps:
 1. Basics
    - Account name is the only required field.
    - Currency defaults from the workspace and can be changed per account.
-   - Website/domain, industry, and region are optional.
+   - Website/domain, industry, and location are optional.
    - If a website/domain is entered, the UI can infer a display name only when the account name is blank.
    - Duplicate detection should warn on matching account name or website/domain.
    - If a duplicate is detected, the user should be able to open the existing account instead of creating another record.
@@ -507,7 +507,7 @@ Editable account fields:
 - Website
 - Industry
 - Employee count
-- Region
+- Location
 - Currency
 - Current tools
 - Strategic initiatives
@@ -612,7 +612,7 @@ This should be treated as the database design starting point, not a final migrat
   - website
   - industry
   - employee_count
-  - region
+  - region (displayed as Location in the app)
   - currency
   - owner_user_id
   - current_tools

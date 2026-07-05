@@ -145,7 +145,7 @@ const commonAccountFields: CsvImportField[] = [
   },
   {
     key: "region",
-    label: "Region",
+    label: "Location",
     aliases: ["region", "country", "territory", "location", "area"],
   },
   {

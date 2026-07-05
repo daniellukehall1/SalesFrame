@@ -40,6 +40,8 @@ export function createStarterOpportunity({
     stage: "Discovery",
     amount: "Unqualified",
     closeDate: "Not set",
+    createdAt: "Not set",
+    createdAtIso: null,
     coverage: 0,
     missing: 11,
     weak: 0,

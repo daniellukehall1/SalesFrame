@@ -253,6 +253,8 @@ export type Opportunity = {
   stage: string
   amount: string
   closeDate: string
+  createdAt: string
+  createdAtIso: string | null
   coverage: number
   missing: number
   weak: number
