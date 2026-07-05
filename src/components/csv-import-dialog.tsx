@@ -6,6 +6,7 @@ import {
   DownloadIcon,
   FileSpreadsheetIcon,
   ListChecksIcon,
+  SparklesIcon,
   Table2Icon,
   UploadIcon,
   XIcon,
@@ -36,6 +37,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs"
+import { Switch } from "@/components/ui/switch"
 import {
   applyCsvRowDecisions,
   buildCsvColumnAutoMapping,
@@ -120,6 +122,7 @@ export function CsvImportDialog({
   const [page, setPage] = React.useState(1)
   const [parseMessage, setParseMessage] = React.useState("")
   const [isImporting, setIsImporting] = React.useState(false)
+  const [enrichmentEnabled, setEnrichmentEnabled] = React.useState(true)
   const [summary, setSummary] = React.useState<CsvImportSummary | null>(null)
   const lastWorkspaceIdRef = React.useRef(workspaceId)
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
@@ -289,6 +292,8 @@ export function CsvImportDialog({
         ? await requestAccountCsvImport({
             decisions: rowDecisions,
             defaultCurrency,
+            enrichmentEnabled,
+            fileName,
             mapping,
             rows,
             workspaceId,
@@ -296,6 +301,8 @@ export function CsvImportDialog({
         : await requestOpportunityCsvImport({
             decisions: rowDecisions,
             defaultCurrency,
+            enrichmentEnabled,
+            fileName,
             mapping,
             rows,
             workspaceId,
@@ -340,6 +347,7 @@ export function CsvImportDialog({
     setFilter("all")
     setPage(1)
     setParseMessage("")
+    setEnrichmentEnabled(true)
     setIsImporting(false)
     setSummary(null)
   }
@@ -596,6 +604,25 @@ export function CsvImportDialog({
                   </Button>
                 </div>
               </div>
+              <div className="flex flex-col gap-3 rounded-lg bg-muted/30 p-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 items-start gap-3">
+                  <SparklesIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <Label htmlFor="csv-import-enrichment" className="text-sm font-medium">
+                      Enrich accounts after import
+                    </Label>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                      SalesFrame imports the file now, then researches account fields quietly in the background.
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  id="csv-import-enrichment"
+                  checked={enrichmentEnabled}
+                  disabled={isImporting}
+                  onCheckedChange={setEnrichmentEnabled}
+                />
+              </div>
             </div>
           ) : null}
 
@@ -607,7 +634,7 @@ export function CsvImportDialog({
                   <p className="font-medium">Import complete</p>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  SalesFrame refreshed the selected workspace after the import completed.
+                  {getEnrichmentSummaryMessage(summary)}
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-4">
@@ -616,6 +643,19 @@ export function CsvImportDialog({
                 <SummaryTile label="Skipped" value={summary.skipped} />
                 <SummaryTile label="Needs review" value={summary.failed} destructive={summary.failed > 0} />
               </div>
+              {summary.enrichment.enabled && summary.enrichment.status !== "none" ? (
+                <div className="rounded-lg bg-muted/30 p-4">
+                  <div className="flex items-start gap-3">
+                    <SparklesIcon className="mt-0.5 size-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium">AI enrichment</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {getEnrichmentDetailMessage(summary)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               {summary.failures.length ? (
                 <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4" role="alert">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -755,6 +795,46 @@ function SummaryTile({ destructive, label, value }: { destructive?: boolean; lab
       <p className={cn("mt-1 text-xl font-semibold", destructive && "text-destructive")}>{value}</p>
     </div>
   )
+}
+
+function getEnrichmentSummaryMessage(summary: CsvImportSummary) {
+  if (!summary.enrichment.enabled) {
+    return "SalesFrame refreshed the selected workspace after the import completed."
+  }
+
+  if (summary.enrichment.status === "paused_missing_key") {
+    return `Import complete. ${summary.enrichment.paused} accounts are paused until an OpenAI key is saved.`
+  }
+
+  if (summary.enrichment.status === "queued") {
+    return `Import complete. ${summary.enrichment.queued} accounts are queued for enrichment.`
+  }
+
+  if (summary.enrichment.status === "unavailable") {
+    return "Import complete. Enrichment status needs another check from the Data import section."
+  }
+
+  return "SalesFrame refreshed the selected workspace after the import completed."
+}
+
+function getEnrichmentDetailMessage(summary: CsvImportSummary) {
+  if (summary.enrichment.status === "paused_missing_key") {
+    return "Enrichment is paused while this workspace waits for an OpenAI key. Save a key in Settings and SalesFrame will pick the queue back up."
+  }
+
+  if (summary.enrichment.status === "queued") {
+    const tracked = summary.enrichment.alreadyTracked
+      ? ` ${summary.enrichment.alreadyTracked} were already in the queue.`
+      : ""
+
+    return `SalesFrame will research those accounts in the background.${tracked}`
+  }
+
+  if (summary.enrichment.status === "unavailable") {
+    return "The import succeeded. SalesFrame could not update the enrichment queue yet, so check Data import again in a moment."
+  }
+
+  return "No new accounts needed enrichment from this import."
 }
 
 function getStepProgress(step: CsvImportStep) {

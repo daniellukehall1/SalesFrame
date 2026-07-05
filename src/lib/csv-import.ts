@@ -93,6 +93,14 @@ export type CsvImportRowDecision = {
 
 export type CsvImportSummary = {
   created: number
+  enrichment: {
+    alreadyTracked: number
+    enabled: boolean
+    paused: number
+    queued: number
+    skipped: number
+    status: "off" | "queued" | "paused_missing_key" | "none" | "unavailable"
+  }
   failed: number
   failures: {
     message: string

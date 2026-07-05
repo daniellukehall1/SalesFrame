@@ -1,6 +1,7 @@
 import type { Config, Context } from "@netlify/functions"
+import type { SupabaseClient } from "@supabase/supabase-js"
 
-import type { Json, TablesUpdate } from "../../src/lib/supabase/database.types"
+import type { Database, Json, TablesUpdate } from "../../src/lib/supabase/database.types"
 import { AppError, badRequest, dataResponse, errorResponse, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { buildAccountLogoMetadata } from "./_shared/account-logo"
 import { callOpenAiWebSearchJson } from "./_shared/openai"
@@ -398,19 +399,21 @@ function mapSignalsToProfile({
   }
 }
 
-export default async function handler(request: Request, _context: Context) {
-  if (request.method !== "POST") return errorResponse(methodNotAllowed())
-
+export async function runAccountEnrichmentForAccount({
+  accountId,
+  rateLimit = true,
+  supabase,
+  userId,
+}: {
+  accountId: string
+  rateLimit?: boolean
+  supabase: SupabaseClient<Database>
+  userId: string
+}) {
   let accountForFailedRun: { id: string; workspace_id: string; name?: string | null; website?: string | null } | null = null
-  let userIdForFailedRun: string | null = null
 
   try {
-    const payload = await readJson<AccountEnrichmentPayload>(request)
-    if (!payload.accountId) throw badRequest("accountId is required.", "account_id_required")
-
-    const { supabase, user } = await requireUser(request)
-    userIdForFailedRun = user.id
-    const authorizedAccount = await authorizeAccount(user.id, payload.accountId, supabase)
+    const authorizedAccount = await authorizeAccount(userId, accountId, supabase)
     const { data: account, error: accountError } = await supabase
       .from("accounts")
       .select("*")
@@ -426,12 +429,14 @@ export default async function handler(request: Request, _context: Context) {
     if (!accountName) throw badRequest("Account name is required before enrichment.", "account_name_required")
     if (!accountDomain) throw badRequest("Website or domain is required before enrichment.", "account_domain_required")
 
-    assertRateLimit({
-      key: `${user.id}:${authorizedAccount.workspace_id}`,
-      limit: 12,
-      name: "account enrichment",
-      windowMs: 10 * 60 * 1000,
-    })
+    if (rateLimit) {
+      assertRateLimit({
+        key: `${userId}:${authorizedAccount.workspace_id}`,
+        limit: 12,
+        name: "account enrichment",
+        windowMs: 10 * 60 * 1000,
+      })
+    }
 
     const [profileStorageCheck, runStorageCheck] = await Promise.all([
       supabase.from("account_enrichment_profiles").select("id").limit(1),
@@ -441,7 +446,7 @@ export default async function handler(request: Request, _context: Context) {
     if (isMissingRelationError(storageError)) throw missingEnrichmentStorageError()
     if (storageError) throw new Error(storageError.message)
 
-    const apiKey = await getDecryptedOpenAiKey(supabase, user.id, authorizedAccount.workspace_id)
+    const apiKey = await getDecryptedOpenAiKey(supabase, userId, authorizedAccount.workspace_id)
     const openAiResponse = await callOpenAiWebSearchJson<AccountEnrichmentResult>({
       apiKey,
       blockedDomains: ["quora.com", "wikipedia.org"],
@@ -536,7 +541,7 @@ export default async function handler(request: Request, _context: Context) {
       .upsert(mapSignalsToProfile({
         accountId: account.id,
         result,
-        userId: user.id,
+        userId,
         workspaceId: authorizedAccount.workspace_id,
       }), { onConflict: "workspace_id,account_id" })
       .select("*")
@@ -549,7 +554,7 @@ export default async function handler(request: Request, _context: Context) {
       .insert({
         account_id: account.id,
         applied_core_updates: updatePlan.applied as Json,
-        created_by_user_id: user.id,
+        created_by_user_id: userId,
         proposed_core_updates: updatePlan.proposed as Json,
         requested_account_name: accountName,
         requested_domain: accountDomain,
@@ -564,20 +569,19 @@ export default async function handler(request: Request, _context: Context) {
 
     if (runError) throw new Error(runError.message)
 
-    return dataResponse({
+    return {
       account: updatedAccount,
       appliedCoreUpdates: updatePlan.applied,
       profile,
       run,
       suggestedCoreUpdates: updatePlan.suggested,
-    })
+    }
   } catch (error) {
-    if (accountForFailedRun && userIdForFailedRun) {
+    if (accountForFailedRun) {
       try {
-        const { supabase } = await requireUser(request)
         await supabase.from("account_enrichment_runs").insert({
           account_id: accountForFailedRun.id,
-          created_by_user_id: userIdForFailedRun,
+          created_by_user_id: userId,
           error_message: error instanceof Error ? error.message : "Account enrichment failed.",
           requested_account_name: accountForFailedRun.name ?? null,
           requested_domain: accountForFailedRun.website ?? null,
@@ -589,6 +593,27 @@ export default async function handler(request: Request, _context: Context) {
       }
     }
 
+    throw error
+  }
+}
+
+export default async function handler(request: Request, _context: Context) {
+  if (request.method !== "POST") return errorResponse(methodNotAllowed())
+
+  try {
+    const payload = await readJson<AccountEnrichmentPayload>(request)
+    if (!payload.accountId) throw badRequest("accountId is required.", "account_id_required")
+
+    const { supabase, user } = await requireUser(request)
+
+    return dataResponse(
+      await runAccountEnrichmentForAccount({
+        accountId: payload.accountId,
+        supabase,
+        userId: user.id,
+      })
+    )
+  } catch (error) {
     return errorResponse(error)
   }
 }

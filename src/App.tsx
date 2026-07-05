@@ -133,7 +133,7 @@ import {
 import type { AudioPreflightResult } from "@/lib/call-audio-preflight"
 import { sectionCards, viewLabels } from "@/data/navigation-content"
 import { formatCurrencyAmount } from "@/lib/currency-utils"
-import type { CsvImportType } from "@/lib/csv-import"
+import { makeFailedRowsCsv, type CsvImportType } from "@/lib/csv-import"
 import { reportClientError } from "@/lib/client-error-reporting"
 import { normalizeCloseDateForPersistence } from "@/lib/date-utils"
 import { getUserFacingErrorMessage, isPermissionDeniedError } from "@/lib/user-facing-errors"
@@ -142,7 +142,9 @@ import type { Database } from "@/lib/supabase/database.types"
 import {
   appendErrorReference,
   deleteOpenAiKey,
+  getBulkImportStatus,
   getOpenAiKeyStatus,
+  retryFailedBulkEnrichment,
   requestAccountEnrichment,
   requestCustomerResearch,
   requestLiveGuidance,
@@ -150,6 +152,7 @@ import {
   requestPostCallOutputs,
   requestSellerDomainResearch,
   saveOpenAiKey,
+  type BulkImportStatusResponse,
   type OpenAiKeyStatus,
 } from "@/lib/server-functions"
 import {
@@ -2136,6 +2139,10 @@ function App() {
   const [authStatusTone, setAuthStatusTone] = React.useState<"success" | "error" | "info">("info")
   const [savedOpenAiKeyState, setSavedOpenAiKeyState] = React.useState<SavedOpenAiKeyState | null>(null)
   const [openAiKeyStatusMessage, setOpenAiKeyStatusMessage] = React.useState("")
+  const [bulkImportStatus, setBulkImportStatus] = React.useState<BulkImportStatusResponse | null>(null)
+  const [bulkImportStatusMessage, setBulkImportStatusMessage] = React.useState("")
+  const [bulkImportStatusLoading, setBulkImportStatusLoading] = React.useState(false)
+  const [bulkImportStatusRefreshToken, setBulkImportStatusRefreshToken] = React.useState(0)
   const [legalPage, setLegalPage] = React.useState<LegalPageId | null>(() => getLegalPageFromPath())
   const [loadingWorkspace, setLoadingWorkspace] = React.useState<WorkspaceNavItem | null>(null)
   const [onboardingOpen, setOnboardingOpen] = React.useState(false)
@@ -2464,8 +2471,55 @@ function App() {
 
     setSavedOpenAiKeyState(nextState)
     setOpenAiKeyStatusMessage("")
+    setBulkImportStatusRefreshToken((value) => value + 1)
 
     return nextState
+  }, [activeWorkspaceId])
+
+  const refreshBulkImportStatus = React.useCallback(async () => {
+    if (!authSession || !activeWorkspaceId) {
+      setBulkImportStatus(null)
+      setBulkImportStatusMessage("")
+      return
+    }
+
+    setBulkImportStatusLoading(true)
+    setBulkImportStatusMessage("")
+
+    try {
+      const status = await getBulkImportStatus(activeWorkspaceId)
+      setBulkImportStatus(status)
+    } catch (caughtError: unknown) {
+      setBulkImportStatus(null)
+      setBulkImportStatusMessage(
+        getUserFacingErrorMessage(caughtError, "Import enrichment status needs another check.")
+      )
+    } finally {
+      setBulkImportStatusLoading(false)
+    }
+  }, [activeWorkspaceId, authSession])
+
+  React.useEffect(() => {
+    refreshBulkImportStatus()
+  }, [bulkImportStatusRefreshToken, refreshBulkImportStatus])
+
+  const handleRetryFailedBulkEnrichment = React.useCallback(async () => {
+    if (!activeWorkspaceId) return
+
+    setBulkImportStatusLoading(true)
+    setBulkImportStatusMessage("")
+
+    try {
+      const status = await retryFailedBulkEnrichment(activeWorkspaceId)
+      setBulkImportStatus(status)
+      setBulkImportStatusMessage("SalesFrame put failed enrichment jobs back in the queue.")
+    } catch (caughtError: unknown) {
+      setBulkImportStatusMessage(
+        getUserFacingErrorMessage(caughtError, "SalesFrame needs another try before it can retry enrichment.")
+      )
+    } finally {
+      setBulkImportStatusLoading(false)
+    }
   }, [activeWorkspaceId])
 
   const handleOpenCsvImport = React.useCallback((mode: CsvImportType) => {
@@ -5403,11 +5457,16 @@ function App() {
               />
             ) : profileViews.includes(activeView) ? (
               <PersonalAccountView
+                bulkImportStatus={bulkImportStatus}
+                bulkImportStatusLoading={bulkImportStatusLoading}
+                bulkImportStatusMessage={bulkImportStatusMessage}
                 profile={personalAccountProfile}
                 savedOpenAiKeyState={savedOpenAiKeyState}
                 sellerResearchProfile={sellerResearchProfile}
                 workspaceId={activeWorkspaceId}
                 onOpenCsvImport={handleOpenCsvImport}
+                onRefreshBulkImportStatus={refreshBulkImportStatus}
+                onRetryFailedBulkEnrichment={handleRetryFailedBulkEnrichment}
                 onProfileChange={setPersonalAccountProfile}
                 onSellerResearchProfileChange={setSellerResearchProfile}
                 onOpenSettings={() => handleNavigate("ai")}
@@ -5451,10 +5510,13 @@ function App() {
             ) : settingsViews.includes(activeView) ? (
               <SettingsView
                 activeView={activeView}
+                bulkImportStatus={bulkImportStatus}
                 workspaceId={activeWorkspaceId}
                 keyStatusMessage={openAiKeyStatusMessage}
                 savedKeyState={savedOpenAiKeyState}
+                onKeySaved={() => setBulkImportStatusRefreshToken((value) => value + 1)}
                 onSavedKeyStateChange={setSavedOpenAiKeyState}
+                onViewImportStatus={() => handleNavigate("profile-account")}
               />
             ) : (
               <SectionView
@@ -5545,6 +5607,7 @@ function App() {
             mode={csvImportMode}
             onImportComplete={() => {
               setWorkspaceRefreshToken((value) => value + 1)
+              setBulkImportStatusRefreshToken((value) => value + 1)
               if (onboardingCsvImportActive) {
                 setOnboardingCompletedImports((items) =>
                   items.includes(csvImportMode) ? items : [...items, csvImportMode]
@@ -6073,11 +6136,15 @@ function AppHeader({
         <BreadcrumbList className="flex-nowrap overflow-hidden">
           {breadcrumbItems.map((item, index) => {
             const isCurrent = index === breadcrumbItems.length - 1
+            const isFirst = index === 0
+            const isVisibleOnMobile = isFirst || isCurrent
 
             return (
               <React.Fragment key={`${item.label}-${index}`}>
-                {index > 0 ? <BreadcrumbSeparator className="hidden sm:flex" /> : null}
-                <BreadcrumbItem className={cn(index > 0 && "hidden min-w-0 sm:inline-flex")}>
+                {index > 0 ? (
+                  <BreadcrumbSeparator className={cn("hidden sm:flex", isCurrent && "flex")} />
+                ) : null}
+                <BreadcrumbItem className={cn("min-w-0", !isVisibleOnMobile && "hidden sm:inline-flex")}>
                   {isCurrent || !item.onSelect ? (
                     <BreadcrumbPage className="max-w-[11rem] truncate sm:max-w-[15rem]">
                       {item.label}
@@ -15381,20 +15448,30 @@ function CustomFrameworkEditor({
 }
 
 function PersonalAccountView({
+  bulkImportStatus,
+  bulkImportStatusLoading,
+  bulkImportStatusMessage,
   profile,
   savedOpenAiKeyState,
   sellerResearchProfile,
   workspaceId,
   onOpenCsvImport,
+  onRefreshBulkImportStatus,
+  onRetryFailedBulkEnrichment,
   onProfileChange,
   onSellerResearchProfileChange,
   onOpenSettings,
 }: {
+  bulkImportStatus: BulkImportStatusResponse | null
+  bulkImportStatusLoading: boolean
+  bulkImportStatusMessage: string
   profile: PersonalAccountProfile
   savedOpenAiKeyState: SavedOpenAiKeyState | null
   sellerResearchProfile: SellerResearchProfile
   workspaceId: string
   onOpenCsvImport: (mode: CsvImportType) => void
+  onRefreshBulkImportStatus: () => void
+  onRetryFailedBulkEnrichment: () => void
   onProfileChange: (profile: PersonalAccountProfile) => void
   onSellerResearchProfileChange: (profile: SellerResearchProfile) => void
   onOpenSettings: () => void
@@ -15761,6 +15838,14 @@ function PersonalAccountView({
               Import opportunities
             </Button>
           </div>
+          <BulkImportStatusPanel
+            loading={bulkImportStatusLoading}
+            message={bulkImportStatusMessage}
+            status={bulkImportStatus}
+            onOpenSettings={onOpenSettings}
+            onRefresh={onRefreshBulkImportStatus}
+            onRetryFailed={onRetryFailedBulkEnrichment}
+          />
         </CardContent>
       </Card>
 
@@ -15800,6 +15885,179 @@ function PersonalAccountView({
 
     </div>
   )
+}
+
+function BulkImportStatusPanel({
+  loading,
+  message,
+  status,
+  onOpenSettings,
+  onRefresh,
+  onRetryFailed,
+}: {
+  loading: boolean
+  message: string
+  status: BulkImportStatusResponse | null
+  onOpenSettings: () => void
+  onRefresh: () => void
+  onRetryFailed: () => void
+}) {
+  const runs = status?.runs ?? []
+  const pausedCount = status?.pausedMissingKeyCount ?? 0
+  const failedCount = runs.reduce((total, run) => total + run.enrichment.failed, 0)
+
+  return (
+    <div className="grid gap-3 rounded-lg bg-muted/30 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <SparklesIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Recent imports and enrichment</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              SalesFrame imports the data first, then enriches accounts quietly in the background.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {failedCount > 0 ? (
+            <Button variant="outline" size="sm" className="gap-2" disabled={loading} onClick={onRetryFailed}>
+              <SparklesIcon />
+              Retry failed
+            </Button>
+          ) : null}
+          <Button variant="outline" size="sm" disabled={loading} onClick={onRefresh}>
+            {loading ? "Refreshing..." : "Refresh status"}
+          </Button>
+        </div>
+      </div>
+
+      {pausedCount > 0 ? (
+        <div className="rounded-lg bg-background/70 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">AI enrichment is paused</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {pausedCount} accounts are waiting for an OpenAI key before SalesFrame can research them.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" className="gap-2" onClick={onOpenSettings}>
+              <KeyRoundIcon />
+              Open settings
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {message ? (
+        <p
+          className={cn("text-sm", /needs|try|failed|error/i.test(message) ? "text-destructive" : "text-muted-foreground")}
+          aria-live={/needs|try|failed|error/i.test(message) ? "assertive" : "polite"}
+          role={/needs|try|failed|error/i.test(message) ? "alert" : "status"}
+        >
+          {message}
+        </p>
+      ) : null}
+
+      {runs.length > 0 ? (
+        <div className="grid gap-2">
+          {runs.map((run) => (
+            <BulkImportRunRow key={run.id} run={run} />
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg bg-background/70 p-3 text-sm text-muted-foreground">
+          No imports yet. When you upload a CSV, enrichment progress will show here.
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BulkImportRunRow({ run }: { run: BulkImportStatusResponse["runs"][number] }) {
+  const activeCount = run.enrichment.queued + run.enrichment.running + run.enrichment.retrying
+  const completedCount = run.enrichment.completed
+  const pausedCount = run.enrichment.paused
+  const failedCount = run.enrichment.failed
+  const summary = [
+    `${run.rows.created} created`,
+    `${run.rows.updated} updated`,
+    `${run.rows.skipped} skipped`,
+    run.rows.failed ? `${run.rows.failed} needs review` : "",
+  ].filter(Boolean).join(" / ")
+  const enrichmentLine = run.enrichment.total === 0
+    ? "No account enrichment queued for this import."
+    : [
+        completedCount ? `${completedCount} completed` : "",
+        activeCount ? `${activeCount} in progress` : "",
+        pausedCount ? `${pausedCount} paused` : "",
+        failedCount ? `${failedCount} failed` : "",
+        run.enrichment.skipped ? `${run.enrichment.skipped} skipped` : "",
+      ].filter(Boolean).join(" / ")
+  const icon =
+    failedCount > 0 ? <CircleAlertIcon className="size-4 text-destructive" /> :
+      pausedCount > 0 ? <KeyRoundIcon className="size-4 text-muted-foreground" /> :
+        run.enrichment.total > 0 && completedCount >= run.enrichment.total ? <CheckCircle2Icon className="size-4 text-emerald-600" /> :
+          <Clock3Icon className="size-4 text-muted-foreground" />
+
+  return (
+    <div className="rounded-lg bg-background/70 p-3">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5">{icon}</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <p className="truncate text-sm font-medium">
+              {run.importType === "accounts" ? "Accounts import" : "Opportunities import"}
+              {run.fileName ? ` / ${run.fileName}` : ""}
+            </p>
+            <p className="text-xs text-muted-foreground">Updated {formatSavedAt(run.lastUpdatedAt)}</p>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{enrichmentLine}</p>
+          {run.enrichment.total > 0 ? (
+            <Progress className="mt-3 h-2" value={run.progress} aria-label="AI enrichment progress" />
+          ) : null}
+          {run.failureRows.length > 0 ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3 gap-2"
+              onClick={() => downloadBulkImportFailedRows(run)}
+            >
+              <DownloadIcon />
+              Download failed rows
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function downloadBulkImportFailedRows(run: BulkImportStatusResponse["runs"][number]) {
+  const csv = makeFailedRowsCsv({
+    created: run.rows.created,
+    enrichment: {
+      alreadyTracked: run.enrichment.alreadyTracked,
+      enabled: run.enrichment.total > 0,
+      paused: run.enrichment.paused,
+      queued: run.enrichment.queued,
+      skipped: run.enrichment.skipped,
+      status: "none",
+    },
+    failed: run.failureRows.length,
+    failures: run.failureRows,
+    skipped: run.rows.skipped,
+    updated: run.rows.updated,
+  })
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = `${run.importType}-import-review-${run.id.slice(0, 8)}.csv`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 function SellerResearchProfileCard({
@@ -16296,16 +16554,22 @@ function WorkspaceStateView({
 
 function SettingsView({
   activeView,
+  bulkImportStatus,
   workspaceId,
   keyStatusMessage,
   savedKeyState,
+  onKeySaved,
   onSavedKeyStateChange,
+  onViewImportStatus,
 }: {
   activeView: string
+  bulkImportStatus: BulkImportStatusResponse | null
   workspaceId: string
   keyStatusMessage: string
   savedKeyState: SavedOpenAiKeyState | null
+  onKeySaved: () => void
   onSavedKeyStateChange: (state: SavedOpenAiKeyState | null) => void
+  onViewImportStatus: () => void
 }) {
   const [apiKey, setApiKey] = React.useState("")
   const [isSavingKey, setIsSavingKey] = React.useState(false)
@@ -16318,6 +16582,7 @@ function SettingsView({
   const [removeKeyError, setRemoveKeyError] = React.useState("")
   const hasApiKey = apiKey.trim().length > 0
   const hasSavedKey = savedKeyState !== null
+  const pausedEnrichmentCount = bulkImportStatus?.pausedMissingKeyCount ?? 0
 
   React.useEffect(() => {
     setCaptureSettings(readCaptureSettings(workspaceId))
@@ -16371,6 +16636,7 @@ function SettingsView({
         }
 
       onSavedKeyStateChange(nextState)
+      onKeySaved()
       setApiKey("")
       setSaveMessageTone("success")
       setSaveMessage("OpenAI key connection saved.")
@@ -16522,6 +16788,22 @@ function SettingsView({
                 </p>
               ) : null}
             </div>
+
+            {pausedEnrichmentCount > 0 ? (
+              <div className="rounded-lg bg-muted/30 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">AI enrichment paused while waiting for an OpenAI key</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {pausedEnrichmentCount} accounts are ready to research once this workspace has a saved key.
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={onViewImportStatus}>
+                    View import status
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             <div className="grid gap-3 md:grid-cols-2">
               {[

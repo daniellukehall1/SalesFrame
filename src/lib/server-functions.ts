@@ -56,6 +56,39 @@ export type AccountEnrichmentResponse = {
   suggestedCoreUpdates: Record<string, unknown>
 }
 
+export type BulkImportRunStatus = {
+  createdAt: string
+  failureRows: CsvImportSummary["failures"]
+  fileName: string | null
+  id: string
+  importType: string
+  lastUpdatedAt: string
+  progress: number
+  rowCount: number
+  rows: {
+    created: number
+    failed: number
+    skipped: number
+    updated: number
+  }
+  enrichment: {
+    alreadyTracked: number
+    completed: number
+    failed: number
+    paused: number
+    queued: number
+    retrying: number
+    running: number
+    skipped: number
+    total: number
+  }
+}
+
+export type BulkImportStatusResponse = {
+  pausedMissingKeyCount: number
+  runs: BulkImportRunStatus[]
+}
+
 type FunctionRequestOptions = {
   body?: unknown
   method?: "DELETE" | "GET" | "POST"
@@ -82,6 +115,8 @@ export class SalesFrameFunctionError extends Error {
 export type CsvImportRequestPayload = {
   decisions: CsvImportRowDecision[]
   defaultCurrency: string
+  enrichmentEnabled?: boolean
+  fileName?: string
   mapping: CsvImportColumnMapping
   rows: CsvImportRow[]
   workspaceId: string
@@ -414,5 +449,16 @@ export function requestOpportunityCsvImport(body: CsvImportRequestPayload) {
   return callFunction<CsvImportSummary>("/api/import/opportunities", {
     method: "POST",
     body,
+  })
+}
+
+export function getBulkImportStatus(workspaceId: string) {
+  return callFunction<BulkImportStatusResponse>(`/api/import/enrichment-status?workspaceId=${encodeURIComponent(workspaceId)}`)
+}
+
+export function retryFailedBulkEnrichment(workspaceId: string) {
+  return callFunction<BulkImportStatusResponse>("/api/import/enrichment-status", {
+    method: "POST",
+    body: { action: "retry_failed", workspaceId },
   })
 }

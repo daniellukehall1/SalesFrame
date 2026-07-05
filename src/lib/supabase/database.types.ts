@@ -918,6 +918,136 @@ export type Database = {
           created_at?: string
         }
       >
+      csv_import_runs: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          import_type: string
+          file_name: string | null
+          row_count: number
+          created_count: number
+          updated_count: number
+          skipped_count: number
+          failed_count: number
+          failure_rows: Json
+          enrichment_enabled: boolean
+          enrichment_queued_count: number
+          enrichment_paused_count: number
+          enrichment_skipped_count: number
+          enrichment_already_tracked_count: number
+          created_by_user_id: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          import_type: string
+          file_name?: string | null
+          row_count?: number
+          created_count?: number
+          updated_count?: number
+          skipped_count?: number
+          failed_count?: number
+          failure_rows?: Json
+          enrichment_enabled?: boolean
+          enrichment_queued_count?: number
+          enrichment_paused_count?: number
+          enrichment_skipped_count?: number
+          enrichment_already_tracked_count?: number
+          created_by_user_id?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          import_type?: string
+          file_name?: string | null
+          row_count?: number
+          created_count?: number
+          updated_count?: number
+          skipped_count?: number
+          failed_count?: number
+          failure_rows?: Json
+          enrichment_enabled?: boolean
+          enrichment_queued_count?: number
+          enrichment_paused_count?: number
+          enrichment_skipped_count?: number
+          enrichment_already_tracked_count?: number
+          created_by_user_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      ai_enrichment_jobs: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string | null
+          import_run_id: string | null
+          job_type: string
+          status: string
+          idempotency_key: string
+          requested_account_name: string | null
+          requested_domain: string | null
+          priority: number
+          attempts: number
+          max_attempts: number
+          run_after: string
+          locked_at: string | null
+          locked_by: string | null
+          last_error: string | null
+          created_by_user_id: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id?: string | null
+          import_run_id?: string | null
+          job_type?: string
+          status?: string
+          idempotency_key: string
+          requested_account_name?: string | null
+          requested_domain?: string | null
+          priority?: number
+          attempts?: number
+          max_attempts?: number
+          run_after?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          last_error?: string | null
+          created_by_user_id?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string | null
+          import_run_id?: string | null
+          job_type?: string
+          status?: string
+          idempotency_key?: string
+          requested_account_name?: string | null
+          requested_domain?: string | null
+          priority?: number
+          attempts?: number
+          max_attempts?: number
+          run_after?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          last_error?: string | null
+          created_by_user_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
       customer_research_runs: TableDefinition<
         {
           id: string

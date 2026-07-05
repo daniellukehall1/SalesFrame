@@ -1,6 +1,7 @@
 import type { Config, Context } from "@netlify/functions"
 
 import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson } from "./_shared/http"
+import { processQueuedEnrichmentJobs, resumePausedEnrichmentJobs } from "./_shared/import-enrichment"
 import { getOpenAiKeyStatus, removeOpenAiKey, saveOpenAiKey } from "./_shared/openai-key"
 import { authorizeWorkspace, requireUser } from "./_shared/supabase"
 
@@ -9,7 +10,7 @@ type SaveKeyPayload = {
   workspaceId?: string
 }
 
-export default async (request: Request, _context: Context) => {
+export default async (request: Request, context: Context) => {
   try {
     const { supabase, user } = await requireUser(request)
     const requestUrl = new URL(request.url)
@@ -29,13 +30,19 @@ export default async (request: Request, _context: Context) => {
       if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
       await authorizeWorkspace(user.id, workspaceId, supabase)
 
+      const status = await saveOpenAiKey({
+        apiKey: payload.apiKey ?? "",
+        supabase,
+        userId: user.id,
+        workspaceId,
+      })
+      await resumePausedEnrichmentJobs({ supabase, userId: user.id, workspaceId })
+      context.waitUntil(
+        processQueuedEnrichmentJobs({ limit: 3, supabase, userId: user.id, workspaceId }).catch(() => undefined)
+      )
+
       return dataResponse(
-        await saveOpenAiKey({
-          apiKey: payload.apiKey ?? "",
-          supabase,
-          userId: user.id,
-          workspaceId,
-        })
+        status
       )
     }
 

@@ -13,17 +13,27 @@ import {
 import { defaultCurrencyCode, normalizeCurrencyCode, type CurrencyCode } from "../../src/lib/salesframe-core"
 import { buildAccountLogoMetadata } from "./_shared/account-logo"
 import { badRequest, dataResponse, errorResponse, getPublicErrorMessageForError, methodNotAllowed, readJson } from "./_shared/http"
+import {
+  createCsvImportRun,
+  createImportEnrichmentSummary,
+  finalizeCsvImportRun,
+  processQueuedEnrichmentJobs,
+  queueAccountEnrichmentJobs,
+  type AccountEnrichmentQueueTarget,
+} from "./_shared/import-enrichment"
 import { authorizeWorkspace, requireUser } from "./_shared/supabase"
 
 type ImportAccountsPayload = {
   decisions?: CsvImportRowDecision[]
   defaultCurrency?: string
+  enrichmentEnabled?: boolean
+  fileName?: string
   mapping?: CsvImportColumnMapping
   rows?: CsvImportRow[]
   workspaceId?: string
 }
 
-export default async (request: Request, _context: Context) => {
+export default async (request: Request, context: Context) => {
   try {
     if (request.method !== "POST") throw methodNotAllowed()
 
@@ -37,6 +47,16 @@ export default async (request: Request, _context: Context) => {
     const rows = validateRows(payload.rows)
     const mapping = validateMapping(payload.mapping)
     const defaultCurrency = normalizeCurrencyCode(payload.defaultCurrency)
+    const enrichmentEnabled = payload.enrichmentEnabled !== false
+    const importRunId = await createCsvImportRun({
+      enrichmentEnabled,
+      fileName: payload.fileName,
+      importType: "accounts",
+      rowCount: rows.length,
+      supabase,
+      userId: user.id,
+      workspaceId,
+    })
 
     const { data: accountRows, error: accountError } = await supabase
       .from("accounts")
@@ -58,11 +78,13 @@ export default async (request: Request, _context: Context) => {
     )
     const summary: CsvImportSummary = {
       created: 0,
+      enrichment: createImportEnrichmentSummary(enrichmentEnabled),
       failed: 0,
       failures: [],
       skipped: 0,
       updated: 0,
     }
+    const accountsToEnrich: AccountEnrichmentQueueTarget[] = []
 
     for (const row of previewRows) {
       const originalRow = rows[row.rowNumber - 2] ?? {}
@@ -94,10 +116,15 @@ export default async (request: Request, _context: Context) => {
             .update(updatePayload)
             .eq("id", row.matchedAccountId)
             .eq("workspace_id", workspaceId)
-            .select("id")
+            .select("id,name,website")
             .single()
 
           if (response.error) throw new Error(response.error.message)
+          accountsToEnrich.push({
+            accountId: response.data.id,
+            name: response.data.name,
+            website: response.data.website,
+          })
           summary.updated += 1
         } else {
           const insertPayload: TablesInsert<"accounts"> = {
@@ -115,9 +142,14 @@ export default async (request: Request, _context: Context) => {
             workspace_id: workspaceId,
             ...buildAccountLogoMetadata(row.values.accountWebsite ?? null),
           }
-          const response = await supabase.from("accounts").insert(insertPayload).select("id").single()
+          const response = await supabase.from("accounts").insert(insertPayload).select("id,name,website").single()
 
           if (response.error) throw new Error(response.error.message)
+          accountsToEnrich.push({
+            accountId: response.data.id,
+            name: response.data.name,
+            website: response.data.website,
+          })
           summary.created += 1
         }
       } catch (error) {
@@ -127,6 +159,29 @@ export default async (request: Request, _context: Context) => {
           rowNumber: row.rowNumber,
           values: originalRow,
         })
+      }
+    }
+
+    try {
+      summary.enrichment = await queueAccountEnrichmentJobs({
+        enabled: enrichmentEnabled,
+        importRunId,
+        supabase,
+        targets: accountsToEnrich,
+        userId: user.id,
+        workspaceId,
+      })
+      await finalizeCsvImportRun({ importRunId, summary, supabase })
+      if (summary.enrichment.status === "queued") {
+        context.waitUntil(
+          processQueuedEnrichmentJobs({ limit: 3, supabase, userId: user.id, workspaceId }).catch(() => undefined)
+        )
+      }
+    } catch {
+      summary.enrichment = {
+        ...createImportEnrichmentSummary(enrichmentEnabled),
+        skipped: accountsToEnrich.length,
+        status: enrichmentEnabled ? "unavailable" : "off",
       }
     }
 
