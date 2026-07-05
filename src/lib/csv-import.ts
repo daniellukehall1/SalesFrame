@@ -459,7 +459,7 @@ export function buildCsvImportPreview({
       if (values.closeDate && !parseDateValue(values.closeDate)) {
         issues.push({
           field: "closeDate",
-          message: "Close date could not be parsed; it will be saved as a note.",
+          message: "SalesFrame will keep this close date as a note. Choose a calendar date after import if needed.",
           severity: "warning",
         })
       }
@@ -467,7 +467,7 @@ export function buildCsvImportPreview({
       if (values.stage && !knownStages.has(values.stage.trim().toLowerCase())) {
         issues.push({
           field: "stage",
-          message: "Stage is not one of the standard SalesFrame stages; it will be imported as typed.",
+          message: "SalesFrame will keep this stage exactly as written.",
           severity: "warning",
         })
       }
@@ -477,7 +477,7 @@ export function buildCsvImportPreview({
       if (!isSupportedImportCurrency(values.currency)) {
         issues.push({
           field: "currency",
-          message: `Currency "${values.currency}" is not supported; ${defaultCurrency} will be used.`,
+          message: `SalesFrame will use ${defaultCurrency} for this row because "${values.currency}" is not a supported currency.`,
           severity: "warning",
         })
       }
@@ -534,7 +534,7 @@ export function applyCsvRowDecisions(
 }
 
 export function makeFailedRowsCsv(summary: CsvImportSummary) {
-  const headers = ["Row", "Error", "Values"]
+  const headers = ["Row", "Review note", "Values"]
   const lines = [
     headers,
     ...summary.failures.map((failure) => [

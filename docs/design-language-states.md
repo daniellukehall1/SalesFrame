@@ -64,7 +64,6 @@ Empty states should feel like a starting line, not a dead end.
 Structure:
 
 ```text
-Eyebrow: Fresh workspace
 Title: Nothing here yet
 Body: Start with one account. SalesFrame will build the selling context around it as calls and opportunities come in.
 Primary action: Create account
@@ -73,6 +72,7 @@ Secondary action: Import accounts
 
 Rules:
 
+- Lead with the useful title. Avoid decorative eyebrow/brow labels above page and state titles.
 - Explain what belongs here.
 - Tell the user the first useful action.
 - Keep it calm and concrete.
@@ -114,6 +114,41 @@ Rules:
 - Avoid vague "Loading..." unless space is extremely tight.
 - If the wait could feel long, say what is happening now.
 
+### Motion And Micro-Interactions
+
+Motion should feel like calm confirmation, not decoration.
+
+Rules:
+
+- Use motion to confirm an action, preserve context, guide attention, or show live system activity.
+- Keep everyday interactions fast: hover, press, focus, and form feedback should be near-instant.
+- Keep menus and popovers crisp. They should appear quickly and never feel like they are delaying work.
+- Dialogs and sheets can be slightly slower, but still under 300ms.
+- Avoid bounce, elastic movement, oversized slides, flashing, or animations that run forever.
+- Reserve expressive motion for rare setup or milestone moments.
+- Always respect reduced-motion preferences.
+
+Approved patterns:
+
+```text
+Button press: subtle compression
+Menu open: quick fade/scale
+Step change: short fade/translate
+Live question changed: one brief highlight
+Transcript line added: quiet fade-in
+Audio health active: gentle pulse
+```
+
+Avoid:
+
+```text
+Permanent shimmer
+Celebration effects in daily workflows
+Animating entire page layouts
+Motion that makes the user wait
+Multiple competing animations at once
+```
+
 ### Error States
 
 Error states should protect confidence. They should not sound like blame.
@@ -121,8 +156,7 @@ Error states should protect confidence. They should not sound like blame.
 Structure:
 
 ```text
-Eyebrow: Something got stuck
-Title: We could not load this workspace
+Title: This workspace needs another moment
 Body: Give it another try. If it keeps happening, settings can help confirm the connection is still in shape.
 Primary action: Try again
 Secondary action: Open settings
@@ -262,7 +296,7 @@ Use this table when replacing generic state language.
 | Situation | Avoid | Use |
 | --- | --- | --- |
 | Workspace loading | Loading workspace data | Getting this workspace ready |
-| New workspace | Empty state | Fresh workspace |
+| New workspace | Empty state / Fresh workspace | Nothing here yet |
 | No accounts | No accounts yet | Nothing here yet |
 | Data failure | Error state | Something got stuck |
 | Permission | Permission denied | This workspace is out of reach |

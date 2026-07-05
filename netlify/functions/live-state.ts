@@ -241,7 +241,7 @@ export default async (request: Request, _context: Context) => {
     if (opportunityError) throw new Error(opportunityError.message)
     if (callError) throw new Error(callError.message)
     if (!accountDetails || !opportunityDetails || !callDetails) {
-      throw upstreamFailure("Live state context could not be loaded.", "live_state_context_missing")
+      throw upstreamFailure("Live state needs another context check.", "live_state_context_missing")
     }
 
     const liveStateContext = buildLiveStateContext({

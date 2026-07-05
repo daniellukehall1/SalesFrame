@@ -121,11 +121,7 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import {
-  playbooks,
-  prepChecklist,
-  riskSignals,
-} from "@/data/playbook-reference-data"
+import { playbooks } from "@/data/playbook-reference-data"
 import type { LegalPageId } from "@/data/legal-documents"
 import {
   useCallCapture,
@@ -139,7 +135,7 @@ import { formatCurrencyAmount } from "@/lib/currency-utils"
 import type { CsvImportType } from "@/lib/csv-import"
 import { reportClientError } from "@/lib/client-error-reporting"
 import { normalizeCloseDateForPersistence } from "@/lib/date-utils"
-import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
+import { getUserFacingErrorMessage, isPermissionDeniedError } from "@/lib/user-facing-errors"
 import { createClient } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
 import {
@@ -219,6 +215,8 @@ import {
   type TranscriptSegmentRow,
 } from "@/lib/supabase/salesframe-data"
 import {
+  getAccountSearchText,
+  getCallSearchText,
   getFuzzyMatches,
   getOpportunitySearchText,
   matchesCoverageFilter,
@@ -228,7 +226,6 @@ import {
 } from "@/lib/fuzzy-search"
 import {
   createManualQuestionFromGuidance,
-  getAlternativeQuestions,
 } from "@/lib/manual-coach"
 import { formatSavedAt } from "@/lib/openai-key-storage"
 import { formatPlaybooks, normalizePlaybooks, parsePlaybookSelection } from "@/lib/playbook-utils"
@@ -253,7 +250,6 @@ import {
   defaultCustomerResearch,
   defaultSellerResearchProfile,
   normalizeCurrencyCode,
-  trustedResearchSources,
   workspaceDataStateOptions,
   type AccountDraft,
   type CallSummary,
@@ -385,11 +381,9 @@ const breadcrumbOpportunityViews = [
   "methodology",
   "opportunity-record",
   "opportunity-intelligence",
-  "stakeholders",
-  "risks",
 ]
-const breadcrumbCallViews = ["workspace", "questions", "post-call"]
-const breadcrumbLibraryViews = ["calls", "recordings", "transcripts"]
+const breadcrumbCallViews = ["workspace", "post-call"]
+const breadcrumbLibraryViews = ["calls"]
 const breadcrumbPlaybookDetailViews = [
   "meddicc",
   "meddpicc",
@@ -409,8 +403,6 @@ const mobileStartCallViews = [
   "home",
   "opportunities",
   "calls",
-  "recordings",
-  "transcripts",
 ]
 const minimumWorkspaceLoadMs = 3000
 const minimumPageLoadMs = 700
@@ -639,7 +631,7 @@ function createAvatarDataUrl(file: File) {
       }
 
       if (!context) {
-        reject(new Error("Avatar could not be processed."))
+        reject(new Error("Choose a different profile photo."))
         return
       }
 
@@ -697,6 +689,21 @@ function createOpportunityDraftFromRecord(opportunity: Opportunity): Opportunity
   }
 }
 
+function areAccountDraftsEqual(left: AccountDraft, right: AccountDraft) {
+  return (Object.keys(left) as (keyof AccountDraft)[]).every((field) => left[field] === right[field])
+}
+
+function areOpportunityDraftsEqual(left: OpportunityDraft, right: OpportunityDraft) {
+  return (Object.keys(left) as (keyof OpportunityDraft)[]).every((field) => left[field] === right[field])
+}
+
+function arePlaybookSelectionsEqual(left: CallPlaybook[], right: CallPlaybook[]) {
+  const normalizedLeft = normalizePlaybooks(left)
+  const normalizedRight = normalizePlaybooks(right)
+
+  return normalizedLeft.length === normalizedRight.length && normalizedLeft.every((playbook, index) => playbook === normalizedRight[index])
+}
+
 type PostCallOutputView = {
   accountUpdates: Record<string, string>
   followUpEmail: string
@@ -737,6 +744,10 @@ function mapAccountEnrichmentProfileToDraft(profile: AccountEnrichmentProfileRow
     sourceNotes: profile?.source_notes ?? "",
     strategicPriorities: profile?.strategic_priorities ?? "",
   }
+}
+
+function areAccountEnrichmentDraftsEqual(left: AccountEnrichmentDraft, right: AccountEnrichmentDraft) {
+  return (Object.keys(left) as (keyof AccountEnrichmentDraft)[]).every((field) => left[field] === right[field])
 }
 
 function mapPostCallOutputsByCallId(rows: PostCallOutputRow[]) {
@@ -1276,7 +1287,7 @@ function isLiveRevisitMoment(value: unknown): value is NonNullable<NonNullable<L
 }
 
 function isLiveSellerFeedbackAction(value: unknown): value is LiveSellerFeedbackAction {
-  return value === "asked" || value === "too_soon" || value === "softer" || value === "skip" || value === "use_next" || value === "move_later"
+  return value === "asked" || value === "too_soon" || value === "softer" || value === "skip" || value === "use_next"
 }
 
 function clampScore(value: unknown) {
@@ -2075,6 +2086,7 @@ const authConnectionUnavailableMessage =
 function App() {
   const supabase = React.useMemo(() => createOptionalSupabaseClient(), [])
   const [activeView, setActiveView] = React.useState("home")
+  const [navigationScrollResetNonce, setNavigationScrollResetNonce] = React.useState(0)
   const [workspaceNavItems, setWorkspaceNavItems] = React.useState<WorkspaceNavItem[]>([])
   const [activeWorkspaceId, setActiveWorkspaceId] = React.useState("")
   const [workspacePlaybooks, setWorkspacePlaybooks] = React.useState<PlaybookRow[]>([])
@@ -2130,6 +2142,7 @@ function App() {
   const [speakerIdentities, setSpeakerIdentities] = React.useState<CallSpeakerIdentityMap>({})
   const [notes, setNotes] = React.useState<string[]>([])
   const [accountDrafts, setAccountDrafts] = React.useState<Record<string, AccountDraft>>({})
+  const [savedAccountDrafts, setSavedAccountDrafts] = React.useState<Record<string, AccountDraft>>({})
   const [accountEnrichmentById, setAccountEnrichmentById] =
     React.useState<Record<string, AccountEnrichmentProfileRow>>({})
   const [accountEnrichmentSaveStatus, setAccountEnrichmentSaveStatus] =
@@ -2139,6 +2152,7 @@ function App() {
     React.useState<RecordSaveStatus>("idle")
   const [accountEnrichmentRunMessage, setAccountEnrichmentRunMessage] = React.useState("")
   const [opportunityDrafts, setOpportunityDrafts] = React.useState<Record<string, OpportunityDraft>>({})
+  const [savedOpportunityDrafts, setSavedOpportunityDrafts] = React.useState<Record<string, OpportunityDraft>>({})
   const [accountRecordSaveStatus, setAccountRecordSaveStatus] =
     React.useState<RecordSaveStatus>("idle")
   const [accountRecordSaveMessage, setAccountRecordSaveMessage] = React.useState("")
@@ -2185,6 +2199,9 @@ function App() {
   const transcriptRef = React.useRef(transcript)
   const workspaceDataStateRef = React.useRef(workspaceDataState)
   const loadedWorkspaceIdRef = React.useRef<string | null>(null)
+  const appMainScrollRef = React.useRef<HTMLElement | null>(null)
+  const pendingNavigationScrollResetRef = React.useRef(false)
+  const lastScrolledNavigationKeyRef = React.useRef("")
 
   const activeOpportunity =
     workspaceOpportunities.find((opportunity) => opportunity.id === activeOpportunityId) ??
@@ -2202,9 +2219,13 @@ function App() {
     ? workspaceAccounts.find((account) => account.id === editAccountId)
     : undefined
   const activeAccountDraft = accountDrafts[activeAccount.id] ?? createAccountDraftFromRecord(activeAccount)
+  const activeSavedAccountDraft =
+    savedAccountDrafts[activeAccount.id] ?? createAccountDraftFromRecord(activeAccount)
   const activeAccountEnrichment = accountEnrichmentById[activeAccount.id] ?? null
   const activeOpportunityDraft =
     opportunityDrafts[activeOpportunity.id] ?? createOpportunityDraftFromRecord(activeOpportunity)
+  const activeSavedOpportunityDraft =
+    savedOpportunityDrafts[activeOpportunity.id] ?? createOpportunityDraftFromRecord(activeOpportunity)
   const activeWorkspace = workspaceNavItems.find((workspace) => workspace.id === activeWorkspaceId) ?? null
   const setupWorkspace = workspaceSetupDraft ?? activeWorkspace
   const activePostCallCallId =
@@ -2226,6 +2247,66 @@ function App() {
       : activePostCallCallId
         ? transcriptsByCallId[activePostCallCallId] ?? []
         : activeOpportunity.transcript
+  const activeNavigationKey = [
+    activeWorkspaceId || "workspace",
+    activeView,
+    activeAccount.id || "account",
+    activeOpportunity.id || "opportunity",
+    activePostCallCallId || activeCallId || "call",
+  ].join(":")
+
+  const scrollAppContentToTop = React.useCallback(() => {
+    const resetScrollPosition = () => {
+      const appContent = appMainScrollRef.current
+
+      appContent?.scrollTo({ left: 0, top: 0, behavior: "auto" })
+      appContent?.querySelectorAll<HTMLElement>("*").forEach((element) => {
+        if (element.dataset.preserveNavigationScroll === "true") return
+        if (element.scrollTop > 0) element.scrollTop = 0
+        if (element.scrollLeft > 0) element.scrollLeft = 0
+      })
+      window.scrollTo({ left: 0, top: 0, behavior: "auto" })
+      document.documentElement.scrollTop = 0
+      document.body.scrollTop = 0
+    }
+
+    resetScrollPosition()
+    window.requestAnimationFrame(() => {
+      resetScrollPosition()
+      window.requestAnimationFrame(resetScrollPosition)
+    })
+    window.setTimeout(resetScrollPosition, 0)
+    window.setTimeout(resetScrollPosition, 120)
+    window.setTimeout(resetScrollPosition, 320)
+    window.setTimeout(resetScrollPosition, minimumPageLoadMs + 80)
+    window.setTimeout(resetScrollPosition, minimumPageLoadMs + 420)
+  }, [])
+
+  const requestNavigationScrollReset = React.useCallback(() => {
+    pendingNavigationScrollResetRef.current = true
+    setNavigationScrollResetNonce((value) => value + 1)
+    scrollAppContentToTop()
+  }, [scrollAppContentToTop])
+
+  React.useEffect(() => {
+    if (!("scrollRestoration" in window.history)) return
+
+    const previousScrollRestoration = window.history.scrollRestoration
+    window.history.scrollRestoration = "manual"
+
+    return () => {
+      window.history.scrollRestoration = previousScrollRestoration
+    }
+  }, [])
+
+  const blurFocusedNavigationElement = React.useCallback(() => {
+    const activeElement = document.activeElement
+
+    if (!(activeElement instanceof HTMLElement)) return
+    if (activeElement.tagName === "INPUT" || activeElement.tagName === "TEXTAREA" || activeElement.tagName === "SELECT") return
+
+    activeElement.blur()
+  }, [])
 
   React.useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode)
@@ -2270,7 +2351,7 @@ function App() {
 
       if (error) {
         setAuthStatusTone("error")
-        setAuthStatusMessage(getUserFacingErrorMessage(error, "Session could not be restored. Sign in again to continue."))
+        setAuthStatusMessage(getUserFacingErrorMessage(error, "SalesFrame needs a fresh sign-in to continue."))
       }
 
       setAuthSession(data.session?.user ? createAuthSessionFromUser(data.session.user) : null)
@@ -2352,7 +2433,7 @@ function App() {
 
         setSavedOpenAiKeyState(null)
         setOpenAiKeyStatusMessage(
-          getUserFacingErrorMessage(caughtError, "OpenAI key status could not be loaded.")
+          getUserFacingErrorMessage(caughtError, "OpenAI key status needs another check.")
         )
       })
 
@@ -2425,6 +2506,22 @@ function App() {
     transcriptRef.current = transcript
   }, [transcript])
 
+  React.useLayoutEffect(() => {
+    if (pageLoadingView || loadingWorkspace || workspaceDataState === "loading") return
+    if (!pendingNavigationScrollResetRef.current && lastScrolledNavigationKeyRef.current === activeNavigationKey) return
+
+    scrollAppContentToTop()
+    pendingNavigationScrollResetRef.current = false
+    lastScrolledNavigationKeyRef.current = activeNavigationKey
+  }, [
+    activeNavigationKey,
+    loadingWorkspace,
+    navigationScrollResetNonce,
+    pageLoadingView,
+    scrollAppContentToTop,
+    workspaceDataState,
+  ])
+
   React.useEffect(() => {
     if (
       !authSession ||
@@ -2479,7 +2576,7 @@ function App() {
       } catch (caughtError: unknown) {
         if (cancelled) return
 
-        setWorkspaceErrorMessage(getUserFacingErrorMessage(caughtError, "Workspaces could not be loaded."))
+        setWorkspaceErrorMessage(getUserFacingErrorMessage(caughtError, "SalesFrame needs another moment to load your workspaces."))
         setWorkspaceDataState("error")
       }
     }
@@ -2563,15 +2660,18 @@ function App() {
       setTranscriptsByCallId(mapTranscriptSegmentsByCallId({ callSpeakers, transcriptSegments }))
       setWorkspaceAccounts(nextAccounts)
       setWorkspaceOpportunities(nextOpportunities)
-      setAccountDrafts(mapAccountRowsToDrafts(accountRows))
-      setOpportunityDrafts(
-        mapOpportunityRowsToDrafts({
-          accounts: accountRows,
-          opportunities: opportunityRows,
-          playbooks: playbookRows,
-          playbookAssignments,
-        })
-      )
+      const nextAccountDrafts = mapAccountRowsToDrafts(accountRows)
+      const nextOpportunityDrafts = mapOpportunityRowsToDrafts({
+        accounts: accountRows,
+        opportunities: opportunityRows,
+        playbooks: playbookRows,
+        playbookAssignments,
+      })
+
+      setAccountDrafts(nextAccountDrafts)
+      setSavedAccountDrafts(nextAccountDrafts)
+      setOpportunityDrafts(nextOpportunityDrafts)
+      setSavedOpportunityDrafts(nextOpportunityDrafts)
       setAccountEnrichmentById(
         Object.fromEntries(enrichmentProfiles.map((profile) => [profile.account_id, profile]))
       )
@@ -2596,7 +2696,8 @@ function App() {
       workspaceDataStateRef.current = nextDataState
       setWorkspaceDataState(nextDataState)
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, "Workspace data could not be loaded.")
+      const isPermissionDenied = isPermissionDeniedError(caughtError)
+      const message = getUserFacingErrorMessage(caughtError, "SalesFrame needs another moment to load this workspace.")
 
       setWorkspaceErrorMessage(message)
       if (canPreserveCurrentWorkspace) {
@@ -2604,7 +2705,7 @@ function App() {
         return
       }
 
-      setWorkspaceDataState(/permission|policy|row-level security|rls/i.test(message) ? "permission-denied" : "error")
+      setWorkspaceDataState(isPermissionDenied ? "permission-denied" : "error")
     }
   }, [
     activeWorkspaceId,
@@ -2690,7 +2791,12 @@ function App() {
   }, [activeOpportunityId])
 
   const handleNavigate = React.useCallback((view: string) => {
-    if (view === activeView) return
+    blurFocusedNavigationElement()
+
+    if (view === activeView) {
+      requestNavigationScrollReset()
+      return
+    }
 
     if (pageLoadTimeoutRef.current !== null) {
       window.clearTimeout(pageLoadTimeoutRef.current)
@@ -2708,9 +2814,11 @@ function App() {
     }
 
     setActiveView(view)
-  }, [activeView, loadingWorkspace, workspaceDataState])
+    requestNavigationScrollReset()
+  }, [activeView, blurFocusedNavigationElement, loadingWorkspace, requestNavigationScrollReset, workspaceDataState])
 
   const handleAccountSelect = (accountId: string) => {
+    requestNavigationScrollReset()
     setActiveAccountId(accountId)
     setPostCallFocusCallId("")
     const firstOpportunity = workspaceOpportunities.find((opportunity) => opportunity.accountId === accountId)
@@ -2723,6 +2831,7 @@ function App() {
   const handleOpportunitySelect = (opportunityId: string) => {
     const selectedOpportunity = workspaceOpportunities.find((opportunity) => opportunity.id === opportunityId)
     if (selectedOpportunity) {
+      requestNavigationScrollReset()
       setActiveAccountId(selectedOpportunity.accountId)
       setActiveOpportunityId(opportunityId)
       setPostCallFocusCallId("")
@@ -2758,7 +2867,7 @@ function App() {
     target: question.target,
   }), [])
 
-  const handleUseManualQuestion = (question: ManualQuestion, returnToCockpit = false) => {
+  const handleUseManualQuestion = (question: ManualQuestion) => {
     const signal = createLiveCoachFeedbackSignal("use_next", question)
     setManualCoachState((state) => ({
       ...state,
@@ -2768,10 +2877,6 @@ function App() {
       lastAction: `Selected next question: "${question.question}"`,
     }))
     persistLiveCoachFeedback(signal)
-
-    if (returnToCockpit) {
-      handleNavigate("workspace")
-    }
   }
 
   const handleMarkManualQuestionAsked = (question: ManualQuestion) => {
@@ -2785,20 +2890,6 @@ function App() {
       deferredQuestionIds: state.deferredQuestionIds.filter((id) => id !== question.id),
       feedbackSignals: [...state.feedbackSignals.slice(-19), signal],
       lastAction: `Marked asked: "${question.question}"`,
-    }))
-    persistLiveCoachFeedback(signal)
-  }
-
-  const handleMoveManualQuestionLater = (question: ManualQuestion) => {
-    const signal = createLiveCoachFeedbackSignal("move_later", question)
-    setManualCoachState((state) => ({
-      ...state,
-      activeQuestion: state.activeQuestion?.id === question.id ? null : state.activeQuestion,
-      deferredQuestionIds: state.deferredQuestionIds.includes(question.id)
-        ? state.deferredQuestionIds
-        : [...state.deferredQuestionIds, question.id],
-      feedbackSignals: [...state.feedbackSignals.slice(-19), signal],
-      lastAction: `Moved later: "${question.question}"`,
     }))
     persistLiveCoachFeedback(signal)
   }
@@ -2841,6 +2932,7 @@ function App() {
     )
     if (!selectedOpportunity) return
 
+    requestNavigationScrollReset()
     setActiveAccountId(selectedOpportunity.accountId)
     setActiveOpportunityId(selectedOpportunity.id)
     setPostCallFocusCallId(callId)
@@ -2980,7 +3072,7 @@ function App() {
       }
     } catch (caughtError: unknown) {
       return {
-        message: getUserFacingErrorMessage(caughtError, "Record could not be deleted."),
+        message: getUserFacingErrorMessage(caughtError, "Record needs another delete attempt."),
         ok: false,
       }
     }
@@ -3037,7 +3129,7 @@ function App() {
       activeCallIdRef.current = ""
       setActiveCallStartedAt("")
       handleNavigate("post-call")
-      setPostCallError(getUserFacingErrorMessage(caughtError, "The call ended, but SalesFrame could not finish saving every post-call item."))
+      setPostCallError(getUserFacingErrorMessage(caughtError, "The call ended, and a few post-call items need another save attempt."))
     } finally {
       setIsStoppingCall(false)
     }
@@ -3051,7 +3143,7 @@ function App() {
       }))
       setWorkspaceRefreshToken((value) => value + 1)
     } catch (caughtError: unknown) {
-      setPostCallError(getUserFacingErrorMessage(caughtError, "Post-call outputs could not be created."))
+      setPostCallError(getUserFacingErrorMessage(caughtError, "Post-call brief needs another pass."))
     } finally {
       setPostCallGenerating(false)
     }
@@ -3123,7 +3215,7 @@ function App() {
         return nextItems
       })
     } catch (caughtError: unknown) {
-      setPostCallError(getUserFacingErrorMessage(caughtError, "Speaker label could not be saved."))
+      setPostCallError(getUserFacingErrorMessage(caughtError, "Speaker label needs another save attempt."))
     }
   }
 
@@ -3232,7 +3324,7 @@ function App() {
         persistence: "saved",
       }
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, "Speaker identity could not be saved.")
+      const message = getUserFacingErrorMessage(caughtError, "Speaker identity needs another save attempt.")
 
       return {
         message: `Speaker name applied. SalesFrame will save it when the connection settles: ${message}`,
@@ -3463,7 +3555,7 @@ function App() {
           })
       updatePreparationStep(
         "coach",
-        "This is usually the longest part. OpenAI is reading the context and writing the first question."
+        "This is usually the longest part. SalesFrame is reading the context and shaping the first question."
       )
       const initialGuidanceResponse = await requestLiveGuidance({
         account: {
@@ -3495,7 +3587,7 @@ function App() {
       throwIfStartCancelled()
       const initialGuidance = mapAiLiveGuidanceResponse(initialGuidanceResponse)
       if (!initialGuidance) {
-        throw new Error("SalesFrame could not prepare the first question. Try again in a moment.")
+        throw new Error("SalesFrame needs another moment to prepare the first question. Try again in a moment.")
       }
       await updateSupabaseCall(call.id, {
         guidance_readiness: {
@@ -3590,7 +3682,7 @@ function App() {
           .then((response) => {
             const research = mapCustomerResearchResponse(response)
             if (!research) {
-              throw new Error("Research context could not be prepared. Try again, or continue without research.")
+              throw new Error("Research context needs another pass. Try again, or continue without research.")
             }
           })
           .catch(() => undefined)
@@ -3609,9 +3701,15 @@ function App() {
             ? items.map((account) => (account.id === createdAccountNav.id ? createdAccountNav : account))
             : [...items, createdAccountNav]
         )
+        const createdAccountDraft = mapAccountRowToDraft(accountRow)
+
         setAccountDrafts((drafts) => ({
           ...drafts,
-          [accountRow.id]: mapAccountRowToDraft(accountRow),
+          [accountRow.id]: createdAccountDraft,
+        }))
+        setSavedAccountDrafts((drafts) => ({
+          ...drafts,
+          [accountRow.id]: createdAccountDraft,
         }))
       } else if (createdOpportunityRow) {
         const opportunityRow = createdOpportunityRow
@@ -3648,14 +3746,20 @@ function App() {
             ? items.map((opportunity) => (opportunity.id === createdOpportunityUi.id ? createdOpportunityUi : opportunity))
             : [...items, createdOpportunityUi]
         )
+        const createdOpportunityDraft = mapOpportunityRowToDraft({
+          accountCurrency: normalizeCurrencyCode(payload.accountCurrency),
+          opportunity: opportunityRow,
+          playbooks: workspacePlaybooks,
+          playbookAssignments,
+        })
+
         setOpportunityDrafts((drafts) => ({
           ...drafts,
-          [opportunityRow.id]: mapOpportunityRowToDraft({
-            accountCurrency: normalizeCurrencyCode(payload.accountCurrency),
-            opportunity: opportunityRow,
-            playbooks: workspacePlaybooks,
-            playbookAssignments,
-          }),
+          [opportunityRow.id]: createdOpportunityDraft,
+        }))
+        setSavedOpportunityDrafts((drafts) => ({
+          ...drafts,
+          [opportunityRow.id]: createdOpportunityDraft,
         }))
       }
 
@@ -3674,7 +3778,9 @@ function App() {
       setCallType(payload.callType)
       setCallPlaybooks(selectedPlaybooks)
       setPageLoadingView(null)
+      blurFocusedNavigationElement()
       setActiveView("workspace")
+      requestNavigationScrollReset()
       setLiveGuidanceByCallId((items) => ({
         ...items,
         [call.id]: initialGuidance,
@@ -3726,6 +3832,10 @@ function App() {
             const { [cancelledAccountId]: _removedDraft, ...remainingDrafts } = drafts
             return remainingDrafts
           })
+          setSavedAccountDrafts((drafts) => {
+            const { [cancelledAccountId]: _removedDraft, ...remainingDrafts } = drafts
+            return remainingDrafts
+          })
           setAccountResearchById((items) => {
             const { [cancelledAccountId]: _removedResearch, ...remainingResearch } = items
             return remainingResearch
@@ -3754,6 +3864,10 @@ function App() {
             const { [cancelledOpportunityId]: _removedDraft, ...remainingDrafts } = drafts
             return remainingDrafts
           })
+          setSavedOpportunityDrafts((drafts) => {
+            const { [cancelledOpportunityId]: _removedDraft, ...remainingDrafts } = drafts
+            return remainingDrafts
+          })
         }
 
         setIsRecording(false)
@@ -3768,7 +3882,7 @@ function App() {
         return getStartCancelledResult()
       }
 
-      const message = appendErrorReference(getUserFacingErrorMessage(caughtError, "Call could not be started."), caughtError)
+      const message = appendErrorReference(getUserFacingErrorMessage(caughtError, "Call start needs another try."), caughtError)
 
       void reportClientError({
         error: caughtError,
@@ -3903,7 +4017,7 @@ function App() {
           .then((response) => {
             const research = mapCustomerResearchResponse(response)
             if (!research) {
-              throw new Error("Research context could not be prepared. Try again from the account page.")
+              throw new Error("Research context needs another pass. Try again from the account page.")
             }
           })
           .catch(() => undefined)
@@ -3932,9 +4046,15 @@ function App() {
                   : item
               )
             )
+            const enrichedAccountDraft = mapAccountRowToDraft(enrichment.account)
+
             setAccountDrafts((drafts) => ({
               ...drafts,
-              [enrichment.account.id]: mapAccountRowToDraft(enrichment.account),
+              [enrichment.account.id]: enrichedAccountDraft,
+            }))
+            setSavedAccountDrafts((drafts) => ({
+              ...drafts,
+              [enrichment.account.id]: enrichedAccountDraft,
             }))
             setAccountEnrichmentById((profiles) => ({
               ...profiles,
@@ -3954,7 +4074,7 @@ function App() {
         ok: true as const,
       }
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, "Account could not be created.")
+      const message = getUserFacingErrorMessage(caughtError, "Account setup needs another try.")
 
       return {
         message,
@@ -4007,7 +4127,7 @@ function App() {
         ok: true as const,
       }
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, "Opportunity could not be created.")
+      const message = getUserFacingErrorMessage(caughtError, "Opportunity setup needs another try.")
 
       return {
         message,
@@ -4020,7 +4140,7 @@ function App() {
     const currentAccount = workspaceAccounts.find((account) => account.id === payload.accountId)
     if (!currentAccount) {
       return {
-        message: "Account could not be found in this workspace.",
+        message: "This account is not in the current workspace.",
         ok: false,
       }
     }
@@ -4052,7 +4172,7 @@ function App() {
       }
     } catch (caughtError: unknown) {
       return {
-        message: getUserFacingErrorMessage(caughtError, "Account could not be updated."),
+        message: getUserFacingErrorMessage(caughtError, "Account update needs another try."),
         ok: false,
       }
     }
@@ -4064,7 +4184,7 @@ function App() {
     )
     if (!currentOpportunity) {
       return {
-        message: "Opportunity could not be found in this workspace.",
+        message: "This opportunity is not in the current workspace.",
         ok: false,
       }
     }
@@ -4107,7 +4227,7 @@ function App() {
       }
     } catch (caughtError: unknown) {
       return {
-        message: getUserFacingErrorMessage(caughtError, "Opportunity could not be updated."),
+        message: getUserFacingErrorMessage(caughtError, "Opportunity update needs another try."),
         ok: false,
       }
     }
@@ -4185,16 +4305,22 @@ function App() {
             : account
         )
       )
+      const updatedAccountDraft = mapAccountRowToDraft(updatedAccount)
+
       setAccountDrafts((drafts) => ({
         ...drafts,
-        [updatedAccount.id]: mapAccountRowToDraft(updatedAccount),
+        [updatedAccount.id]: updatedAccountDraft,
+      }))
+      setSavedAccountDrafts((drafts) => ({
+        ...drafts,
+        [updatedAccount.id]: updatedAccountDraft,
       }))
       setWorkspaceErrorMessage("")
       setAccountRecordSaveStatus("saved")
       setAccountRecordSaveMessage("Account saved.")
       return true
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, "Account fields could not be saved.")
+      const message = getUserFacingErrorMessage(caughtError, "Account fields need another save attempt.")
 
       setAccountRecordSaveStatus("error")
       setAccountRecordSaveMessage(message)
@@ -4244,9 +4370,15 @@ function App() {
             : account
         )
       )
+      const enrichedAccountDraft = mapAccountRowToDraft(response.account)
+
       setAccountDrafts((drafts) => ({
         ...drafts,
-        [response.account.id]: mapAccountRowToDraft(response.account),
+        [response.account.id]: enrichedAccountDraft,
+      }))
+      setSavedAccountDrafts((drafts) => ({
+        ...drafts,
+        [response.account.id]: enrichedAccountDraft,
       }))
       setAccountEnrichmentById((profiles) => ({
         ...profiles,
@@ -4390,29 +4522,35 @@ function App() {
           ),
         }))
       )
+      const updatedOpportunityDraft = {
+        ...mapOpportunityRowToDraft({
+          accountCurrency: activeAccount.currency,
+          opportunity: updatedOpportunity,
+          playbookAssignments: selectedPlaybookIds.map((playbookId) => ({
+            id: `${updatedOpportunity.id}-${playbookId}`,
+            opportunity_id: updatedOpportunity.id,
+            playbook_id: playbookId,
+            created_at: new Date().toISOString(),
+          })),
+          playbooks: workspacePlaybooks,
+        }),
+        amount: formattedAmount,
+      }
+
       setOpportunityDrafts((drafts) => ({
         ...drafts,
-        [updatedOpportunity.id]: {
-          ...mapOpportunityRowToDraft({
-            accountCurrency: activeAccount.currency,
-            opportunity: updatedOpportunity,
-            playbookAssignments: selectedPlaybookIds.map((playbookId) => ({
-              id: `${updatedOpportunity.id}-${playbookId}`,
-              opportunity_id: updatedOpportunity.id,
-              playbook_id: playbookId,
-              created_at: new Date().toISOString(),
-            })),
-            playbooks: workspacePlaybooks,
-          }),
-          amount: formattedAmount,
-        },
+        [updatedOpportunity.id]: updatedOpportunityDraft,
+      }))
+      setSavedOpportunityDrafts((drafts) => ({
+        ...drafts,
+        [updatedOpportunity.id]: updatedOpportunityDraft,
       }))
       setCallPlaybooks(selectedPlaybooks)
       setWorkspaceErrorMessage("")
       setOpportunityRecordSaveStatus("saved")
       setOpportunityRecordSaveMessage("Opportunity saved.")
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, "Opportunity fields could not be saved.")
+      const message = getUserFacingErrorMessage(caughtError, "Opportunity fields need another save attempt.")
 
       setOpportunityRecordSaveStatus("error")
       setOpportunityRecordSaveMessage(message)
@@ -4500,7 +4638,7 @@ function App() {
 
       if (error) {
         setAuthStatusTone("error")
-        setAuthStatusMessage(getUserFacingErrorMessage(error, "Sign-in could not be completed."))
+        setAuthStatusMessage(getUserFacingErrorMessage(error, "Sign-in needs another try."))
         return
       }
 
@@ -4512,7 +4650,7 @@ function App() {
       }
     } catch (caughtError: unknown) {
       setAuthStatusTone("error")
-      setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Sign-in could not be completed."))
+      setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Sign-in needs another try."))
     } finally {
       setAuthSubmitting(false)
     }
@@ -4561,7 +4699,7 @@ function App() {
 
       if (error) {
         setAuthStatusTone("error")
-        setAuthStatusMessage(getUserFacingErrorMessage(error, "Account could not be created."))
+        setAuthStatusMessage(getUserFacingErrorMessage(error, "Account setup needs another try."))
         return
       }
 
@@ -4581,7 +4719,7 @@ function App() {
       }
     } catch (caughtError: unknown) {
       setAuthStatusTone("error")
-      setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Account could not be created."))
+      setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Account setup needs another try."))
     } finally {
       setAuthSubmitting(false)
     }
@@ -4611,12 +4749,12 @@ function App() {
       setAuthStatusTone(error ? "error" : "success")
       setAuthStatusMessage(
         error
-          ? getUserFacingErrorMessage(error, "Password reset email could not be sent.")
+          ? getUserFacingErrorMessage(error, "Password reset needs another try.")
           : `Password reset email requested for ${email.trim()}.`
       )
     } catch (caughtError: unknown) {
       setAuthStatusTone("error")
-      setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Password reset email could not be sent."))
+      setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Password reset needs another try."))
     } finally {
       setAuthSubmitting(false)
     }
@@ -4701,7 +4839,9 @@ function App() {
     setSavedOpenAiKeyState(null)
     setOpenAiKeyStatusMessage("")
     setAccountDrafts({})
+    setSavedAccountDrafts({})
     setOpportunityDrafts({})
+    setSavedOpportunityDrafts({})
     setLiveGuidanceByCallId({})
     setActiveAccountId("")
     setActiveOpportunityId("")
@@ -4713,7 +4853,7 @@ function App() {
       window.history.pushState(null, "", nextPath)
     }
     setAuthStatusTone(error ? "error" : "success")
-    setAuthStatusMessage(error ? getUserFacingErrorMessage(error, "Sign-out could not be completed.") : "Signed out.")
+    setAuthStatusMessage(error ? getUserFacingErrorMessage(error, "Sign-out needs another try.") : "Signed out.")
   }
 
   const handleAuthLogout = async () => {
@@ -4770,7 +4910,9 @@ function App() {
     setElapsed(0)
     setPageLoadingView(null)
     loadedWorkspaceIdRef.current = null
+    blurFocusedNavigationElement()
     setActiveView("home")
+    requestNavigationScrollReset()
     setActiveWorkspaceId(workspace.id)
     setWorkspaceDataState("loading")
     setLoadingWorkspace(workspace)
@@ -4930,8 +5072,8 @@ function App() {
 
   const workspaceViews = ["workspace", "post-call", "methodology", "opportunity-record", "opportunity-intelligence"]
   const accountViews = ["account-detail"]
-  const opportunityViews = ["opportunities", "stakeholders", "risks"]
-  const callViews = ["calls", "recordings", "transcripts"]
+  const opportunityViews = ["opportunities"]
+  const callViews = ["calls"]
   const playbookViews = [
     "playbooks",
     "meddicc",
@@ -4949,7 +5091,7 @@ function App() {
   ]
   const profileViews = profileRouteIds
   const settingsViews = settingsRouteIds
-  const callSurfaceViews = ["workspace", "questions", "post-call"]
+  const callSurfaceViews = ["workspace", "post-call"]
   const isWorkspaceIndependentView =
     settingsViews.includes(activeView) || profileViews.includes(activeView) || playbookViews.includes(activeView)
   const shouldShowWorkspaceState = workspaceDataState !== "ready" && !isWorkspaceIndependentView && !isCallLive
@@ -5063,13 +5205,16 @@ function App() {
         <SidebarInset className="h-svh min-h-0 overflow-hidden md:h-[calc(100svh-1rem)]">
           <AppHeader
             account={activeAccount}
+            accountDrafts={accountDrafts}
             accounts={workspaceAccounts}
             activeView={activeView}
             calls={workspaceCalls}
             darkMode={darkMode}
             isRecording={isCallLive}
             opportunity={activeOpportunity}
+            opportunityDrafts={opportunityDrafts}
             opportunities={workspaceOpportunities}
+            transcriptsByCallId={transcriptsByCallId}
             onDarkModeChange={setDarkMode}
             onAccountSelect={handleAccountSelect}
             onCallSelect={handleCallSelect}
@@ -5077,8 +5222,11 @@ function App() {
             onOpportunitySelect={handleOpportunitySelect}
           />
           <main
+            ref={appMainScrollRef}
+            data-navigation-key={activeNavigationKey}
+            data-navigation-reset={navigationScrollResetNonce}
             className={cn(
-              "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pt-0 md:gap-6 md:p-6 md:pb-6 md:pt-0",
+              "sf-navigation-scroll-root flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pt-0 md:gap-6 md:p-6 md:pb-6 md:pt-0",
               shouldShowMobileStartCall
                 ? "pb-[calc(6.5rem+env(safe-area-inset-bottom))]"
                 : "pb-[calc(1rem+env(safe-area-inset-bottom))]"
@@ -5092,6 +5240,7 @@ function App() {
                 isRecording={canStopActiveCall}
                 isStopping={isStoppingCall || callCapture.status === "stopping"}
                 opportunity={activeOpportunity}
+                opportunityDraft={activeOpportunityDraft}
                 startCallAction={
                   activeAccount.id && activeOpportunity.id ? (
                     <StartRecordingDialog
@@ -5182,6 +5331,7 @@ function App() {
                 postCallOutput={activePostCallOutput}
                 postCallTranscript={activePostCallTranscript}
                 savedOpenAiKeyState={savedOpenAiKeyState}
+                savedOpportunityDraft={activeSavedOpportunityDraft}
                 sellerResearchProfile={sellerResearchProfile}
                 sellerName={personalAccountProfile.fullName}
                 speakerIdentities={speakerIdentities}
@@ -5196,6 +5346,7 @@ function App() {
                 }
                 onDeleteOpportunity={handleRequestDeleteOpportunity}
                 onSaveOpportunityDraft={handleSaveActiveOpportunityDraft}
+                onScrollToTop={requestNavigationScrollReset}
                 onStartRecording={handleStartRecording}
                 onStopRecording={() => handleRecordingChange(false)}
                 onSpeakerIdentityChange={handleSpeakerIdentityChange}
@@ -5204,15 +5355,6 @@ function App() {
                 onUseManualQuestion={handleUseManualQuestion}
                 opportunitySaveMessage={opportunityRecordSaveMessage}
                 opportunitySaveStatus={opportunityRecordSaveStatus}
-              />
-            ) : activeView === "questions" ? (
-              <QuestionQueuePage
-                guidance={activeCallId ? liveGuidanceByCallId[activeCallId] ?? null : null}
-                manualCoach={manualCoachState}
-                opportunity={activeOpportunity}
-                onMoveQuestionLater={handleMoveManualQuestionLater}
-                onNavigate={handleNavigate}
-                onUseQuestion={(question) => handleUseManualQuestion(question, true)}
               />
             ) : accountViews.includes(activeView) ? (
               <AccountView
@@ -5228,6 +5370,7 @@ function App() {
                 opportunities={workspaceOpportunities.filter((opportunity) => opportunity.accountId === activeAccount.id)}
                 playbookFields={workspacePlaybookFields}
                 playbookRows={workspacePlaybooks}
+                savedAccountDraft={activeSavedAccountDraft}
                 savedOpenAiKeyState={savedOpenAiKeyState}
                 sellerResearchProfile={sellerResearchProfile}
                 workspaceId={activeWorkspaceId}
@@ -5239,6 +5382,7 @@ function App() {
                 onRunAccountEnrichment={handleRunActiveAccountEnrichment}
                 onSaveAccountDraft={handleSaveActiveAccountDraft}
                 onSaveAccountEnrichment={handleSaveActiveAccountEnrichment}
+                onScrollToTop={requestNavigationScrollReset}
                 onStartRecording={handleStartRecording}
                 saveMessage={accountRecordSaveMessage}
                 saveStatus={accountRecordSaveStatus}
@@ -5256,7 +5400,6 @@ function App() {
               />
             ) : opportunityViews.includes(activeView) ? (
               <OpportunitiesView
-                activeView={activeView}
                 accounts={workspaceAccounts}
                 opportunities={workspaceOpportunities}
                 opportunityDrafts={opportunityDrafts}
@@ -5271,12 +5414,12 @@ function App() {
                 accounts={workspaceAccounts}
                 accountResearchById={accountResearchById}
                 activeCallId={activeCallId}
-                activeView={activeView}
                 calls={workspaceCalls}
                 opportunityDrafts={opportunityDrafts}
                 opportunities={workspaceOpportunities}
                 savedOpenAiKeyState={savedOpenAiKeyState}
                 sellerResearchProfile={sellerResearchProfile}
+                transcriptsByCallId={transcriptsByCallId}
                 workspaceId={activeWorkspaceId}
                 onCallSelect={handleCallSelect}
                 onDeleteCall={handleRequestDeleteCall}
@@ -5340,6 +5483,7 @@ function App() {
           account={editingAccount}
           draft={editingAccount ? accountDrafts[editingAccount.id] ?? createAccountDraftFromRecord(editingAccount) : undefined}
           open={Boolean(editingAccount)}
+          savedDraft={editingAccount ? savedAccountDrafts[editingAccount.id] ?? createAccountDraftFromRecord(editingAccount) : undefined}
           onEditAccount={handleEditAccount}
           onOpenChange={(open) => {
             if (!open) {
@@ -5363,6 +5507,11 @@ function App() {
           }
           opportunity={editingOpportunity}
           open={Boolean(editingOpportunity)}
+          savedDraft={
+            editingOpportunity
+              ? savedOpportunityDrafts[editingOpportunity.id] ?? createOpportunityDraftFromRecord(editingOpportunity)
+              : undefined
+          }
           onEditOpportunity={handleEditOpportunity}
           onOpenChange={(open) => {
             if (!open) {
@@ -5582,7 +5731,7 @@ function WorkspaceOnboardingDialog({
       }
     } catch (caughtError: unknown) {
       setStatusMessage(
-        getUserFacingErrorMessage(caughtError, "Workspace setup could not be saved.")
+        getUserFacingErrorMessage(caughtError, "Workspace setup needs another save attempt.")
       )
     } finally {
       setIsSaving(false)
@@ -5611,7 +5760,7 @@ function WorkspaceOnboardingDialog({
           <p className="sr-only" aria-live="polite">
             Step {step} of {stepItems.length}: {currentStepItem.label}
           </p>
-          <div className="grid grid-cols-4 gap-2" aria-hidden="true">
+          <div className="grid min-w-0 grid-cols-4 gap-2" aria-hidden="true">
             {stepItems.map((item) => (
               <div
                 key={item.id}
@@ -5861,13 +6010,16 @@ function WorkspaceOnboardingDialog({
 
 function AppHeader({
   account,
+  accountDrafts,
   accounts,
   activeView,
   calls,
   darkMode,
   isRecording,
   opportunity,
+  opportunityDrafts,
   opportunities,
+  transcriptsByCallId,
   onAccountSelect,
   onCallSelect,
   onDarkModeChange,
@@ -5875,13 +6027,16 @@ function AppHeader({
   onOpportunitySelect,
 }: {
   account: AccountNavItem
+  accountDrafts: Record<string, AccountDraft>
   accounts: AccountNavItem[]
   activeView: string
   calls: CallSummary[]
   darkMode: boolean
   isRecording: boolean
   opportunity: Opportunity
+  opportunityDrafts: Record<string, OpportunityDraft>
   opportunities: Opportunity[]
+  transcriptsByCallId: Record<string, Opportunity["transcript"]>
   onAccountSelect: (id: string) => void
   onCallSelect: (id: string) => void
   onDarkModeChange: (value: boolean) => void
@@ -5929,9 +6084,12 @@ function AppHeader({
       </Breadcrumb>
       <div className="ml-auto flex items-center gap-2">
         <GlobalSearch
+          accountDrafts={accountDrafts}
           accounts={accounts}
           calls={calls}
+          opportunityDrafts={opportunityDrafts}
           opportunities={opportunities}
+          transcriptsByCallId={transcriptsByCallId}
           onAccountSelect={onAccountSelect}
           onCallSelect={onCallSelect}
           onNavigate={onNavigate}
@@ -6036,17 +6194,23 @@ function getHeaderBreadcrumbItems({
 }
 
 function GlobalSearch({
+  accountDrafts,
   accounts,
   calls,
+  opportunityDrafts,
   opportunities,
+  transcriptsByCallId,
   onAccountSelect,
   onCallSelect,
   onNavigate,
   onOpportunitySelect,
 }: {
+  accountDrafts: Record<string, AccountDraft>
   accounts: AccountNavItem[]
   calls: CallSummary[]
+  opportunityDrafts: Record<string, OpportunityDraft>
   opportunities: Opportunity[]
+  transcriptsByCallId: Record<string, Opportunity["transcript"]>
   onAccountSelect: (id: string) => void
   onCallSelect: (id: string) => void
   onNavigate: (value: string) => void
@@ -6054,8 +6218,12 @@ function GlobalSearch({
 }) {
   const [query, setQuery] = React.useState("")
   const [focused, setFocused] = React.useState(false)
-  const accountById = new Map(accounts.map((account) => [account.id, account]))
-  const opportunityById = new Map(opportunities.map((opportunity) => [opportunity.id, opportunity]))
+  const [mobileOpen, setMobileOpen] = React.useState(false)
+  const accountById = React.useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
+  const opportunityById = React.useMemo(
+    () => new Map(opportunities.map((opportunity) => [opportunity.id, opportunity])),
+    [opportunities]
+  )
 
   const results = React.useMemo(() => {
     const entries = [
@@ -6065,11 +6233,7 @@ function GlobalSearch({
         label: account.name,
         meta: account.description,
         icon: account.icon,
-        searchText: [
-          account.name,
-          account.description,
-          ...account.opportunities.flatMap((opportunity) => [opportunity.name, opportunity.stage]),
-        ].join(" "),
+        searchText: getAccountSearchText(account, accountDrafts[account.id]),
         onSelect: () => onAccountSelect(account.id),
       })),
       ...opportunities.map((item) => {
@@ -6079,9 +6243,9 @@ function GlobalSearch({
           id: item.id,
           type: "Opportunity",
           label: item.name,
-          meta: `${account?.name ?? "Unknown account"} / ${item.stage} / ${item.coverage}% covered`,
+          meta: `${account?.name ?? "No account linked"} / ${item.stage} / ${item.coverage}% covered`,
           icon: <TargetIcon />,
-          searchText: getOpportunitySearchText(item, account),
+          searchText: getOpportunitySearchText(item, account, opportunityDrafts[item.id]),
           onSelect: () => onOpportunitySelect(item.id),
         }
       }),
@@ -6093,19 +6257,15 @@ function GlobalSearch({
           id: call.id,
           type: "Call",
           label: call.title,
-          meta: `${account?.name ?? "Unknown account"} / ${item?.name ?? "Unknown opportunity"} / ${call.status}`,
+          meta: `${account?.name ?? "No account linked"} / ${item?.name ?? "No opportunity linked"} / ${call.status}`,
           icon: <FileAudioIcon />,
-          searchText: [
-            call.title,
-            call.date,
-            call.duration,
-            call.type,
-            call.status,
-            item?.name,
-            account?.name,
-          ]
-            .filter(Boolean)
-            .join(" "),
+          searchText: getCallSearchText({
+            account,
+            call,
+            opportunity: item,
+            opportunityDraft: item ? opportunityDrafts[item.id] : undefined,
+            transcript: transcriptsByCallId[call.id] ?? item?.transcript ?? [],
+          }),
           onSelect: () => onCallSelect(call.id),
         }
       }),
@@ -6129,7 +6289,21 @@ function GlobalSearch({
     ]
 
     return getFuzzyMatches(entries, query, (entry) => entry.searchText).slice(0, 8)
-  }, [accountById, accounts, calls, onAccountSelect, onCallSelect, onNavigate, onOpportunitySelect, opportunities, opportunityById, query])
+  }, [
+    accountById,
+    accountDrafts,
+    accounts,
+    calls,
+    onAccountSelect,
+    onCallSelect,
+    onNavigate,
+    onOpportunitySelect,
+    opportunities,
+    opportunityById,
+    opportunityDrafts,
+    query,
+    transcriptsByCallId,
+  ])
 
   const showResults = focused && normalizeSearchText(query).length > 0
 
@@ -6137,51 +6311,138 @@ function GlobalSearch({
     selectResult.onSelect()
     setQuery("")
     setFocused(false)
+    setMobileOpen(false)
+  }
+
+  const renderResults = (mode: "desktop" | "mobile") => {
+    const hasQuery = normalizeSearchText(query).length > 0
+
+    if (!hasQuery) {
+      return (
+        <div className="grid grid-cols-[28px_1fr] items-start gap-3 rounded-md px-2 py-3">
+          <span className="flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <SearchIcon className="size-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-sm font-medium">Search the workspace</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+              Try an account, opportunity, call, or playbook name.
+            </span>
+          </span>
+        </div>
+      )
+    }
+
+    if (!results.length) {
+      return (
+        <div className="grid grid-cols-[28px_1fr] items-start gap-3 rounded-md px-2 py-3">
+          <span className="flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <SearchIcon className="size-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-sm font-medium">Nothing matches that search</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+              Try an account, opportunity, call, or playbook name.
+            </span>
+          </span>
+        </div>
+      )
+    }
+
+    return results.map((result) => (
+      <button
+        key={`${mode}-${result.type}-${result.id}`}
+        type="button"
+        className="grid grid-cols-[28px_1fr_auto] items-center gap-3 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-accent"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => handleSelect(result)}
+      >
+        <span className="flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground [&_svg]:size-4">
+          {result.icon}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium">{result.label}</span>
+          <span className="block truncate text-xs text-muted-foreground">{result.meta}</span>
+        </span>
+        <span className="text-xs text-muted-foreground">{result.type}</span>
+      </button>
+    ))
   }
 
   return (
-    <div className="relative hidden w-72 lg:block">
-      <SearchIcon className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
-      <Input
+    <div className="relative">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-10 lg:hidden"
         aria-label="Search workspace"
-        value={query}
-        className="h-8 pl-9"
-        placeholder="Search workspace"
-        onBlur={() => window.setTimeout(() => setFocused(false), 120)}
-        onChange={(event) => {
-          setQuery(event.currentTarget.value)
-          setFocused(true)
+        onClick={() => setMobileOpen(true)}
+      >
+        <SearchIcon />
+      </Button>
+      <div className="relative hidden w-72 lg:block">
+        <SearchIcon className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          aria-label="Search workspace"
+          value={query}
+          className="h-8 pl-9"
+          placeholder="Search workspace"
+          onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+          onChange={(event) => {
+            setQuery(event.currentTarget.value)
+            setFocused(true)
+          }}
+          onFocus={() => setFocused(true)}
+        />
+        {showResults ? (
+          <div className="absolute right-0 z-40 mt-2 grid w-[420px] max-w-[calc(100vw-2rem)] gap-1 rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg">
+            {renderResults("desktop")}
+          </div>
+        ) : null}
+      </div>
+      <Dialog
+        open={mobileOpen}
+        onOpenChange={(open) => {
+          setMobileOpen(open)
+          setFocused(open)
+          if (!open) setQuery("")
         }}
-        onFocus={() => setFocused(true)}
-      />
-      {showResults ? (
-        <div className="absolute right-0 z-40 mt-2 grid w-[420px] max-w-[calc(100vw-2rem)] gap-1 rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg">
-          {results.length ? (
-            results.map((result) => (
-              <button
-                key={`${result.type}-${result.id}`}
-                type="button"
-                className="grid grid-cols-[28px_1fr_auto] items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-accent"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => handleSelect(result)}
-              >
-                <span className="flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground [&_svg]:size-4">
-                  {result.icon}
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">{result.label}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{result.meta}</span>
-                </span>
-                <span className="text-xs text-muted-foreground">{result.type}</span>
-              </button>
-            ))
-          ) : (
-            <div className="rounded-md px-3 py-4 text-sm text-muted-foreground">
-              No matching accounts, opportunities, calls, or playbooks.
-            </div>
-          )}
-        </div>
-      ) : null}
+      >
+        <DialogContent
+          dismissible
+          className="grid max-h-[calc(100svh-1rem)] overflow-hidden max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=input]]:min-h-11 sm:max-w-lg"
+        >
+          <DialogHeader>
+            <DialogTitle>Search workspace</DialogTitle>
+            <DialogDescription>Find accounts, opportunities, calls, and playbooks.</DialogDescription>
+          </DialogHeader>
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              autoFocus
+              aria-label="Search workspace"
+              value={query}
+              className="h-11 pl-9"
+              placeholder="Search workspace"
+              onChange={(event) => {
+                setQuery(event.currentTarget.value)
+                setFocused(true)
+              }}
+            />
+          </div>
+          <div className="grid max-h-[min(24rem,calc(100svh-14rem))] gap-1 overflow-y-auto overscroll-contain rounded-lg bg-muted/30 p-1">
+            {renderResults("mobile")}
+          </div>
+          <DialogActions
+            cancelAction={
+              <DialogClose asChild>
+                <Button variant="outline">Cancel</Button>
+              </DialogClose>
+            }
+            primaryAction={null}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -6193,6 +6454,7 @@ function CommandBar({
   isRecording,
   isStopping,
   opportunity,
+  opportunityDraft,
   startCallAction,
   onCallTypeChange,
   onRecordingChange,
@@ -6204,6 +6466,7 @@ function CommandBar({
   isRecording: boolean
   isStopping: boolean
   opportunity: Opportunity
+  opportunityDraft: OpportunityDraft
   startCallAction?: React.ReactNode
   onCallTypeChange: (value: string) => void
   onRecordingChange: (value: boolean) => void
@@ -6232,11 +6495,14 @@ function CommandBar({
             ))}
           </SelectContent>
         </Select>
-        <CallPrepDialog opportunity={opportunity} onViewChange={onViewChange} />
-        <Button variant="outline" className="justify-start gap-2" onClick={() => onViewChange("recordings")}>
+        <CallPrepDialog opportunity={opportunity} opportunityDraft={opportunityDraft} onViewChange={onViewChange} />
+        <div
+          className="inline-flex h-9 min-w-0 items-center gap-2 rounded-lg border bg-background px-3 text-sm font-medium text-muted-foreground"
+          aria-label={`Elapsed call time ${formatTime(elapsed)}`}
+        >
           <Clock3Icon />
-          {formatTime(elapsed)}
-        </Button>
+          <span>{formatTime(elapsed)}</span>
+        </div>
         {isRecording ? (
           <Button
             className="gap-2"
@@ -6251,24 +6517,66 @@ function CommandBar({
           <div className="[&_[data-slot=button]]:w-full [&_[data-slot=button]]:justify-start">
             {startCallAction}
           </div>
-        ) : (
-          <Button className="gap-2" disabled variant="destructive">
-            <Mic2Icon />
-            Start call
-          </Button>
-        )}
+        ) : null}
       </div>
     </div>
   )
 }
 
+type CallPrepBriefItem = {
+  detail: string
+  status: "ready" | "needs-evidence"
+  title: string
+}
+
+function buildCallPrepBriefItems(opportunity: Opportunity, opportunityDraft: OpportunityDraft): CallPrepBriefItem[] {
+  const methodologyDebt = opportunity.missing + opportunity.weak
+  const selectedPlaybooks = formatPlaybooks(parsePlaybookSelection(opportunityDraft.frameworks))
+
+  return [
+    {
+      title: "Known pain",
+      detail: opportunityDraft.pain.trim()
+        ? opportunityDraft.pain.trim()
+        : "Capture the customer-stated problem before moving into deeper methodology questions.",
+      status: opportunityDraft.pain.trim() ? "ready" : "needs-evidence",
+    },
+    {
+      title: "Decision path",
+      detail: opportunityDraft.decisionProcess.trim()
+        ? opportunityDraft.decisionProcess.trim()
+        : "Listen for who is involved, how the decision happens, and what could slow it down.",
+      status: opportunityDraft.decisionProcess.trim() ? "ready" : "needs-evidence",
+    },
+    {
+      title: "Next step",
+      detail: opportunityDraft.nextStep.trim()
+        ? opportunityDraft.nextStep.trim()
+        : "Leave the call with a clear owner, action, and timing for the next move.",
+      status: opportunityDraft.nextStep.trim() ? "ready" : "needs-evidence",
+    },
+    {
+      title: "Selected playbooks",
+      detail: methodologyDebt > 0
+        ? `${selectedPlaybooks} has ${methodologyDebt} field${methodologyDebt === 1 ? "" : "s"} that still need stronger evidence.`
+        : `${selectedPlaybooks} is currently fully covered for this opportunity.`,
+      status: methodologyDebt > 0 ? "needs-evidence" : "ready",
+    },
+  ]
+}
+
 function CallPrepDialog({
   opportunity,
+  opportunityDraft,
   onViewChange,
 }: {
   opportunity: Opportunity
+  opportunityDraft: OpportunityDraft
   onViewChange: (value: string) => void
 }) {
+  const prepItems = buildCallPrepBriefItems(opportunity, opportunityDraft)
+  const suggestedOpening = opportunity.nextCallBrief?.opening.trim()
+
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -6290,8 +6598,8 @@ function CallPrepDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          {prepChecklist.map((item) => (
-            <div key={item.title} className="grid grid-cols-[32px_1fr] gap-3 rounded-lg border p-3">
+          {prepItems.map((item) => (
+            <div key={item.title} className="grid grid-cols-[32px_1fr] gap-3 rounded-lg bg-muted/35 p-3">
               <div
                 className={cn(
                   "flex size-8 items-center justify-center rounded-lg",
@@ -6306,10 +6614,13 @@ function CallPrepDialog({
               </div>
             </div>
           ))}
-          <div className="rounded-lg border bg-muted/40 p-3">
-            <p className="text-sm font-medium">Current recommended opening</p>
+          <div className="rounded-lg bg-muted/35 p-3">
+            <p className="text-sm font-medium">
+              {suggestedOpening ? "Suggested opening from next-call brief" : "First live question"}
+            </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Start with what changed, then move quickly to impact: “Before we jump into solution fit, what made this urgent enough to revisit now?”
+              {suggestedOpening ||
+                "Start the call when ready. SalesFrame will generate the opener from the account context, opportunity record, call type, selected playbooks, and previous evidence before recording begins."}
             </p>
           </div>
         </div>
@@ -6406,7 +6717,7 @@ function StartCallPreparingView({
                     isComplete && "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
                   )}
                 >
-                  {isComplete ? <CheckIcon className="size-4" /> : <Icon className={cn("size-4", isActive && "animate-pulse")} />}
+                  {isComplete ? <CheckIcon className="size-4" /> : <Icon className={cn("size-4", isActive && "sf-state-pulse")} />}
                 </span>
                 <div className="min-w-0">
                   <p className="truncate font-medium">{item.label}</p>
@@ -6562,7 +6873,7 @@ function StartRecordingDialog({
     {
       id: "coach",
       label: "Writing your first live question",
-      description: "OpenAI is choosing a question that fits the call, not just the next empty field.",
+      description: "SalesFrame is choosing a question that fits the call, not just the next empty field.",
       icon: SparklesIcon,
       progress: 78,
     },
@@ -6794,10 +7105,10 @@ function StartRecordingDialog({
     }
 
     setResearchProfileStatus("loading")
-    setResearchProfileMessage(`Fetching information for ${normalizedDomain} after you stop typing...`)
+    setResearchProfileMessage(`Looking up ${normalizedDomain} after you stop typing...`)
 
     sellerDomainLookupTimeoutRef.current = window.setTimeout(() => {
-      setResearchProfileMessage(`Fetching information from OpenAI web research for ${normalizedDomain}...`)
+      setResearchProfileMessage(`Reading public information for ${normalizedDomain}...`)
 
       void requestSellerDomainResearch({
         domain: normalizedDomain,
@@ -6811,7 +7122,7 @@ function StartRecordingDialog({
           setProductContext(result.productContext)
           setResearchProfileStatus("success")
           setResearchProfileMessage(
-            `What you sell was updated from OpenAI web research for ${result.sellerDomain || normalizedDomain}.`
+            `What you sell is ready for ${result.sellerDomain || normalizedDomain}.`
           )
         })
         .catch((error: unknown) => {
@@ -6839,7 +7150,7 @@ function StartRecordingDialog({
     const message =
       typeof error === "string"
         ? error
-        : getUserFacingErrorMessage(error, "Call could not be started.")
+        : getUserFacingErrorMessage(error, "Call start needs another try.")
 
     if (/OpenAI key did not work|key needs billing|quota attention|Check the key in Settings/i.test(message)) {
       return appendErrorReference(
@@ -6857,7 +7168,7 @@ function StartRecordingDialog({
 
     if (
       /SalesFrame needs another moment to prepare this/i.test(message) ||
-      /could not prepare the first question/i.test(message) ||
+      /prepare the first question/i.test(message) ||
       /Live guidance did not return/i.test(message)
     ) {
       return appendErrorReference(
@@ -6995,7 +7306,7 @@ function StartRecordingDialog({
               onCancel={handleCancelStart}
               primaryAction={
                 <Button disabled className="gap-2">
-                  <SparklesIcon className="animate-pulse" />
+                  <SparklesIcon className="sf-state-pulse" />
                   Starting call
                 </Button>
               }
@@ -7039,7 +7350,7 @@ function StartRecordingDialog({
 
             <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain pr-1 max-sm:pr-0">
               {step === 1 ? (
-                <div className="grid min-w-0 gap-4 rounded-lg border p-3 sm:p-4">
+                <div className="grid min-w-0 gap-4">
                   <div className="flex items-center gap-2">
                     <Building2Icon className="size-4 text-muted-foreground" />
                     <p className="text-sm font-medium">Account</p>
@@ -7113,7 +7424,7 @@ function StartRecordingDialog({
               ) : null}
 
               {step === 2 ? (
-                <div className="grid min-w-0 gap-4 rounded-lg border p-3 sm:p-4">
+                <div className="grid min-w-0 gap-4">
                   <div className="flex items-center gap-2">
                     <TargetIcon className="size-4 text-muted-foreground" />
                     <p className="text-sm font-medium">Opportunity</p>
@@ -7166,7 +7477,7 @@ function StartRecordingDialog({
               ) : null}
 
               {step === 3 ? (
-                <div className="grid min-w-0 gap-4 rounded-lg border p-3 sm:p-4">
+                <div className="grid min-w-0 gap-4">
                   <div className="flex items-center gap-2">
                     <PhoneCallIcon className="size-4 text-muted-foreground" />
                     <p className="text-sm font-medium">Call setup</p>
@@ -7252,7 +7563,7 @@ function StartRecordingDialog({
               ) : null}
 
                   {step === 4 ? (
-                    <div className="grid min-w-0 gap-4 rounded-lg border p-3 sm:p-4">
+                    <div className="grid min-w-0 gap-4">
                       {!hasSavedOpenAiKey ? (
                     <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3" role="alert">
                       <div className="min-w-0">
@@ -7354,8 +7665,8 @@ function StartRecordingDialog({
                           className="min-h-20 resize-none"
                           placeholder={
                             researchProfileStatus === "loading"
-                              ? "Fetching information..."
-                              : "Describe the product or offer the AI should connect to buyer research and live questions."
+                              ? "Looking up your company..."
+                              : "Describe the product or offer SalesFrame should connect to buyer research and live questions."
                           }
                           onChange={(event) => setProductContext(event.currentTarget.value)}
                         />
@@ -7682,10 +7993,10 @@ function CreateAccountDialog({
     }
 
     setResearchProfileStatus("loading")
-    setResearchProfileMessage(`Fetching information for ${normalizedDomain} after you stop typing...`)
+    setResearchProfileMessage(`Looking up ${normalizedDomain} after you stop typing...`)
 
     sellerDomainLookupTimeoutRef.current = window.setTimeout(() => {
-      setResearchProfileMessage(`Fetching information from OpenAI web research for ${normalizedDomain}...`)
+      setResearchProfileMessage(`Reading public information for ${normalizedDomain}...`)
 
       void requestSellerDomainResearch({
         domain: normalizedDomain,
@@ -7699,7 +8010,7 @@ function CreateAccountDialog({
           setProductContext(result.productContext)
           setResearchProfileStatus("success")
           setResearchProfileMessage(
-            `What you sell was updated from OpenAI web research for ${result.sellerDomain || normalizedDomain}.`
+            `What you sell is ready for ${result.sellerDomain || normalizedDomain}.`
           )
         })
         .catch((error: unknown) => {
@@ -7775,7 +8086,7 @@ function CreateAccountDialog({
       onOpenChange(false)
       setStep(1)
     } catch (caughtError: unknown) {
-      setCreateError(getUserFacingErrorMessage(caughtError, "Account could not be created."))
+      setCreateError(getUserFacingErrorMessage(caughtError, "Account setup needs another try."))
     } finally {
       setCreateSubmitting(false)
       setCreateProgressMessage("")
@@ -7811,7 +8122,7 @@ function CreateAccountDialog({
         <p className="sr-only" aria-live="polite">
           Step {step} of {accountSteps.length}: {currentAccountStepLabel}
         </p>
-        <div className="grid grid-cols-4 gap-2" role="list" aria-label="Create account steps">
+        <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4" role="list" aria-label="Create account steps">
           {accountSteps.map(({ label, icon: Icon }, index) => {
             const itemStep = (index + 1) as 1 | 2 | 3 | 4
             const isActive = step === itemStep
@@ -7823,7 +8134,7 @@ function CreateAccountDialog({
                 role="listitem"
                 aria-current={isActive ? "step" : undefined}
                 className={cn(
-                  "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+                  "flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-sm sm:px-3",
                   isActive && "border-primary bg-primary/5",
                   isComplete && "bg-muted/50"
                 )}
@@ -7844,7 +8155,7 @@ function CreateAccountDialog({
 
         <div className="min-h-0 overflow-y-auto pr-1">
         {step === 1 ? (
-          <div className="grid gap-4 rounded-lg border p-4">
+          <div className="grid gap-4">
             <div className="flex items-center gap-2">
               <Building2Icon className="size-4 text-muted-foreground" />
               <p className="text-sm font-medium">Account basics</p>
@@ -7914,7 +8225,7 @@ function CreateAccountDialog({
         ) : null}
 
         {step === 2 ? (
-          <div className="grid gap-4 rounded-lg border p-4">
+          <div className="grid gap-4">
             <div className="flex items-center gap-2">
               <ListChecksIcon className="size-4 text-muted-foreground" />
               <p className="text-sm font-medium">Account context</p>
@@ -7975,11 +8286,11 @@ function CreateAccountDialog({
         ) : null}
 
         {step === 3 ? (
-          <div className="grid gap-3 rounded-lg border p-4">
+          <div className="grid gap-3">
             <div
               className={cn(
-                "flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between",
-                hasSavedOpenAiKey ? "border-emerald-500/30 bg-emerald-500/10" : "border-destructive/40 bg-destructive/10"
+                "flex flex-col gap-3 rounded-lg p-3 sm:flex-row sm:items-center sm:justify-between",
+                hasSavedOpenAiKey ? "bg-emerald-500/10" : "border border-destructive/40 bg-destructive/10"
               )}
             >
               <div className="min-w-0">
@@ -8025,12 +8336,17 @@ function CreateAccountDialog({
                     ) : null}
                   </div>
                 </div>
-                <Switch
-                  id="create-account-ai-enrichment"
-                  checked={aiEnrichmentEnabled}
-                  disabled={!hasSavedOpenAiKey}
-                  onCheckedChange={setAiEnrichmentEnabled}
-                />
+                <div className="flex shrink-0 items-center gap-2">
+                  <Label htmlFor="create-account-ai-enrichment" className="text-sm text-muted-foreground">
+                    Use customer research
+                  </Label>
+                  <Switch
+                    id="create-account-ai-enrichment"
+                    checked={aiEnrichmentEnabled}
+                    disabled={!hasSavedOpenAiKey}
+                    onCheckedChange={setAiEnrichmentEnabled}
+                  />
+                </div>
               </div>
             </div>
 
@@ -8090,8 +8406,8 @@ function CreateAccountDialog({
                   className="min-h-20 resize-none"
                   placeholder={
                     researchProfileStatus === "loading"
-                      ? "Fetching information..."
-                      : "Describe the product or offer the AI should connect to buyer research and live questions."
+                      ? "Looking up your company..."
+                      : "Describe the product or offer SalesFrame should connect to buyer research and live questions."
                   }
                   onChange={(event) => setProductContext(event.currentTarget.value)}
                 />
@@ -8111,16 +8427,12 @@ function CreateAccountDialog({
                       : "Turn on seller research to save product context for this account.")}
                 </p>
               </div>
-
-              <p className="text-xs text-muted-foreground">
-                Uses the same trusted source set each time: {trustedResearchSources.join(", ")}.
-              </p>
             </div>
           </div>
         ) : null}
 
         {step === 4 ? (
-          <div className="grid gap-4 rounded-lg border p-4">
+          <div className="grid gap-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-2">
                 <TargetIcon className="size-4 text-muted-foreground" />
@@ -8183,6 +8495,9 @@ function CreateAccountDialog({
                           value={amount}
                           placeholder={`Optional (${currency})`}
                           onChange={(event) => setAmount(event.currentTarget.value)}
+                          onBlur={() =>
+                            setAmount((value) => value.trim() ? formatCurrencyAmount(value, currency) : "")
+                          }
                         />
                       </div>
                       <div className="grid min-w-0 gap-2">
@@ -8195,11 +8510,6 @@ function CreateAccountDialog({
                           onChange={setCloseDate}
                         />
                       </div>
-                      {amount.trim() ? (
-                        <p className="text-xs text-muted-foreground sm:col-span-3">
-                          Amount preview: {formatCurrencyAmount(amount, currency)}
-                        </p>
-                      ) : null}
                     </div>
                     <div className="grid gap-2">
                       <Label htmlFor="create-opportunity-playbooks">Playbooks</Label>
@@ -8299,12 +8609,14 @@ function EditAccountDialog({
   account,
   draft,
   open,
+  savedDraft,
   onEditAccount,
   onOpenChange,
 }: {
   account?: AccountNavItem
   draft?: AccountDraft
   open: boolean
+  savedDraft?: AccountDraft
   onEditAccount: (payload: EditAccountPayload) => Promise<RecordMutationResult> | RecordMutationResult
   onOpenChange: (open: boolean) => void
 }) {
@@ -8320,25 +8632,54 @@ function EditAccountDialog({
   const [accountNotes, setAccountNotes] = React.useState("")
   const [editError, setEditError] = React.useState("")
   const [editSubmitting, setEditSubmitting] = React.useState(false)
+  const [savedEditDraft, setSavedEditDraft] = React.useState<AccountDraft | null>(null)
 
   React.useEffect(() => {
     if (!open || !account) return
 
-    setAccountName(draft?.accountName ?? account.name)
-    setWebsite(draft?.website ?? "")
-    setIndustry(draft?.industry ?? account.description)
-    setEmployeeCount(draft?.employeeCount ?? "")
-    setRegion(draft?.region ?? "Australia")
-    setCurrency(draft?.currency ?? account.currency)
-    setCurrentTools(draft?.currentTools ?? "")
-    setStrategicInitiatives(draft?.strategicInitiatives ?? "")
-    setCompetitors(draft?.competitors ?? "")
-    setAccountNotes(draft?.accountNotes ?? "")
+    const nextDraft: AccountDraft = {
+      accountName: draft?.accountName ?? account.name,
+      website: draft?.website ?? "",
+      industry: draft?.industry ?? account.description,
+      employeeCount: draft?.employeeCount ?? "",
+      region: draft?.region ?? "Australia",
+      currency: draft?.currency ?? account.currency,
+      currentTools: draft?.currentTools ?? "",
+      strategicInitiatives: draft?.strategicInitiatives ?? "",
+      competitors: draft?.competitors ?? "",
+      accountNotes: draft?.accountNotes ?? "",
+    }
+    const nextSavedDraft = savedDraft ?? nextDraft
+
+    setAccountName(nextDraft.accountName)
+    setWebsite(nextDraft.website)
+    setIndustry(nextDraft.industry)
+    setEmployeeCount(nextDraft.employeeCount)
+    setRegion(nextDraft.region)
+    setCurrency(nextDraft.currency)
+    setCurrentTools(nextDraft.currentTools)
+    setStrategicInitiatives(nextDraft.strategicInitiatives)
+    setCompetitors(nextDraft.competitors)
+    setAccountNotes(nextDraft.accountNotes)
+    setSavedEditDraft(nextSavedDraft)
     setEditError("")
     setEditSubmitting(false)
-  }, [account, draft, open])
+  }, [account, draft, open, savedDraft])
 
-  const canSave = Boolean(account) && accountName.trim().length > 0
+  const currentEditDraft = React.useMemo<AccountDraft>(() => ({
+    accountName,
+    website,
+    industry,
+    employeeCount,
+    region,
+    currency,
+    currentTools,
+    strategicInitiatives,
+    competitors,
+    accountNotes,
+  }), [accountName, website, industry, employeeCount, region, currency, currentTools, strategicInitiatives, competitors, accountNotes])
+  const hasEditChanges = savedEditDraft ? !areAccountDraftsEqual(currentEditDraft, savedEditDraft) : false
+  const canSave = Boolean(account) && accountName.trim().length > 0 && hasEditChanges
 
   const handleSave = async () => {
     if (!canSave || !account) return
@@ -8383,7 +8724,7 @@ function EditAccountDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 rounded-lg border p-4">
+        <div className="grid gap-4">
           <div className="flex items-center gap-2">
             <Building2Icon className="size-4 text-muted-foreground" />
             <p className="text-sm font-medium">Account basics</p>
@@ -8442,7 +8783,7 @@ function EditAccountDialog({
           </div>
         </div>
 
-        <div className="grid gap-4 rounded-lg border p-4">
+        <div className="grid gap-4">
           <div className="flex items-center gap-2">
             <SquarePenIcon className="size-4 text-muted-foreground" />
             <p className="text-sm font-medium">Account context</p>
@@ -8596,7 +8937,7 @@ function CreateOpportunityDialog({
 
       onOpenChange(false)
     } catch (caughtError: unknown) {
-      setCreateError(getUserFacingErrorMessage(caughtError, "Opportunity could not be created."))
+      setCreateError(getUserFacingErrorMessage(caughtError, "Opportunity setup needs another try."))
     } finally {
       setCreateSubmitting(false)
     }
@@ -8617,7 +8958,7 @@ function CreateOpportunityDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 rounded-lg border p-4">
+        <div className="grid gap-4">
           <div className="flex items-center gap-2">
             <TargetIcon className="size-4 text-muted-foreground" />
             <p className="text-sm font-medium">Opportunity basics</p>
@@ -8680,7 +9021,7 @@ function CreateOpportunityDialog({
           </div>
         </div>
 
-        <div className="grid gap-2 rounded-lg border p-3">
+        <div className="grid gap-3 rounded-lg bg-muted/40 p-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <SquarePenIcon className="size-4 text-muted-foreground" />
@@ -8702,19 +9043,17 @@ function CreateOpportunityDialog({
             <div className="grid gap-3">
               <div className="grid items-start gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
-                  <div className="flex min-w-0 items-center justify-between gap-2">
-                    <Label htmlFor="add-opportunity-amount">Amount</Label>
-                    {amount.trim() ? (
-                      <span className="truncate text-[11px] text-muted-foreground">
-                        {formatCurrencyAmount(amount, selectedAccount?.currency)}
-                      </span>
-                    ) : null}
-                  </div>
+                  <Label htmlFor="add-opportunity-amount">Amount</Label>
                   <Input
                     id="add-opportunity-amount"
                     value={amount}
                     placeholder={`Optional (${selectedAccount?.currency ?? defaultCurrencyCode})`}
                     onChange={(event) => setAmount(event.currentTarget.value)}
+                    onBlur={() =>
+                      setAmount((value) =>
+                        value.trim() ? formatCurrencyAmount(value, selectedAccount?.currency) : ""
+                      )
+                    }
                   />
                 </div>
                 <div className="grid gap-2">
@@ -8803,6 +9142,7 @@ function EditOpportunityDialog({
   draft,
   opportunity,
   open,
+  savedDraft,
   onEditOpportunity,
   onOpenChange,
 }: {
@@ -8810,6 +9150,7 @@ function EditOpportunityDialog({
   draft?: OpportunityDraft
   opportunity?: Opportunity
   open: boolean
+  savedDraft?: OpportunityDraft
   onEditOpportunity: (payload: EditOpportunityPayload) => Promise<RecordMutationResult> | RecordMutationResult
   onOpenChange: (open: boolean) => void
 }) {
@@ -8826,27 +9167,61 @@ function EditOpportunityDialog({
   const [manualNotes, setManualNotes] = React.useState("")
   const [editError, setEditError] = React.useState("")
   const [editSubmitting, setEditSubmitting] = React.useState(false)
+  const [savedEditAccountId, setSavedEditAccountId] = React.useState("")
+  const [savedEditDraft, setSavedEditDraft] = React.useState<OpportunityDraft | null>(null)
 
   React.useEffect(() => {
     if (!open || !opportunity) return
 
-    setAccountId(opportunity.accountId)
-    setOpportunityName(draft?.opportunityName ?? opportunity.name)
-    setStage(draft?.stage ?? opportunity.stage)
-    setAmount(draft?.amount ?? opportunity.amount)
-    setCloseDate(draft?.closeDate ?? opportunity.closeDate)
-    setSource(draft?.source ?? "")
-    setSelectedPlaybooks(parsePlaybookSelection(draft?.frameworks))
-    setNextStep(draft?.nextStep ?? "")
-    setPain(draft?.pain ?? "")
-    setDecisionProcess(draft?.decisionProcess ?? "")
-    setManualNotes(draft?.manualNotes ?? "")
+    const nextDraft: OpportunityDraft = {
+      opportunityName: draft?.opportunityName ?? opportunity.name,
+      stage: draft?.stage ?? opportunity.stage,
+      amount: draft?.amount ?? opportunity.amount,
+      closeDate: draft?.closeDate ?? opportunity.closeDate,
+      source: draft?.source ?? "",
+      frameworks: formatPlaybooks(parsePlaybookSelection(draft?.frameworks)),
+      nextStep: draft?.nextStep ?? "",
+      pain: draft?.pain ?? "",
+      decisionProcess: draft?.decisionProcess ?? "",
+      manualNotes: draft?.manualNotes ?? "",
+    }
+    const nextAccountId = opportunity.accountId
+    const nextSavedDraft = savedDraft ?? nextDraft
+
+    setAccountId(nextAccountId)
+    setOpportunityName(nextDraft.opportunityName)
+    setStage(nextDraft.stage)
+    setAmount(nextDraft.amount)
+    setCloseDate(nextDraft.closeDate)
+    setSource(nextDraft.source)
+    setSelectedPlaybooks(parsePlaybookSelection(nextDraft.frameworks))
+    setNextStep(nextDraft.nextStep)
+    setPain(nextDraft.pain)
+    setDecisionProcess(nextDraft.decisionProcess)
+    setManualNotes(nextDraft.manualNotes)
+    setSavedEditAccountId(nextAccountId)
+    setSavedEditDraft(nextSavedDraft)
     setEditError("")
     setEditSubmitting(false)
-  }, [draft, open, opportunity])
+  }, [draft, open, opportunity, savedDraft])
 
   const selectedAccount = accounts.find((account) => account.id === accountId)
-  const canSave = Boolean(opportunity) && Boolean(accountId) && opportunityName.trim().length > 0
+  const currentEditDraft = React.useMemo<OpportunityDraft>(() => ({
+    opportunityName,
+    stage,
+    amount,
+    closeDate,
+    source,
+    frameworks: formatPlaybooks(selectedPlaybooks),
+    nextStep,
+    pain,
+    decisionProcess,
+    manualNotes,
+  }), [opportunityName, stage, amount, closeDate, source, selectedPlaybooks, nextStep, pain, decisionProcess, manualNotes])
+  const hasEditChanges = savedEditDraft
+    ? accountId !== savedEditAccountId || !areOpportunityDraftsEqual(currentEditDraft, savedEditDraft)
+    : false
+  const canSave = Boolean(opportunity) && Boolean(accountId) && opportunityName.trim().length > 0 && hasEditChanges
 
   const handleSave = async () => {
     if (!canSave || !opportunity) return
@@ -8892,7 +9267,7 @@ function EditOpportunityDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 rounded-lg border p-4">
+        <div className="grid gap-4">
           <div className="flex items-center gap-2">
             <TargetIcon className="size-4 text-muted-foreground" />
             <p className="text-sm font-medium">Opportunity basics</p>
@@ -8956,10 +9331,12 @@ function EditOpportunityDialog({
                 value={amount}
                 placeholder={`Amount (${selectedAccount?.currency ?? defaultCurrencyCode})`}
                 onChange={(event) => setAmount(event.currentTarget.value)}
+                onBlur={() =>
+                  setAmount((value) =>
+                    value.trim() ? formatCurrencyAmount(value, selectedAccount?.currency) : ""
+                  )
+                }
               />
-              <p className="text-xs text-muted-foreground">
-                Preview: {formatCurrencyAmount(amount, selectedAccount?.currency)}
-              </p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="edit-opportunity-close-date">Close date</Label>
@@ -8989,7 +9366,7 @@ function EditOpportunityDialog({
           </div>
         </div>
 
-        <div className="grid gap-4 rounded-lg border p-4">
+        <div className="grid gap-4">
           <div className="flex items-center gap-2">
             <SquarePenIcon className="size-4 text-muted-foreground" />
             <p className="text-sm font-medium">Seller notes</p>
@@ -9090,6 +9467,7 @@ function DeleteRecordDialog({
     }
 
     setDeleteSubmitting(false)
+    onCancel()
   }
 
   return (
@@ -9109,7 +9487,7 @@ function DeleteRecordDialog({
             This action removes the selected record from this workspace. This cannot be undone.
           </DialogDescription>
         </DialogHeader>
-        <div className="rounded-lg border bg-muted/30 p-3">
+        <div className="rounded-lg bg-muted/30 p-3">
           <p className="text-sm font-medium">{record.name}</p>
           <p className="mt-1 text-sm text-muted-foreground">{record.detail}</p>
         </div>
@@ -9156,7 +9534,21 @@ function PlaybookMultiSelect({
   }
 
   return (
-    <div className="relative min-w-0">
+    <div
+      className="relative min-w-0"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setOpen(false)
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault()
+          event.stopPropagation()
+          setOpen(false)
+        }
+      }}
+    >
       <Button
         id={id}
         type="button"
@@ -9174,14 +9566,14 @@ function PlaybookMultiSelect({
             <span className="shrink-0 text-muted-foreground">+{hiddenPlaybookCount} more</span>
           ) : null}
         </span>
-        <ChevronDownIcon className={cn("size-4 shrink-0 transition-transform", open && "rotate-180")} />
+        <ChevronDownIcon className={cn("size-4 shrink-0 transition-transform duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-standard)]", open && "rotate-180")} />
       </Button>
 
       {open ? (
         <div
           role="listbox"
           aria-multiselectable="true"
-          className="absolute right-0 z-50 mt-1 grid max-h-[min(18rem,calc(100vh-12rem))] w-full max-w-[min(28rem,calc(100vw-2rem))] min-w-0 gap-1 overflow-y-auto overscroll-contain rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg sm:min-w-64"
+          className="absolute right-0 top-full z-50 mt-1 grid max-h-[min(18rem,calc(100vh-12rem))] w-full max-w-[min(28rem,calc(100vw-2rem))] min-w-0 gap-1 overflow-y-auto overscroll-contain rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg transition-none duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-enter)] animate-in fade-in-0 zoom-in-95 max-sm:top-auto max-sm:bottom-full max-sm:mt-0 max-sm:mb-1 max-sm:max-h-[min(14rem,calc(100dvh-10rem))] sm:min-w-64"
         >
           {callPlaybookOptions.map((playbook) => {
             const isSelected = selectedPlaybooks.includes(playbook)
@@ -9192,7 +9584,7 @@ function PlaybookMultiSelect({
                 type="button"
                 role="option"
                 aria-selected={isSelected}
-                className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => togglePlaybook(playbook)}
               >
                 <span
@@ -9253,17 +9645,21 @@ function HomeDashboard({
   const [focusQuery, setFocusQuery] = React.useState("")
   const [focusCoverageFilter, setFocusCoverageFilter] = React.useState<OpportunityCoverageFilter>("all")
   const [focusSort, setFocusSort] = React.useState<OpportunitySort>("gaps")
-  const accountById = new Map(accounts.map((account) => [account.id, account]))
-  const displayOpportunities = opportunities.map((opportunity) =>
-    applyOpportunityMethodologySummary(
-      opportunity,
-      getOpportunityMethodologySummary({
-        opportunity,
-        playbookFields,
-        playbookRows,
-        selectedPlaybooks: parsePlaybookSelection(opportunityDrafts[opportunity.id]?.frameworks),
-      })
-    )
+  const accountById = React.useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
+  const displayOpportunities = React.useMemo(
+    () =>
+      opportunities.map((opportunity) =>
+        applyOpportunityMethodologySummary(
+          opportunity,
+          getOpportunityMethodologySummary({
+            opportunity,
+            playbookFields,
+            playbookRows,
+            selectedPlaybooks: parsePlaybookSelection(opportunityDrafts[opportunity.id]?.frameworks),
+          })
+        )
+      ),
+    [opportunities, opportunityDrafts, playbookFields, playbookRows]
   )
   const averageCoverage = displayOpportunities.length
     ? Math.round(displayOpportunities.reduce((total, opportunity) => total + opportunity.coverage, 0) / displayOpportunities.length)
@@ -9284,6 +9680,7 @@ function HomeDashboard({
   const visibleFocusOpportunities = filteredFocusOpportunities.slice(0, dashboardPreviewLimit)
   const hiddenFocusCount = Math.max(0, filteredFocusOpportunities.length - visibleFocusOpportunities.length)
   const hiddenCoverageCount = Math.max(0, sortedCoverageOpportunities.length - coverageOpportunities.length)
+  const hasFocusFilters = Boolean(focusQuery.trim()) || focusCoverageFilter !== "all" || focusSort !== "gaps"
 
   return (
     <div className="grid gap-4">
@@ -9326,33 +9723,43 @@ function HomeDashboard({
             </CardDescription>
           </div>
           <CardAction>
-            <Button variant="outline" size="sm" className="h-10 gap-2 md:h-7" onClick={onOpenOpportunities}>
+            <Button variant="outline" size="sm" className="h-10 w-full gap-2 sm:w-auto md:h-7" onClick={onOpenOpportunities}>
               <ChartNoAxesColumnIncreasingIcon />
               View all
             </Button>
           </CardAction>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
-          {coverageOpportunities.map((opportunity) => {
-            const account = accountById.get(opportunity.accountId)
+          {coverageOpportunities.length ? (
+            coverageOpportunities.map((opportunity) => {
+              const account = accountById.get(opportunity.accountId)
 
-            return (
-              <div key={`${opportunity.id}-coverage`} className="grid gap-2">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{opportunity.name}</p>
-                    <p className="text-xs text-muted-foreground">{account?.name ?? "Unknown account"}</p>
+              return (
+                <div key={`${opportunity.id}-coverage`} className="grid gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{opportunity.name}</p>
+                      <p className="text-xs text-muted-foreground">{account?.name ?? "No account linked"}</p>
+                    </div>
+                    <span className="text-sm font-medium">{opportunity.coverage}%</span>
                   </div>
-                  <span className="text-sm font-medium">{opportunity.coverage}%</span>
+                  <CoverageProgress
+                    value={opportunity.coverage}
+                    className="h-2"
+                    data-testid="dashboard-coverage-bar"
+                  />
                 </div>
-                <CoverageProgress
-                  value={opportunity.coverage}
-                  className="h-2"
-                  data-testid="dashboard-coverage-bar"
-                />
-              </div>
-            )
-          })}
+              )
+            })
+          ) : (
+            <div className="md:col-span-2">
+              <ListEmptyState
+                icon={<ChartNoAxesColumnIncreasingIcon />}
+                title="No opportunity coverage yet"
+                message="Create an opportunity or start a call when there is a deal to qualify."
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -9366,7 +9773,7 @@ function HomeDashboard({
             </CardDescription>
           </div>
           <CardAction>
-            <Button variant="outline" size="sm" className="h-10 gap-2 md:h-7" onClick={onOpenOpportunities}>
+            <Button variant="outline" size="sm" className="h-10 w-full gap-2 sm:w-auto md:h-7" onClick={onOpenOpportunities}>
               <Table2Icon />
               View all
             </Button>
@@ -9411,81 +9818,101 @@ function HomeDashboard({
                 <SelectItem value="close-date">Close date</SelectItem>
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              className="h-10 gap-2 md:h-8"
-              onClick={() => {
-                setFocusQuery("")
-                setFocusCoverageFilter("all")
-                setFocusSort("gaps")
-              }}
-            >
-              <FilterIcon />
-              Reset
-            </Button>
+            {hasFocusFilters ? (
+              <Button
+                variant="outline"
+                className="h-10 gap-2 md:h-8"
+                onClick={() => {
+                  setFocusQuery("")
+                  setFocusCoverageFilter("all")
+                  setFocusSort("gaps")
+                }}
+              >
+                <FilterIcon />
+                Reset
+              </Button>
+            ) : null}
           </div>
-          <div className="overflow-hidden">
-            <table className="w-full table-fixed text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs text-muted-foreground">
-                  <th className="w-[38%] py-2 pr-4 font-medium">Opportunity</th>
-                  <th className="hidden w-[14%] py-2 pr-4 font-medium lg:table-cell">Stage</th>
-                  <th className="w-[22%] py-2 pr-4 font-medium">Attention</th>
-                  <th className="hidden w-[16%] py-2 pr-4 font-medium md:table-cell">Gaps</th>
-                  <th className="w-[84px] py-2 text-right font-medium">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleFocusOpportunities.map((opportunity) => {
-                  const account = accountById.get(opportunity.accountId)
-                  const attention = getOpportunityAttention(opportunity)
-
-                  return (
-                    <tr key={`${opportunity.id}-row`} className="border-b last:border-b-0">
-                      <td className="min-w-0 py-3 pr-4">
-                        <p className="truncate font-medium">{opportunity.name}</p>
-                        <p className="truncate text-xs text-muted-foreground">{account?.name ?? "Unknown account"}</p>
-                        <p className="mt-1 hidden truncate text-xs text-muted-foreground xl:block">
-                          {getOpportunityGuidancePreview(opportunity)}
-                        </p>
-                      </td>
-                      <td className="hidden py-3 pr-4 text-muted-foreground lg:table-cell">
-                        <span className="block truncate">{opportunity.stage}</span>
-                      </td>
-                      <td className="py-3 pr-4">
-                        <div className="grid min-w-0 gap-1.5">
-                          <Badge
-                            variant="outline"
-                            className={getAttentionBadgeClassName(attention.score)}
-                            data-attention-tone={attention.tone}
-                            data-testid="dashboard-attention-badge"
-                          >
-                            {attention.label}
-                          </Badge>
-                          <span className="truncate text-xs text-muted-foreground">{attention.detail}</span>
-                        </div>
-                      </td>
-                      <td className="hidden py-3 pr-4 text-muted-foreground md:table-cell">
-                        <span className="block truncate">
-                          {opportunity.missing} missing / {opportunity.weak} weak
-                        </span>
-                      </td>
-                      <td className="py-3 text-right">
-                        <OpenButton onClick={() => onOpportunitySelect(opportunity.id)} />
-                      </td>
-                    </tr>
-                  )
-                })}
-                {filteredFocusOpportunities.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
-                      No opportunities match this search and filter.
-                    </td>
+          {filteredFocusOpportunities.length ? (
+            <div className="overflow-hidden">
+              <table className="w-full table-fixed text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs text-muted-foreground">
+                    <th className="w-[38%] py-2 pr-4 font-medium">Opportunity</th>
+                    <th className="hidden w-[14%] py-2 pr-4 font-medium lg:table-cell">Stage</th>
+                    <th className="w-[22%] py-2 pr-4 font-medium">Attention</th>
+                    <th className="hidden w-[16%] py-2 pr-4 font-medium md:table-cell">Gaps</th>
+                    <th className="w-[84px] py-2 text-right font-medium">Action</th>
                   </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {visibleFocusOpportunities.map((opportunity) => {
+                    const account = accountById.get(opportunity.accountId)
+                    const attention = getOpportunityAttention(opportunity)
+
+                    return (
+                      <tr
+                        key={`${opportunity.id}-row`}
+                        className="cursor-pointer border-b transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
+                        tabIndex={0}
+                        aria-label={`Open ${opportunity.name}`}
+                        onClick={() => onOpportunitySelect(opportunity.id)}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return
+                          if (event.key !== "Enter" && event.key !== " ") return
+
+                          event.preventDefault()
+                          onOpportunitySelect(opportunity.id)
+                        }}
+                      >
+                        <td className="min-w-0 py-3 pr-4">
+                          <p className="truncate font-medium">{opportunity.name}</p>
+                          <p className="truncate text-xs text-muted-foreground">{account?.name ?? "No account linked"}</p>
+                          <p className="mt-1 hidden truncate text-xs text-muted-foreground xl:block">
+                            {getOpportunityGuidancePreview(opportunity)}
+                          </p>
+                        </td>
+                        <td className="hidden py-3 pr-4 text-muted-foreground lg:table-cell">
+                          <span className="block truncate">{opportunity.stage}</span>
+                        </td>
+                        <td className="py-3 pr-4">
+                          <div className="grid min-w-0 gap-1.5">
+                            <Badge
+                              variant="outline"
+                              className={getAttentionBadgeClassName(attention.score)}
+                              data-attention-tone={attention.tone}
+                              data-testid="dashboard-attention-badge"
+                            >
+                              {attention.label}
+                            </Badge>
+                            <span className="truncate text-xs text-muted-foreground">{attention.detail}</span>
+                          </div>
+                        </td>
+                        <td className="hidden py-3 pr-4 text-muted-foreground md:table-cell">
+                          <span className="block truncate">
+                            {opportunity.missing} missing / {opportunity.weak} weak
+                          </span>
+                        </td>
+                        <td
+                          className="py-3 text-right"
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >
+                          <OpenButton onClick={() => onOpportunitySelect(opportunity.id)} />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <ListEmptyState
+              icon={<TargetIcon />}
+              title="Nothing matches that view"
+              message="Try a lighter filter or search by account, opportunity, stakeholder, or gap."
+            />
+          )}
         </CardContent>
       </Card>
     </div>
@@ -9661,6 +10088,7 @@ function AccountView({
   opportunities,
   playbookFields,
   playbookRows,
+  savedAccountDraft,
   savedOpenAiKeyState,
   sellerResearchProfile,
   workspaceId,
@@ -9672,6 +10100,7 @@ function AccountView({
   onRunAccountEnrichment,
   onSaveAccountDraft,
   onSaveAccountEnrichment,
+  onScrollToTop,
   onStartRecording,
   saveMessage,
   saveStatus,
@@ -9688,6 +10117,7 @@ function AccountView({
   opportunities: Opportunity[]
   playbookFields: PlaybookFieldRow[]
   playbookRows: PlaybookRow[]
+  savedAccountDraft: AccountDraft
   savedOpenAiKeyState: SavedOpenAiKeyState | null
   sellerResearchProfile: SellerResearchProfile
   workspaceId: string
@@ -9699,6 +10129,7 @@ function AccountView({
   onRunAccountEnrichment: () => void
   onSaveAccountDraft: () => void
   onSaveAccountEnrichment: (draft: AccountEnrichmentDraft) => Promise<RecordMutationResult> | RecordMutationResult
+  onScrollToTop: () => void
   onStartRecording: StartRecordingHandler
   saveMessage: string
   saveStatus: RecordSaveStatus
@@ -9728,6 +10159,7 @@ function AccountView({
     ),
     opportunitySort
   )
+  const accountHasDraftChanges = !areAccountDraftsEqual(accountDraft, savedAccountDraft)
 
   return (
     <div className="grid w-full min-w-0 gap-4">
@@ -9742,7 +10174,6 @@ function AccountView({
               size="md"
             />
             <div className="min-w-0">
-              <CardDescription>Account workspace</CardDescription>
               <CardTitle className="truncate text-2xl">{accountDraft.accountName}</CardTitle>
               <div className="mt-3 flex flex-wrap gap-2">
                 <CoverageBadge value={averageCoverage} />
@@ -9766,7 +10197,7 @@ function AccountView({
         </CardHeader>
       </Card>
 
-      <Tabs defaultValue="record" className="grid w-full min-w-0 gap-4">
+      <Tabs defaultValue="record" className="grid w-full min-w-0 gap-4" onValueChange={onScrollToTop}>
         <TabsList className="grid w-full grid-cols-3 md:w-fit">
           <TabsTrigger value="record">Account record</TabsTrigger>
           <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
@@ -9780,11 +10211,11 @@ function AccountView({
                 <CardTitle>Main account fields</CardTitle>
                 <CardDescription>Account context SalesFrame uses for research and live guidance</CardDescription>
               </div>
-              <CardAction className="flex flex-wrap items-center gap-2">
+              <CardAction className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
                 <Button
                   size="sm"
-                  className="gap-2"
-                  disabled={saveStatus === "saving" || !accountDraft.accountName.trim()}
+                  className="w-full gap-2 sm:w-auto"
+                  disabled={saveStatus === "saving" || !accountDraft.accountName.trim() || !accountHasDraftChanges}
                   onClick={onSaveAccountDraft}
                 >
                   <CheckCircle2Icon />
@@ -9793,18 +10224,8 @@ function AccountView({
               </CardAction>
             </CardHeader>
             <CardContent className="grid gap-4">
-              {saveMessage ? (
-                <div
-                  role={saveStatus === "error" ? "alert" : "status"}
-                  className={cn(
-                    "rounded-lg border p-3 text-sm",
-                    saveStatus === "error"
-                      ? "border-destructive/30 bg-destructive/10 text-destructive"
-                      : "bg-muted/30 text-muted-foreground"
-                  )}
-                >
-                  {saveMessage}
-                </div>
+              {saveMessage && !(saveStatus === "saved" && accountHasDraftChanges) ? (
+                <RecordStatusMessage message={saveMessage} status={saveStatus} />
               ) : null}
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 <EditableTextField
@@ -9881,7 +10302,7 @@ function AccountView({
                 <CardDescription>Open an opportunity to work the live call, fields, and intelligence</CardDescription>
               </div>
               <CardAction>
-                <Button variant="outline" size="sm" className="gap-2" onClick={onCreateOpportunity}>
+                <Button variant="outline" size="sm" className="w-full gap-2 sm:w-auto" onClick={onCreateOpportunity}>
                   <PlusIcon />
                   New opportunity
                 </Button>
@@ -9930,7 +10351,69 @@ function AccountView({
                 </div>
               ) : null}
               {visibleOpportunities.length ? (
-                <div className="w-full overflow-hidden rounded-lg border" data-testid="account-opportunities-table">
+                <div className="grid gap-2 md:hidden" data-testid="account-opportunities-mobile-list">
+                  {visibleOpportunities.map((opportunity) => (
+                    <div
+                      key={`${opportunity.id}-mobile`}
+                      className="grid gap-3 rounded-lg bg-muted/30 p-3"
+                    >
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <button
+                          type="button"
+                          className="min-w-0 text-left outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-label={`Open ${opportunity.name}`}
+                          onClick={() => onOpportunitySelect(opportunity.id)}
+                        >
+                          <span className="block truncate text-sm font-medium">{opportunity.name}</span>
+                          <span className="mt-1 block truncate text-xs text-muted-foreground">
+                            {opportunity.stage} / {formatCurrencyAmount(opportunity.amount, accountDraft.currency)}
+                          </span>
+                        </button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="shrink-0 gap-1.5"
+                              aria-label={`Actions for ${opportunity.name}`}
+                            >
+                              Actions
+                              <ChevronDownIcon className="size-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem onSelect={() => onOpportunitySelect(opportunity.id)}>
+                              <ExternalLinkIcon />
+                              Open
+                            </DropdownMenuItem>
+                            <DropdownMenuItem variant="destructive" onSelect={() => onDeleteOpportunity(opportunity.id)}>
+                              <Trash2Icon />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                      <div className="grid min-w-0 gap-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-xs text-muted-foreground">Methodology coverage</span>
+                          <span className="text-xs font-medium">{opportunity.coverage}%</span>
+                        </div>
+                        <CoverageProgress
+                          value={opportunity.coverage}
+                          className="h-1.5"
+                          data-testid="account-opportunity-mobile-coverage-bar"
+                        />
+                      </div>
+                      <p className="text-sm leading-relaxed text-muted-foreground">
+                        {getOpportunityGuidancePreview(opportunity)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {visibleOpportunities.length ? (
+                <div className="hidden w-full overflow-hidden rounded-lg border md:block" data-testid="account-opportunities-table">
                   <table className="w-full table-fixed text-sm">
                     <thead>
                       <tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
@@ -9947,7 +10430,7 @@ function AccountView({
                       {visibleOpportunities.map((opportunity) => (
                         <tr
                           key={opportunity.id}
-                          className="cursor-pointer border-b transition-colors hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
+                          className="cursor-pointer border-b transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
                           tabIndex={0}
                           aria-label={`Open ${opportunity.name}`}
                           onClick={() => onOpportunitySelect(opportunity.id)}
@@ -10041,13 +10524,17 @@ function AccountView({
                   </table>
                 </div>
               ) : opportunities.length ? (
-                <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-                  No opportunities match this search and filter.
-                </div>
+                <ListEmptyState
+                  icon={<TargetIcon />}
+                  title="Nothing matches that view"
+                  message="Try a lighter filter or search by opportunity name, amount, stage, or methodology gap."
+                />
               ) : (
-                <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-                  No opportunities yet. Create one from Start Call or return to this account when a deal is ready to qualify.
-                </div>
+                <ListEmptyState
+                  icon={<TargetIcon />}
+                  title="No opportunities yet"
+                  message="Create one from Start Call, or add an opportunity when there is a deal to qualify."
+                />
               )}
             </CardContent>
           </Card>
@@ -10073,7 +10560,7 @@ function AccountView({
             </CardHeader>
             <CardContent className="grid gap-3">
               {opportunities.length ? opportunities.map((opportunity) => (
-                <div key={`${opportunity.id}-focus`} className="rounded-lg border bg-muted/30 p-3">
+                <div key={`${opportunity.id}-focus`} className="rounded-lg bg-muted/30 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <p className="min-w-0 truncate text-sm font-medium">{opportunity.name}</p>
                     <span className="text-sm font-medium">{opportunity.coverage}%</span>
@@ -10083,9 +10570,11 @@ function AccountView({
                   </p>
                 </div>
               )) : (
-                <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  No active opportunity focus yet.
-                </div>
+                <ListEmptyState
+                  icon={<TargetIcon />}
+                  title="No active opportunity focus yet"
+                  message="Add an opportunity to see where the next calls should tighten methodology coverage."
+                />
               )}
             </CardContent>
           </Card>
@@ -10116,11 +10605,13 @@ function AccountEnrichmentEditor({
   onRunEnrichment: () => void
   onSave: (draft: AccountEnrichmentDraft) => Promise<RecordMutationResult> | RecordMutationResult
 }) {
-  const [draft, setDraft] = React.useState<AccountEnrichmentDraft>(() => mapAccountEnrichmentProfileToDraft(profile))
+  const savedDraft = React.useMemo(() => mapAccountEnrichmentProfileToDraft(profile), [profile])
+  const [draft, setDraft] = React.useState<AccountEnrichmentDraft>(() => savedDraft)
+  const hasDraftChanges = !areAccountEnrichmentDraftsEqual(draft, savedDraft)
 
   React.useEffect(() => {
-    setDraft(mapAccountEnrichmentProfileToDraft(profile))
-  }, [profile])
+    setDraft(savedDraft)
+  }, [savedDraft])
 
   const updateDraft = (field: keyof AccountEnrichmentDraft, value: string) => {
     setDraft((currentDraft) => ({
@@ -10196,7 +10687,9 @@ function AccountEnrichmentEditor({
     },
   ]
   const primaryStatusMessage = saveMessage
-    ? { message: saveMessage, status: saveStatus }
+    ? saveStatus === "saved" && hasDraftChanges
+      ? null
+      : { message: saveMessage, status: saveStatus }
     : runMessage && (runStatus === "saving" || runStatus === "error")
       ? { message: runMessage, status: runStatus }
       : null
@@ -10234,7 +10727,7 @@ function AccountEnrichmentEditor({
             type="button"
             size="sm"
             className="min-w-40 justify-center gap-2 sm:w-auto"
-            disabled={saveStatus === "saving"}
+            disabled={saveStatus === "saving" || !hasDraftChanges}
             onClick={() => void onSave(draft)}
           >
             <CheckCircle2Icon />
@@ -10244,18 +10737,7 @@ function AccountEnrichmentEditor({
       </CardHeader>
       <CardContent className="grid gap-4">
         {primaryStatusMessage ? (
-          <div
-            aria-live={primaryStatusMessage.status === "error" ? "assertive" : "polite"}
-            className={cn(
-              "rounded-lg border p-3 text-sm",
-              primaryStatusMessage.status === "error"
-                ? "border-destructive/30 bg-destructive/10 text-destructive"
-                : "bg-muted/30 text-muted-foreground"
-            )}
-            role={primaryStatusMessage.status === "error" ? "alert" : "status"}
-          >
-            {primaryStatusMessage.message}
-          </div>
+          <RecordStatusMessage message={primaryStatusMessage.message} status={primaryStatusMessage.status} />
         ) : null}
         <div className="grid gap-4 md:grid-cols-2">
           {enrichmentFields.map((item) => (
@@ -10318,6 +10800,7 @@ function WorkspaceView({
   postCallOutput,
   postCallTranscript,
   savedOpenAiKeyState,
+  savedOpportunityDraft,
   sellerResearchProfile,
   sellerName,
   speakerIdentities,
@@ -10330,6 +10813,7 @@ function WorkspaceView({
   onOpportunityDraftChange,
   onDeleteOpportunity,
   onSaveOpportunityDraft,
+  onScrollToTop,
   onStartRecording,
   onStopRecording,
   onSpeakerIdentityChange,
@@ -10369,6 +10853,7 @@ function WorkspaceView({
   postCallOutput: PostCallOutputView | null
   postCallTranscript: Opportunity["transcript"]
   savedOpenAiKeyState: SavedOpenAiKeyState | null
+  savedOpportunityDraft: OpportunityDraft
   sellerResearchProfile: SellerResearchProfile
   sellerName: string
   speakerIdentities: CallSpeakerIdentityMap
@@ -10381,6 +10866,7 @@ function WorkspaceView({
   onOpportunityDraftChange: (field: keyof OpportunityDraft, value: string) => void
   onDeleteOpportunity: (id: string) => void
   onSaveOpportunityDraft: () => void
+  onScrollToTop: () => void
   onStartRecording: StartRecordingHandler
   onStopRecording: () => void | Promise<void>
   onSpeakerIdentityChange: (payload: SpeakerIdentityChangePayload) => Promise<SpeakerIdentityChangeResult>
@@ -10661,7 +11147,7 @@ function WorkspaceView({
   ])
 
   return (
-    <Tabs key={defaultTab} defaultValue={defaultTab} className="grid w-full min-w-0 gap-4">
+    <Tabs key={defaultTab} defaultValue={defaultTab} className="grid w-full min-w-0 gap-4" onValueChange={onScrollToTop}>
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <TabsList className="grid w-full grid-cols-3 md:w-fit">
           <TabsTrigger value="opportunity">Opportunity</TabsTrigger>
@@ -10764,6 +11250,7 @@ function WorkspaceView({
           playbookFields={playbookFields}
           playbookRows={playbookRows}
           savedOpenAiKeyState={savedOpenAiKeyState}
+          savedOpportunityDraft={savedOpportunityDraft}
           sellerResearchProfile={sellerResearchProfile}
           workspaceId={workspaceId}
           onDeleteCall={onDeleteCall}
@@ -10772,6 +11259,7 @@ function WorkspaceView({
           onOpenSettings={onOpenSettings}
           onOpportunityDraftChange={onOpportunityDraftChange}
           onSaveOpportunityDraft={onSaveOpportunityDraft}
+          onScrollToTop={onScrollToTop}
           onStartRecording={onStartRecording}
           opportunitySaveMessage={opportunitySaveMessage}
           opportunitySaveStatus={opportunitySaveStatus}
@@ -10808,6 +11296,7 @@ function OpportunityWorkspace({
   playbookFields,
   playbookRows,
   savedOpenAiKeyState,
+  savedOpportunityDraft,
   sellerResearchProfile,
   workspaceId,
   onDeleteCall,
@@ -10816,6 +11305,7 @@ function OpportunityWorkspace({
   onOpenSettings,
   onOpportunityDraftChange,
   onSaveOpportunityDraft,
+  onScrollToTop,
   onStartRecording,
   opportunitySaveMessage,
   opportunitySaveStatus,
@@ -10832,6 +11322,7 @@ function OpportunityWorkspace({
   playbookFields: PlaybookFieldRow[]
   playbookRows: PlaybookRow[]
   savedOpenAiKeyState: SavedOpenAiKeyState | null
+  savedOpportunityDraft: OpportunityDraft
   sellerResearchProfile: SellerResearchProfile
   workspaceId: string
   onDeleteCall: (callId: string) => void
@@ -10840,6 +11331,7 @@ function OpportunityWorkspace({
   onOpenSettings: () => void
   onOpportunityDraftChange: (field: keyof OpportunityDraft, value: string) => void
   onSaveOpportunityDraft: () => void
+  onScrollToTop: () => void
   onStartRecording: StartRecordingHandler
   opportunitySaveMessage: string
   opportunitySaveStatus: RecordSaveStatus
@@ -10848,7 +11340,7 @@ function OpportunityWorkspace({
     activeView === "methodology" ? "methodology" : activeView === "opportunity-intelligence" ? "intelligence" : "record"
 
   return (
-    <Tabs key={defaultTab} defaultValue={defaultTab} className="grid w-full min-w-0 gap-4">
+    <Tabs key={defaultTab} defaultValue={defaultTab} className="grid w-full min-w-0 gap-4" onValueChange={onScrollToTop}>
       <OpportunitySummaryStrip
         opportunity={opportunity}
         startCallAction={
@@ -10880,6 +11372,7 @@ function OpportunityWorkspace({
           account={account}
           opportunity={opportunity}
           opportunityDraft={opportunityDraft}
+          savedOpportunityDraft={savedOpportunityDraft}
           onOpportunityDraftChange={onOpportunityDraftChange}
           onSaveOpportunityDraft={onSaveOpportunityDraft}
           saveMessage={opportunitySaveMessage}
@@ -10902,6 +11395,7 @@ function OpportunityWorkspace({
           playbookRows={playbookRows}
           saveMessage={opportunitySaveMessage}
           saveStatus={opportunitySaveStatus}
+          savedSelectedPlaybooks={parsePlaybookSelection(savedOpportunityDraft.frameworks)}
           selectedPlaybooks={parsePlaybookSelection(opportunityDraft.frameworks)}
           onSavePlaybooks={onSaveOpportunityDraft}
           onSelectedPlaybooksChange={(playbooks) =>
@@ -11033,7 +11527,10 @@ function NextQuestionCard({
       </CardHeader>
       <CardContent className="grid gap-5">
         {displayedQuestion ? (
-          <p className="next-question-text max-w-5xl break-words text-2xl leading-[1.08] font-semibold sm:text-3xl md:text-4xl lg:text-[2.75rem]">
+          <p
+            key={`${displayedQuestion.id}-${displayedQuestion.question}`}
+            className="next-question-text sf-soft-highlight max-w-5xl break-words text-2xl leading-[1.08] font-semibold sm:text-3xl md:text-4xl lg:text-[2.75rem]"
+          >
             “{displayedQuestion.question}”
           </p>
         ) : (
@@ -11195,7 +11692,7 @@ function PriorityGapsCard({
       </CardHeader>
       <CardContent className="grid gap-3">
         {gaps.map((gap, index) => (
-          <div key={`${gap.label}-${index}`} className="flex items-start gap-3 rounded-lg border bg-muted/30 p-3">
+          <div key={`${gap.label}-${index}`} className="flex items-start gap-3 rounded-lg bg-muted/30 p-3">
             <span
               className={cn(
                 "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium",
@@ -11216,9 +11713,11 @@ function PriorityGapsCard({
           </div>
         ))}
         {gaps.length === 0 ? (
-          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-            Required live-call intent clusters have been asked or answered. The coach will listen for risk, contradiction, or a natural next step.
-          </div>
+          <ListEmptyState
+            icon={<CheckCircle2Icon />}
+            title="Intent coverage is quiet"
+            message="Required live-call intent clusters have been asked or answered. SalesFrame will listen for risk, contradiction, or a natural next step."
+          />
         ) : null}
       </CardContent>
     </Card>
@@ -11266,9 +11765,11 @@ function ParkedIntentsCard({
           </div>
         ))}
         {parkedIntents.length === 0 ? (
-          <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-            Nothing is parked right now. The coach is following the current conversation thread.
-          </div>
+          <ListEmptyState
+            icon={<Clock3Icon />}
+            title="Nothing parked right now"
+            message="SalesFrame is following the current conversation thread and will save intent debt when the timing is wrong."
+          />
         ) : null}
       </CardContent>
     </Card>
@@ -11319,6 +11820,13 @@ function ConversationMapCard({
             </div>
           </div>
         ))}
+        {!candidateScores.length && !flow.length ? (
+          <ListEmptyState
+            icon={<SparklesIcon />}
+            title="No coach read yet"
+            message="SalesFrame will show timing, flow, and ranked alternatives after the next guidance update."
+          />
+        ) : null}
       </CardContent>
     </Card>
   )
@@ -11471,6 +11979,7 @@ function MethodologyGrid({
   playbookRows,
   saveMessage,
   saveStatus,
+  savedSelectedPlaybooks,
   selectedPlaybooks,
 }: {
   opportunity: Opportunity
@@ -11480,6 +11989,7 @@ function MethodologyGrid({
   playbookRows: PlaybookRow[]
   saveMessage: string
   saveStatus: RecordSaveStatus
+  savedSelectedPlaybooks: CallPlaybook[]
   selectedPlaybooks: CallPlaybook[]
 }) {
   const selectedSet = new Set(selectedPlaybooks)
@@ -11506,8 +12016,11 @@ function MethodologyGrid({
   })
   const weakFieldCount = checklistGroups.reduce((total, group) => total + group.weakCount, 0)
   const missingFieldCount = checklistGroups.reduce((total, group) => total + group.missingCount, 0)
+  const playbooksHaveChanges = !arePlaybookSelectionsEqual(selectedPlaybooks, savedSelectedPlaybooks)
 
   const togglePlaybook = (playbook: CallPlaybook) => {
+    if (selectedSet.has(playbook) && selectedPlaybooks.length === 1) return
+
     const nextSelected = selectedSet.has(playbook)
       ? selectedPlaybooks.filter((item) => item !== playbook)
       : [...selectedPlaybooks, playbook]
@@ -11525,39 +12038,28 @@ function MethodologyGrid({
               Select the playbooks this opportunity should enforce during calls.
             </CardDescription>
           </div>
-          <CardAction className="flex flex-wrap items-center gap-2">
-            <span className="max-w-[260px] truncate text-sm text-muted-foreground">{formatPlaybooks(selectedPlaybooks)}</span>
-            <Button
-              size="sm"
-              className="gap-2"
-              disabled={saveStatus === "saving" || selectedPlaybooks.length === 0}
-              onClick={onSavePlaybooks}
-            >
+          <CardAction className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <span className="max-w-full truncate text-sm text-muted-foreground sm:max-w-[260px]">{formatPlaybooks(selectedPlaybooks)}</span>
+              <Button
+                size="sm"
+                className="w-full gap-2 sm:w-auto"
+                disabled={saveStatus === "saving" || selectedPlaybooks.length === 0 || !playbooksHaveChanges}
+                onClick={onSavePlaybooks}
+              >
               <CheckCircle2Icon />
               {saveStatus === "saving" ? "Saving..." : "Save methodologies"}
             </Button>
           </CardAction>
         </CardHeader>
         <CardContent className="grid gap-4">
-          {saveMessage ? (
-            <div
-              role={saveStatus === "error" ? "alert" : "status"}
-              className={cn(
-                "rounded-lg border p-3 text-sm",
-                saveStatus === "error"
-                  ? "border-destructive/30 bg-destructive/10 text-destructive"
-                  : "bg-muted/30 text-muted-foreground"
-              )}
-            >
-              {saveMessage}
-            </div>
+          {saveMessage && !(saveStatus === "saved" && playbooksHaveChanges) ? (
+            <RecordStatusMessage message={saveMessage} status={saveStatus} />
           ) : null}
           <div className="grid gap-2">
             <Label>Selected playbooks</Label>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               {callPlaybookOptions.map((playbook) => {
                 const isSelected = selectedSet.has(playbook)
-                const cannotRemove = isSelected && selectedPlaybooks.length === 1
 
                 return (
                   <Button
@@ -11566,7 +12068,8 @@ function MethodologyGrid({
                     size="sm"
                     variant={isSelected ? "default" : "outline"}
                     className="gap-2"
-                    disabled={cannotRemove}
+                    aria-pressed={isSelected}
+                    aria-describedby="methodology-playbook-selection-help"
                     onClick={() => togglePlaybook(playbook)}
                   >
                     {isSelected ? <CheckIcon /> : <PlusIcon />}
@@ -11575,21 +12078,24 @@ function MethodologyGrid({
                 )
               })}
             </div>
+            <p id="methodology-playbook-selection-help" className="text-sm text-muted-foreground">
+              Keep at least one playbook selected so the live coach has a methodology to enforce.
+            </p>
           </div>
           <div className="grid gap-3 md:grid-cols-4">
-            <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="rounded-lg bg-muted/20 p-3">
               <p className="text-xs font-medium text-muted-foreground">Transcript lines captured</p>
               <p className="mt-1 text-2xl font-semibold">{transcriptLineCount}</p>
             </div>
-            <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="rounded-lg bg-muted/20 p-3">
               <p className="text-xs font-medium text-muted-foreground">Last AI coverage</p>
               <p className="mt-1 text-2xl font-semibold">{opportunity.coverage}%</p>
             </div>
-            <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="rounded-lg bg-muted/20 p-3">
               <p className="text-xs font-medium text-muted-foreground">Weak fields</p>
               <p className="mt-1 text-2xl font-semibold">{weakFieldCount}</p>
             </div>
-            <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="rounded-lg bg-muted/20 p-3">
               <p className="text-xs font-medium text-muted-foreground">Missing</p>
               <p className="mt-1 text-2xl font-semibold">{missingFieldCount}</p>
             </div>
@@ -11861,7 +12367,7 @@ function SpeakerIdentityPanel({
     <details className="group rounded-lg bg-muted/20 px-3 py-2">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
         <span className="text-xs font-medium text-muted-foreground">Speaker map</span>
-        <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
+        <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-standard)] group-open:rotate-180" aria-hidden="true" />
       </summary>
       <div className="mt-2 grid gap-2">
         {nextSpeakerLabel ? (
@@ -12102,7 +12608,7 @@ function LiveRail({
               <p className="text-sm text-muted-foreground">{captureActivityLabel}</p>
             </div>
           ) : (
-            <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3 text-sm">
+            <div className="flex items-center justify-between rounded-lg bg-muted/30 p-3 text-sm">
               <span className="font-medium">{captureActivityLabel}</span>
             </div>
           )}
@@ -12115,10 +12621,10 @@ function LiveRail({
             <div
               role={audioPreflight.ok ? "status" : "alert"}
               className={cn(
-                "rounded-lg border p-3 text-sm",
+                "rounded-lg p-3 text-sm",
                 audioPreflight.ok
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                  : "border-destructive/40 bg-destructive/10 text-destructive"
+                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  : "border border-destructive/40 bg-destructive/10 text-destructive"
               )}
             >
               {audioPreflight.statusMessage}
@@ -12152,7 +12658,7 @@ function LiveRail({
             </TabsList>
             <TabsContent value="notes" className="m-0 grid gap-2">
               {visibleNotes.map((note, index) => (
-                <div key={`${note}-${index}`} className="rounded-lg border bg-muted/40 p-3 text-sm">
+                <div key={`${note}-${index}`} className="rounded-lg bg-muted/40 p-3 text-sm">
                   {note}
                 </div>
               ))}
@@ -12165,7 +12671,7 @@ function LiveRail({
             </TabsContent>
             <TabsContent value="evidence" className="m-0 grid gap-2">
               {visibleEvidence.slice(0, 6).map((item) => (
-                <div key={item.label} className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+                <div key={item.label} className="grid gap-2 rounded-lg bg-muted/30 p-3 text-sm">
                   <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
                     <p className="font-medium">{item.label}</p>
                     <span className="text-xs text-muted-foreground">{item.framework} · {item.status}</span>
@@ -12251,7 +12757,7 @@ function LiveCaptureEmptyState({
   message: string
 }) {
   return (
-    <div className={cn("flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground", className)}>
+    <div className={cn("flex items-center gap-2 rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground", className)}>
       {icon}
       <span>{message}</span>
     </div>
@@ -12284,7 +12790,7 @@ function CaptureSignalStack({
               className={cn(
                 "size-1.5 shrink-0 rounded-full",
                 indicator.tone === "live" && "bg-emerald-500 shadow-[0_0_0_4px_rgb(16_185_129_/_0.12)]",
-                indicator.tone === "building" && "animate-pulse bg-sky-500 shadow-[0_0_0_4px_rgb(14_165_233_/_0.12)]",
+                indicator.tone === "building" && "sf-state-pulse bg-sky-500 shadow-[0_0_0_4px_rgb(14_165_233_/_0.12)]",
                 indicator.tone === "warning" && "bg-amber-500 shadow-[0_0_0_4px_rgb(245_158_11_/_0.12)]",
                 indicator.tone === "error" && "bg-destructive shadow-[0_0_0_4px_rgb(239_68_68_/_0.12)]",
                 indicator.tone === "muted" && "bg-muted-foreground/40"
@@ -12330,11 +12836,11 @@ function CallReplayCard({
           <CardDescription>Recording</CardDescription>
           <CardTitle>{call.title}</CardTitle>
         </div>
-        <CardAction className="flex flex-wrap items-center gap-2">
+        <CardAction className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
           <Button
             size="sm"
             variant="outline"
-            className="gap-2"
+            className="w-full gap-2 sm:w-auto"
             disabled={!hasTranscriptLines}
             onClick={() => downloadTranscriptFile(call, transcript)}
           >
@@ -12344,7 +12850,7 @@ function CallReplayCard({
           <Button
             size="sm"
             variant="destructive"
-            className="gap-2"
+            className="w-full gap-2 sm:w-auto"
             onClick={() => onDeleteCall(call.id)}
           >
             <Trash2Icon />
@@ -12444,7 +12950,7 @@ function CallReplayContent({
       } catch (caughtError: unknown) {
         if (requestId !== recordingLinkRequestRef.current) return ""
 
-        const message = getUserFacingErrorMessage(caughtError, "Recording link could not be prepared.")
+        const message = getUserFacingErrorMessage(caughtError, "Recording link needs another refresh.")
         setRecordingUrl("")
         if (silentError) {
           setRecordingLinkStatus("idle")
@@ -12543,7 +13049,7 @@ function CallReplayContent({
         replayPlayIntentRef.current = false
         setIsReplayPlaying(false)
         setRecordingLinkStatus("error")
-        const message = getUserFacingErrorMessage(caughtError, "Replay could not start. Refresh the recording link and try again.")
+        const message = getUserFacingErrorMessage(caughtError, "Replay needs another start attempt. Refresh the recording link and try again.")
         setRecordingLinkError(message)
         setLastReplayAction(message)
       }
@@ -12574,7 +13080,7 @@ function CallReplayContent({
       }
     } catch (caughtError: unknown) {
       targetWindow?.close()
-      setOpenError(getUserFacingErrorMessage(caughtError, "Recording could not be opened."))
+      setOpenError(getUserFacingErrorMessage(caughtError, "Recording needs another open attempt."))
     }
   }
 
@@ -12636,7 +13142,7 @@ function CallReplayContent({
                     replayPlayIntentRef.current = false
                     setIsReplayPlaying(false)
                     setRecordingLinkStatus("error")
-                    const message = getUserFacingErrorMessage(caughtError, "Replay could not start. Press Play to try again.")
+                    const message = getUserFacingErrorMessage(caughtError, "Replay needs another start attempt. Press Play to try again.")
                     setRecordingLinkError(message)
                     setLastReplayAction(message)
                   }
@@ -12660,7 +13166,7 @@ function CallReplayContent({
             onTimeUpdate={(event) => setReplaySeconds(event.currentTarget.currentTime)}
           />
         ) : null}
-        <div className="grid gap-3 rounded-lg border bg-muted/40 p-3">
+        <div className="grid gap-3 rounded-lg bg-muted/30 p-3">
           <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
             <span>{displayedReplayTime}</span>
             <span>{formatTime(replayDuration)}</span>
@@ -12676,7 +13182,7 @@ function CallReplayContent({
                 key={`${call.id}-${marker.label}-${marker.time}`}
                 type="button"
                 className={cn(
-                  "absolute top-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-background text-[9px] font-medium text-white shadow-sm transition-transform hover:scale-110",
+                  "absolute top-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-background text-[9px] font-medium text-white shadow-sm transition-transform duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:scale-110",
                   marker.tone
                 )}
                 style={{ left: `${marker.position}%` }}
@@ -12704,7 +13210,7 @@ function CallReplayContent({
                 <button
                   key={`${call.id}-${marker.label}-label-${marker.time}`}
                   type="button"
-                  className="rounded-md border bg-background px-2 py-1 text-left transition-colors hover:bg-accent"
+                  className="rounded-md bg-background/70 px-2 py-1 text-left transition-[background-color,border-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-background"
                   onClick={() => setPlaybackPosition(marker.seconds, `Jumped to ${marker.label} at ${marker.time}`)}
                 >
                   <span className="flex items-center justify-between gap-2">
@@ -12716,16 +13222,16 @@ function CallReplayContent({
               ))}
             </div>
           ) : (
-            <div className="rounded-md border bg-background px-2 py-2 text-xs text-muted-foreground">
+            <div className="rounded-md bg-background/70 px-2 py-2 text-xs text-muted-foreground">
               Timeline events appear after transcript or notes are saved for this call.
             </div>
           )}
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-between">
           <Button
             variant="outline"
             size="sm"
-            className="gap-2"
+            className="w-full gap-2 sm:w-auto"
             aria-label={isReplayPlaying ? "Pause recording" : "Play recording"}
             disabled={!hasPlayableRecording || isRecordingLinkLoading}
             onClick={handlePlayPause}
@@ -12742,18 +13248,18 @@ function CallReplayContent({
           <Button
             variant="outline"
             size="sm"
-            className="gap-2"
+            className="w-full gap-2 sm:w-auto"
             disabled={!hasPlayableRecording || isRecordingLinkLoading}
             onClick={() => void handleOpenRecording()}
           >
             <ExternalLinkIcon />
             Open recording
           </Button>
-          <div className="flex min-w-36 flex-1 items-center justify-end gap-2">
+          <div className="flex w-full items-center gap-2 rounded-lg bg-muted/30 px-3 py-2 sm:min-w-36 sm:flex-1 sm:justify-end sm:bg-transparent sm:px-0 sm:py-0">
             <Volume2Icon className="size-4 shrink-0 text-muted-foreground" />
             <input
               aria-label="Recording volume"
-              className="h-2 w-full max-w-32 accent-primary"
+              className="h-2 w-full accent-primary sm:max-w-32"
               max={1}
               min={0}
               step={0.05}
@@ -12762,9 +13268,9 @@ function CallReplayContent({
               onChange={(event) => setReplayVolume(Number(event.currentTarget.value))}
             />
           </div>
-          <p className="text-xs text-muted-foreground">90 day retention</p>
+          <p className="text-xs text-muted-foreground sm:ml-auto">90 day retention</p>
         </div>
-        <div className="rounded-lg border bg-background p-3 text-sm text-muted-foreground">
+        <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
           {lastReplayAction} / {displayedReplayTime}
         </div>
         {recordingLinkError ? (
@@ -12803,7 +13309,7 @@ function CallReplayContent({
               ))}
             </div>
           ) : (
-            <div className="rounded-lg border bg-background p-3 text-sm text-muted-foreground">
+            <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
               Notes will appear here as SalesFrame captures useful moments from the conversation.
             </div>
           )}
@@ -12893,6 +13399,7 @@ function OpportunityProfile({
   account,
   opportunity,
   opportunityDraft,
+  savedOpportunityDraft,
   onOpportunityDraftChange,
   onSaveOpportunityDraft,
   saveMessage,
@@ -12901,23 +13408,25 @@ function OpportunityProfile({
   account: AccountNavItem
   opportunity: Opportunity
   opportunityDraft: OpportunityDraft
+  savedOpportunityDraft: OpportunityDraft
   onOpportunityDraftChange: (field: keyof OpportunityDraft, value: string) => void
   onSaveOpportunityDraft: () => void
   saveMessage: string
   saveStatus: RecordSaveStatus
 }) {
+  const opportunityHasDraftChanges = !areOpportunityDraftsEqual(opportunityDraft, savedOpportunityDraft)
+
   return (
     <Card>
       <CardHeader>
         <div>
-          <CardDescription>{account.name}</CardDescription>
           <CardTitle>Opportunity record</CardTitle>
         </div>
-        <CardAction className="flex flex-wrap items-center gap-2">
+        <CardAction className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
           <Button
             size="sm"
-            className="gap-2"
-            disabled={saveStatus === "saving" || !opportunityDraft.opportunityName.trim()}
+            className="w-full gap-2 sm:w-auto"
+            disabled={saveStatus === "saving" || !opportunityDraft.opportunityName.trim() || !opportunityHasDraftChanges}
             onClick={onSaveOpportunityDraft}
           >
             <CheckCircle2Icon />
@@ -12926,18 +13435,8 @@ function OpportunityProfile({
         </CardAction>
       </CardHeader>
       <CardContent className="grid gap-4">
-        {saveMessage ? (
-          <div
-            role={saveStatus === "error" ? "alert" : "status"}
-            className={cn(
-              "rounded-lg border p-3 text-sm",
-              saveStatus === "error"
-                ? "border-destructive/30 bg-destructive/10 text-destructive"
-                : "bg-muted/30 text-muted-foreground"
-            )}
-          >
-            {saveMessage}
-          </div>
+        {saveMessage && !(saveStatus === "saved" && opportunityHasDraftChanges) ? (
+          <RecordStatusMessage message={saveMessage} status={saveStatus} />
         ) : null}
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <EditableTextField
@@ -13075,12 +13574,12 @@ function OpportunityIntelligence({
           </div>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="rounded-lg border bg-muted/30 p-3">
+          <div className="rounded-lg bg-muted/30 p-3">
             <p className="text-sm font-medium">
               {hasStarterOpportunityGuidance(opportunity) ? "Live question" : "Next best question"}
             </p>
             {hasStarterOpportunityGuidance(opportunity) ? (
-              <div className="mt-2 rounded-lg bg-background p-3 text-sm leading-relaxed text-muted-foreground">
+              <div className="mt-2 rounded-lg bg-background/70 p-3 text-sm leading-relaxed text-muted-foreground">
                 Start a call when you are ready. SalesFrame will prepare the first live question from the account, opportunity, and selected playbooks.
               </div>
             ) : (
@@ -13096,7 +13595,7 @@ function OpportunityIntelligence({
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             {fieldGroups.map(([label, value]) => (
-              <div key={label} className="rounded-lg border bg-muted/20 p-3">
+              <div key={label} className="rounded-lg bg-muted/20 p-3">
                 <p className="text-xs font-medium text-muted-foreground">{label}</p>
                 <p className="mt-1 text-2xl font-semibold">{value}</p>
               </div>
@@ -13159,7 +13658,7 @@ function BriefTextBlock({
   title: string
 }) {
   return (
-    <div className="rounded-lg border bg-muted/20 p-3">
+    <div className="rounded-lg bg-muted/20 p-3">
       <div className="flex items-center gap-2">
         <span className="text-muted-foreground [&_svg]:size-4">{icon}</span>
         <p className="text-xs font-medium text-muted-foreground">{title}</p>
@@ -13179,7 +13678,7 @@ function BriefList({
   title: string
 }) {
   return (
-    <div className="rounded-lg border bg-muted/20 p-3">
+    <div className="rounded-lg bg-muted/20 p-3">
       <div className="flex items-center gap-2">
         <span className="text-muted-foreground [&_svg]:size-4">{icon}</span>
         <p className="text-xs font-medium text-muted-foreground">{title}</p>
@@ -13243,7 +13742,7 @@ function OpportunityRecordingHistory({
       }
     } catch (caughtError: unknown) {
       targetWindow?.close()
-      setOpenError(getUserFacingErrorMessage(caughtError, "Recording could not be opened."))
+      setOpenError(getUserFacingErrorMessage(caughtError, "Recording needs another open attempt."))
     } finally {
       setOpeningCallId("")
     }
@@ -13408,133 +13907,17 @@ function PostCallPanel({
         </CardHeader>
         <CardContent className="grid gap-3">
           {(nextCallItems.length ? nextCallItems : ["Next-call plan will appear after the call is processed."]).map((item) => (
-            <div key={item} className="flex items-start gap-3 rounded-lg border p-3">
+            <div key={item} className="flex items-start gap-3 rounded-lg bg-muted/30 p-3">
               <CircleDotIcon className="mt-0.5 size-4 text-muted-foreground" />
               <p className="text-sm">{item}</p>
             </div>
           ))}
-          <Button className="gap-2" disabled={!opportunity.nextCallBrief} onClick={onViewNextCallBrief}>
-            <FileTextIcon />
-            View next-call brief
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-function QuestionQueuePage({
-  guidance,
-  manualCoach,
-  opportunity,
-  onMoveQuestionLater,
-  onNavigate,
-  onUseQuestion,
-}: {
-  guidance: LiveGuidance | null
-  manualCoach: ManualCoachState
-  opportunity: Opportunity
-  onMoveQuestionLater: (question: ManualQuestion) => void
-  onNavigate: (view: string) => void
-  onUseQuestion: (question: ManualQuestion) => void
-}) {
-  const aiQuestions = guidance
-    ? [
-        createManualQuestionFromGuidance(guidance),
-        ...getAlternativeQuestions(guidance),
-      ]
-    : []
-  const sortedQueue = aiQuestions.sort((leftQuestion, rightQuestion) => {
-    const leftDeferred = manualCoach.deferredQuestionIds.includes(leftQuestion.id)
-    const rightDeferred = manualCoach.deferredQuestionIds.includes(rightQuestion.id)
-    const leftAsked = manualCoach.askedQuestionIds.includes(leftQuestion.id)
-    const rightAsked = manualCoach.askedQuestionIds.includes(rightQuestion.id)
-
-    return Number(leftAsked) - Number(rightAsked) || Number(leftDeferred) - Number(rightDeferred)
-  })
-
-  return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-      <Card>
-        <CardHeader>
-          <div>
-            <CardDescription>Live coaching</CardDescription>
-            <CardTitle>Question queue</CardTitle>
-          </div>
-          <CardAction>
-            <Button variant="outline" className="gap-2" onClick={() => onNavigate("workspace")}>
-              <PhoneCallIcon />
-              Back to cockpit
+          {opportunity.nextCallBrief ? (
+            <Button className="gap-2" onClick={onViewNextCallBrief}>
+              <FileTextIcon />
+              View next-call brief
             </Button>
-          </CardAction>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          {sortedQueue.length === 0 ? (
-            <div className="rounded-lg bg-muted/30 p-4 text-sm text-muted-foreground">
-              Start a call and SalesFrame will keep a short list of helpful next moves here.
-            </div>
           ) : null}
-          {sortedQueue.map((question) => {
-            const isActive = manualCoach.activeQuestion?.id === question.id
-            const isDeferred = manualCoach.deferredQuestionIds.includes(question.id)
-            const isAsked = manualCoach.askedQuestionIds.includes(question.id)
-            const priority = question.source === "live" ? "Now" : "Alternative"
-
-            return (
-            <div
-              key={question.id}
-              className={cn(
-                "rounded-lg bg-muted/30 p-4",
-                isActive && "bg-primary/5",
-                isAsked && "opacity-70"
-              )}
-            >
-              <p className="text-xs font-medium text-muted-foreground">
-                {[priority, question.framework, question.target, isActive ? "Selected" : "", isDeferred ? "Moved later" : "", isAsked ? "Asked" : ""]
-                  .filter(Boolean)
-                  .join(" / ")}
-              </p>
-              <p className="mt-3 text-lg font-medium leading-snug">“{question.question}”</p>
-              <p className="mt-2 text-sm text-muted-foreground">{question.reason}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  className="gap-2"
-                  disabled={isAsked}
-                  onClick={() => onUseQuestion(question)}
-                >
-                  <CheckCircle2Icon />
-                  {isActive ? "Selected" : "Use this next"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={isAsked || isDeferred}
-                  onClick={() => onMoveQuestionLater(question)}
-                >
-                  {isDeferred ? "Moved later" : "Move later"}
-                </Button>
-              </div>
-            </div>
-            )
-          })}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Why this fits</CardTitle>
-          <CardDescription>How SalesFrame keeps the next move natural</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          <ContextRow label="Opportunity" value={opportunity.name} />
-          <ContextRow
-            label="Current choice"
-            value={manualCoach.activeQuestion?.question ?? "The cockpit is using the live recommendation."}
-          />
-          <ContextRow label="Recent action" value={manualCoach.lastAction} />
-          <ContextRow label="How SalesFrame chooses" value="Playbook gaps are sequenced by timing, buyer mood, and what the customer just said." />
-          <ContextRow label="Conversation fit" value="The best question is the one that moves the opportunity forward without breaking the thread." />
-          <ContextRow label="What changes it" value="Use this next brings a question into focus. Move later keeps it available without distracting the seller." />
         </CardContent>
       </Card>
     </div>
@@ -13542,7 +13925,6 @@ function QuestionQueuePage({
 }
 
 function OpportunitiesView({
-  activeView,
   accounts,
   opportunities,
   opportunityDrafts,
@@ -13552,7 +13934,6 @@ function OpportunitiesView({
   onDeleteOpportunity,
   onOpportunitySelect,
 }: {
-  activeView: string
   accounts: AccountNavItem[]
   opportunities: Opportunity[]
   opportunityDrafts: Record<string, OpportunityDraft>
@@ -13568,19 +13949,21 @@ function OpportunitiesView({
   const [sort, setSort] = React.useState<OpportunitySort>("gaps")
   const [page, setPage] = React.useState(1)
   const pageSize = 15
-  const showRisks = activeView === "risks"
-  const showStakeholders = activeView === "stakeholders"
-  const accountById = new Map(accounts.map((account) => [account.id, account]))
-  const displayOpportunities = opportunities.map((opportunity) =>
-    applyOpportunityMethodologySummary(
-      opportunity,
-      getOpportunityMethodologySummary({
-        opportunity,
-        playbookFields,
-        playbookRows,
-        selectedPlaybooks: parsePlaybookSelection(opportunityDrafts[opportunity.id]?.frameworks),
-      })
-    )
+  const accountById = React.useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
+  const displayOpportunities = React.useMemo(
+    () =>
+      opportunities.map((opportunity) =>
+        applyOpportunityMethodologySummary(
+          opportunity,
+          getOpportunityMethodologySummary({
+            opportunity,
+            playbookFields,
+            playbookRows,
+            selectedPlaybooks: parsePlaybookSelection(opportunityDrafts[opportunity.id]?.frameworks),
+          })
+        )
+      ),
+    [opportunities, opportunityDrafts, playbookFields, playbookRows]
   )
   const stages = Array.from(new Set(displayOpportunities.map((item) => item.stage))).sort()
   const visibleOpportunities = sortOpportunities(
@@ -13589,7 +13972,7 @@ function OpportunitiesView({
         .filter((item) => stageFilter === "all" || item.stage === stageFilter)
         .filter((item) => matchesCoverageFilter(item, coverageFilter)),
       query,
-      (item) => getOpportunitySearchText(item, accountById.get(item.accountId))
+      (item) => getOpportunitySearchText(item, accountById.get(item.accountId), opportunityDrafts[item.id])
     ),
     sort
   )
@@ -13613,9 +13996,7 @@ function OpportunitiesView({
       <Card>
         <CardHeader>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {showRisks ? "Deal risks" : showStakeholders ? "Stakeholder map" : "Opportunities"}
-            </h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Opportunities</h1>
           </div>
           <CardAction>
             <Button className="gap-2" onClick={onCreateOpportunity}>
@@ -13673,46 +14054,77 @@ function OpportunitiesView({
                 <SelectItem value="close-date">Close date</SelectItem>
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              className="gap-2 justify-self-start 2xl:justify-self-auto"
-              onClick={() => {
-                setQuery("")
-                setStageFilter("all")
-                setCoverageFilter("all")
-                setSort("gaps")
-                setPage(1)
-              }}
-            >
-              <FilterIcon />
-              Reset
-            </Button>
+            {hasOpportunityFilters ? (
+              <Button
+                variant="outline"
+                className="gap-2 justify-self-start 2xl:justify-self-auto"
+                onClick={() => {
+                  setQuery("")
+                  setStageFilter("all")
+                  setCoverageFilter("all")
+                  setSort("gaps")
+                  setPage(1)
+                }}
+              >
+                <FilterIcon />
+                Reset
+              </Button>
+            ) : null}
           </div>
           <div className="grid gap-3">
+            {paginatedOpportunities.length > 0 ? (
+              <div
+                className="hidden px-4 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_150px_110px_110px_112px] md:items-center"
+                aria-hidden="true"
+              >
+                <span>Opportunity</span>
+                <span>Account</span>
+                <span>Coverage</span>
+                <span>Missing</span>
+                <span>Close</span>
+                <span className="text-right">Actions</span>
+              </div>
+            ) : null}
             {paginatedOpportunities.map((opportunity) => {
               const account = accountById.get(opportunity.accountId)
 
               return (
                 <div
                   key={opportunity.id}
-                  className="grid gap-3 rounded-lg bg-muted/30 p-4 md:grid-cols-[minmax(0,1fr)_160px_120px_120px_128px] md:items-center"
+                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_150px_110px_110px_112px] md:items-center"
+                  tabIndex={0}
+                  aria-label={`Open ${opportunity.name}`}
+                  onClick={() => onOpportunitySelect(opportunity.id)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return
+                    if (event.key !== "Enter" && event.key !== " ") return
+
+                    event.preventDefault()
+                    onOpportunitySelect(opportunity.id)
+                  }}
                 >
                   <div className="min-w-0">
                     <button
                       type="button"
                       className="block text-left font-medium leading-snug underline-offset-4 outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
                       aria-label={`Open ${opportunity.name}`}
-                      onClick={() => onOpportunitySelect(opportunity.id)}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onOpportunitySelect(opportunity.id)
+                      }}
                     >
                       {opportunity.name}
                     </button>
-                    <p className="flex flex-wrap gap-x-1 text-sm text-muted-foreground">
-                      <span>{account?.name ?? "Unknown account"}</span>
-                      <span>{formatCurrencyAmount(opportunity.amount, account?.currency)}</span>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {formatCurrencyAmount(opportunity.amount, account?.currency)}
                     </p>
                   </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground md:hidden">Account</p>
+                    <p className="truncate text-sm font-medium">{account?.name ?? "No account linked"}</p>
+                  </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Coverage</p>
+                    <p className="text-xs text-muted-foreground md:hidden">Coverage</p>
                     <div className="mt-1 flex items-center gap-2">
                       <CoverageProgress
                         value={opportunity.coverage}
@@ -13723,14 +14135,18 @@ function OpportunitiesView({
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Missing</p>
+                    <p className="text-xs text-muted-foreground md:hidden">Missing</p>
                     <p className="text-sm font-medium">{opportunity.missing} fields</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Close</p>
+                    <p className="text-xs text-muted-foreground md:hidden">Close</p>
                     <p className="truncate text-sm font-medium">{opportunity.closeDate}</p>
                   </div>
-                  <div className="flex md:justify-end">
+                  <div
+                    className="flex md:justify-end"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -13804,42 +14220,6 @@ function OpportunitiesView({
         </CardContent>
       </Card>
 
-      {showRisks ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Risk signals</CardTitle>
-            <CardDescription>Shown here instead of interrupting the live coach</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
-            {riskSignals.map((risk) => (
-              <div key={risk} className="flex items-start gap-3 rounded-lg border p-3">
-                <CircleAlertIcon className="mt-0.5 size-4 text-amber-500" />
-                <p className="text-sm">{risk}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {showStakeholders ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Stakeholder patterns</CardTitle>
-            <CardDescription>Buying committee view across open opportunities</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
-            {paginatedOpportunities.flatMap((opportunity) =>
-              opportunity.stakeholders.map((stakeholder) => (
-                <div key={`${opportunity.id}-${stakeholder.name}-${stakeholder.role}`} className="rounded-lg border p-3">
-                  <p className="text-sm font-medium">{stakeholder.name}</p>
-                  <p className="text-sm text-muted-foreground">{stakeholder.role}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">{stakeholder.status}</p>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      ) : null}
     </div>
   )
 }
@@ -13848,12 +14228,12 @@ function CallsView({
   accounts,
   accountResearchById,
   activeCallId,
-  activeView,
   calls,
   opportunityDrafts,
   opportunities,
   savedOpenAiKeyState,
   sellerResearchProfile,
+  transcriptsByCallId,
   workspaceId,
   onCallSelect,
   onDeleteCall,
@@ -13863,12 +14243,12 @@ function CallsView({
   accounts: AccountNavItem[]
   accountResearchById: Record<string, CustomerResearchConfig>
   activeCallId: string
-  activeView: string
   calls: CallSummary[]
   opportunityDrafts: Record<string, OpportunityDraft>
   opportunities: Opportunity[]
   savedOpenAiKeyState: SavedOpenAiKeyState | null
   sellerResearchProfile: SellerResearchProfile
+  transcriptsByCallId: Record<string, Opportunity["transcript"]>
   workspaceId: string
   onCallSelect: (callId: string) => void
   onDeleteCall: (callId: string) => void
@@ -13880,36 +14260,47 @@ function CallsView({
   const [typeFilter, setTypeFilter] = React.useState("all")
   const [statusFilter, setStatusFilter] = React.useState("all")
   const [callsPage, setCallsPage] = React.useState(1)
-  const accountById = new Map(accounts.map((account) => [account.id, account]))
-  const opportunityById = new Map(opportunities.map((item) => [item.id, item]))
-  const callTypes = Array.from(new Set(calls.map((call) => call.type))).sort()
-  const callStatuses = Array.from(new Set(calls.map((call) => getCallDisplayStatus(call, activeCallId)))).sort()
-  const visibleCalls = getFuzzyMatches(
-    calls
-      .filter((call) => activeView !== "recordings" || canReplayCall(call))
-      .filter((call) => typeFilter === "all" || call.type === typeFilter)
-      .filter((call) => statusFilter === "all" || getCallDisplayStatus(call, activeCallId) === statusFilter),
-    query,
-    (call) => {
-      const relatedOpportunity = opportunityById.get(call.opportunityId)
-      const relatedAccount = relatedOpportunity ? accountById.get(relatedOpportunity.accountId) : undefined
-      const displayStatus = getCallDisplayStatus(call, activeCallId)
-      const displayDuration = getCallDisplayDuration(call, activeCallId)
+  const accountById = React.useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
+  const opportunityById = React.useMemo(
+    () => new Map(opportunities.map((item) => [item.id, item])),
+    [opportunities]
+  )
+  const callTypes = React.useMemo(() => Array.from(new Set(calls.map((call) => call.type))).sort(), [calls])
+  const callStatuses = React.useMemo(
+    () => Array.from(new Set(calls.map((call) => getCallDisplayStatus(call, activeCallId)))).sort(),
+    [activeCallId, calls]
+  )
+  const visibleCalls = React.useMemo(
+    () =>
+      getFuzzyMatches(
+        calls
+          .filter((call) => typeFilter === "all" || call.type === typeFilter)
+          .filter((call) => statusFilter === "all" || getCallDisplayStatus(call, activeCallId) === statusFilter),
+        query,
+        (call) => {
+          const relatedOpportunity = opportunityById.get(call.opportunityId)
+          const relatedAccount = relatedOpportunity ? accountById.get(relatedOpportunity.accountId) : undefined
 
-      return [
-        call.title,
-        call.date,
-        displayDuration,
-        call.type,
-        displayStatus,
-        relatedOpportunity?.name,
-        relatedOpportunity?.nextQuestion,
-        relatedAccount?.name,
-        relatedAccount?.description,
-      ]
-        .filter(Boolean)
-        .join(" ")
-    }
+          return getCallSearchText({
+            account: relatedAccount,
+            call,
+            opportunity: relatedOpportunity,
+            opportunityDraft: relatedOpportunity ? opportunityDrafts[relatedOpportunity.id] : undefined,
+            transcript: transcriptsByCallId[call.id] ?? relatedOpportunity?.transcript ?? [],
+          })
+        }
+      ),
+    [
+      accountById,
+      activeCallId,
+      calls,
+      opportunityById,
+      opportunityDrafts,
+      query,
+      statusFilter,
+      transcriptsByCallId,
+      typeFilter,
+    ]
   )
   const totalCallPages = Math.max(1, Math.ceil(visibleCalls.length / callsPageSize))
   const safeCallsPage = Math.min(callsPage, totalCallPages)
@@ -13919,10 +14310,10 @@ function CallsView({
   )
   const callRangeStart = visibleCalls.length === 0 ? 0 : (safeCallsPage - 1) * callsPageSize + 1
   const callRangeEnd = Math.min(safeCallsPage * callsPageSize, visibleCalls.length)
-  const hasCallFilters = Boolean(query.trim()) || typeFilter !== "all" || statusFilter !== "all" || activeView === "recordings"
+  const hasCallFilters = Boolean(query.trim()) || typeFilter !== "all" || statusFilter !== "all"
   React.useEffect(() => {
     setCallsPage(1)
-  }, [activeView, query, statusFilter, typeFilter])
+  }, [query, statusFilter, typeFilter])
 
   React.useEffect(() => {
     if (callsPage > totalCallPages) setCallsPage(totalCallPages)
@@ -13934,7 +14325,7 @@ function CallsView({
         <CardHeader>
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              {activeView === "transcripts" ? "Transcripts" : activeView === "recordings" ? "Recordings" : "Calls"}
+              Calls
             </h1>
           </div>
           <CardAction>
@@ -13989,21 +14380,36 @@ function CallsView({
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              className="gap-2 justify-self-start 2xl:justify-self-auto"
-              onClick={() => {
-                setQuery("")
-                setTypeFilter("all")
-                setStatusFilter("all")
-                setCallsPage(1)
-              }}
-            >
-              <FilterIcon />
-              Reset
-            </Button>
+            {hasCallFilters ? (
+              <Button
+                variant="outline"
+                className="gap-2 justify-self-start 2xl:justify-self-auto"
+                onClick={() => {
+                  setQuery("")
+                  setTypeFilter("all")
+                  setStatusFilter("all")
+                  setCallsPage(1)
+                }}
+              >
+                <FilterIcon />
+                Reset
+              </Button>
+            ) : null}
           </div>
           <div className="grid gap-3">
+            {paginatedCalls.length > 0 ? (
+              <div
+                className="hidden px-4 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_140px_110px_110px_112px] md:items-center"
+                aria-hidden="true"
+              >
+                <span>Call</span>
+                <span>Account</span>
+                <span>Status</span>
+                <span>Duration</span>
+                <span>Date</span>
+                <span className="text-right">Actions</span>
+              </div>
+            ) : null}
             {paginatedCalls.map((call) => {
               const displayStatus = getCallDisplayStatus(call, activeCallId)
               const displayDuration = getCallDisplayDuration(call, activeCallId)
@@ -14013,27 +14419,45 @@ function CallsView({
               return (
                 <div
                   key={call.id}
-                  className="grid gap-3 rounded-lg bg-muted/30 p-4 md:grid-cols-[minmax(0,1fr)_160px_120px_120px_128px] md:items-center"
+                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_140px_110px_110px_112px] md:items-center"
+                  tabIndex={0}
+                  aria-label={`Open ${call.title}`}
+                  onClick={() => onCallSelect(call.id)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return
+                    if (event.key !== "Enter" && event.key !== " ") return
+
+                    event.preventDefault()
+                    onCallSelect(call.id)
+                  }}
                 >
                   <div className="min-w-0">
                     <p className="font-medium">{call.title}</p>
                     <p className="truncate text-sm text-muted-foreground">
-                      {relatedAccount?.name ?? "Unknown account"} · {relatedOpportunity?.name ?? "Unknown opportunity"} · {call.type}
+                      {relatedOpportunity?.name ?? "No opportunity linked"} · {call.type}
                     </p>
                   </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground md:hidden">Account</p>
+                    <p className="truncate text-sm font-medium">{relatedAccount?.name ?? "No account linked"}</p>
+                  </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Status</p>
+                    <p className="text-xs text-muted-foreground md:hidden">Status</p>
                     <p className={cn("text-sm font-medium", getCallStatusTextClassName(displayStatus))}>{displayStatus}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Duration</p>
+                    <p className="text-xs text-muted-foreground md:hidden">Duration</p>
                     <p className="text-sm font-medium">{displayDuration}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Date</p>
+                    <p className="text-xs text-muted-foreground md:hidden">Date</p>
                     <p className="truncate text-sm font-medium">{call.date}</p>
                   </div>
-                  <div className="flex md:justify-end">
+                  <div
+                    className="flex md:justify-end"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -14064,14 +14488,8 @@ function CallsView({
             })}
             {visibleCalls.length === 0 ? (
               <ListEmptyState
-                icon={activeView === "recordings" ? <FileAudioIcon /> : <PhoneCallIcon />}
-                title={
-                  calls.length === 0
-                    ? "No calls recorded yet"
-                    : activeView === "recordings"
-                      ? "No playable recordings here"
-                      : "Nothing matches that view"
-                }
+                icon={<PhoneCallIcon />}
+                title={calls.length === 0 ? "No calls recorded yet" : "Nothing matches that view"}
                 message={
                   calls.length === 0
                     ? "Start a call when you are ready. SalesFrame will save the recording, transcript, notes, and next-call brief here."
@@ -14136,6 +14554,31 @@ function ListEmptyState({
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{message}</p>
         </div>
       </div>
+    </div>
+  )
+}
+
+function RecordStatusMessage({
+  message,
+  status,
+}: {
+  message: string
+  status: RecordSaveStatus
+}) {
+  const isError = status === "error"
+
+  return (
+    <div
+      aria-live={isError ? "assertive" : "polite"}
+      role={isError ? "alert" : "status"}
+      className={cn(
+        "rounded-lg p-3 text-sm",
+        isError
+          ? "border border-destructive/30 bg-destructive/10 text-destructive"
+          : "bg-muted/30 text-muted-foreground"
+      )}
+    >
+      {message}
     </div>
   )
 }
@@ -14401,6 +14844,7 @@ function PlaybooksView({
         ...playbook.exitCriteria,
       ].join(" ")
   )
+  const hasPlaybookFilters = Boolean(query.trim()) || focusFilter !== "all"
   const hasCustomChanges = JSON.stringify(customDraft) !== JSON.stringify(savedCustomFramework)
 
   React.useEffect(() => {
@@ -14507,7 +14951,7 @@ function PlaybooksView({
       setCustomSaveMessage("Custom framework saved.")
     } catch (caughtError: unknown) {
       setCustomSaveTone("error")
-      setCustomSaveMessage(getUserFacingErrorMessage(caughtError, "Custom framework could not be saved."))
+      setCustomSaveMessage(getUserFacingErrorMessage(caughtError, "Custom framework needs another save attempt."))
     } finally {
       setCustomSaving(false)
     }
@@ -14524,7 +14968,6 @@ function PlaybooksView({
       <div className="grid gap-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm text-muted-foreground">Methodologies</p>
             <h1 className="text-2xl font-semibold tracking-tight">Playbooks</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               Reference pages for the qualification frameworks sellers can attach to opportunities.
@@ -14557,17 +15000,19 @@ function PlaybooksView({
                 <SelectItem value="custom">Custom frameworks</SelectItem>
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              className="gap-2"
-              onClick={() => {
-                setQuery("")
-                setFocusFilter("all")
-              }}
-            >
-              <FilterIcon />
-              Reset
-            </Button>
+            {hasPlaybookFilters ? (
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => {
+                  setQuery("")
+                  setFocusFilter("all")
+                }}
+              >
+                <FilterIcon />
+                Reset
+              </Button>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -14575,10 +15020,10 @@ function PlaybooksView({
           {visiblePlaybooks.map((playbook) => (
             <div
               key={playbook.id}
-              className="grid gap-4 rounded-lg border bg-card p-4"
+              className="grid gap-4 rounded-lg bg-muted/30 p-4"
             >
               <div>
-                <div className="mb-3 flex size-9 items-center justify-center rounded-lg bg-muted">
+                <div className="mb-3 flex size-9 items-center justify-center rounded-lg bg-background/70">
                   <BookOpenCheckIcon className="size-4" />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -14589,15 +15034,19 @@ function PlaybooksView({
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{playbook.description}</p>
               </div>
-              <div className="flex items-center justify-between gap-3 border-t pt-3 text-sm">
+              <div className="flex items-center justify-between gap-3 pt-1 text-sm">
                 <span className="text-muted-foreground">{playbook.fields.length} required fields</span>
                 <OpenButton onClick={() => onNavigate(playbook.id)} />
               </div>
             </div>
           ))}
           {visiblePlaybooks.length === 0 ? (
-            <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground lg:col-span-3">
-              No playbooks match this search and filter.
+            <div className="lg:col-span-3">
+              <ListEmptyState
+                icon={<BookOpenCheckIcon />}
+                title="Nothing matches that view"
+                message="Try a broader search, or switch the use-case filter back to all playbooks."
+              />
             </div>
           ) : null}
         </div>
@@ -14631,7 +15080,6 @@ function PlaybooksView({
     <div className="grid gap-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="text-sm text-muted-foreground">Playbook</p>
           <h1 className="text-2xl font-semibold tracking-tight">{selectedPlaybook.name}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{selectedPlaybook.description}</p>
         </div>
@@ -14650,7 +15098,7 @@ function PlaybooksView({
           </CardHeader>
           <CardContent className="grid gap-3">
             {selectedPlaybook.fields.map(([field, detail]) => (
-              <div key={field} className="grid gap-2 rounded-lg border p-3">
+              <div key={field} className="grid gap-2 rounded-lg bg-muted/20 p-3">
                 <div className="flex items-center gap-2">
                   <ListChecksIcon className="size-4 text-muted-foreground" />
                   <p className="text-sm font-medium">{field}</p>
@@ -14733,10 +15181,6 @@ function CustomFrameworkEditor({
     <div className="grid gap-4" data-testid="custom-framework-editor">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <p className="text-sm text-muted-foreground">Playbook</p>
-            <span className="text-sm text-muted-foreground">Custom framework</span>
-          </div>
           <h1 className="text-2xl font-semibold tracking-tight">{draft.frameworkName}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{draft.description}</p>
         </div>
@@ -14751,11 +15195,11 @@ function CustomFrameworkEditor({
             <CardTitle>Framework setup</CardTitle>
             <CardDescription>Name the framework and define how the coach should use it.</CardDescription>
           </div>
-          <CardAction className="flex flex-wrap items-center gap-2">
+          <CardAction className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
             {saveMessage ? (
               <p
                 className={cn(
-                  "text-sm",
+                  "text-sm sm:text-right",
                   saveTone === "error" && "text-destructive",
                   saveTone === "success" && "text-emerald-600",
                   saveTone === "info" && "text-muted-foreground"
@@ -14766,10 +15210,10 @@ function CustomFrameworkEditor({
                 {saveMessage}
               </p>
             ) : null}
-            <Button variant="outline" size="sm" disabled={!hasChanges || isSaving} onClick={onReset}>
+            <Button className="w-full sm:w-auto" variant="outline" size="sm" disabled={!hasChanges || isSaving} onClick={onReset}>
               Reset
             </Button>
-            <Button size="sm" className="gap-2" disabled={!hasChanges || isSaving} onClick={onSave}>
+            <Button size="sm" className="w-full gap-2 sm:w-auto" disabled={!hasChanges || isSaving} onClick={onSave}>
               <CheckCircle2Icon />
               {isSaving ? "Saving..." : "Save custom framework"}
             </Button>
@@ -14818,7 +15262,7 @@ function CustomFrameworkEditor({
           <CardHeader>
             <div>
               <CardTitle>Required fields</CardTitle>
-              <CardDescription>Fields the seller must capture before the opportunity progresses.</CardDescription>
+              <CardDescription>Fields the seller must capture before the opportunity progresses. Keep at least one required field.</CardDescription>
             </div>
             <CardAction>
               <Button variant="outline" size="sm" className="gap-2" onClick={onAddField}>
@@ -14832,16 +15276,17 @@ function CustomFrameworkEditor({
               <div key={field.id} className="grid gap-3 rounded-lg border bg-muted/20 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs font-medium text-muted-foreground">Field {index + 1}</p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="gap-2 text-muted-foreground"
-                    disabled={draft.fields.length === 1}
-                    onClick={() => onRemoveField(field.id)}
-                  >
-                    <Trash2Icon />
-                    Remove
-                  </Button>
+                  {draft.fields.length > 1 ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-2 text-muted-foreground"
+                      onClick={() => onRemoveField(field.id)}
+                    >
+                      <Trash2Icon />
+                      Remove
+                    </Button>
+                  ) : null}
                 </div>
                 <div className="grid gap-3 lg:grid-cols-[280px_1fr]">
                   <div className="grid gap-2">
@@ -14872,7 +15317,7 @@ function CustomFrameworkEditor({
             <CardHeader>
               <div>
                 <CardTitle>Exit criteria</CardTitle>
-                <CardDescription>Rules for when this custom framework has enough evidence.</CardDescription>
+                <CardDescription>Rules for when this custom framework has enough evidence. Keep at least one criterion.</CardDescription>
               </div>
               <CardAction>
                 <Button variant="outline" size="sm" className="gap-2" onClick={onAddCriterion}>
@@ -14886,16 +15331,17 @@ function CustomFrameworkEditor({
                 <div key={criterion.id} className="grid gap-2 rounded-lg border bg-muted/20 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs font-medium text-muted-foreground">Criteria {index + 1}</p>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="gap-2 text-muted-foreground"
-                      disabled={draft.exitCriteria.length === 1}
-                      onClick={() => onRemoveCriterion(criterion.id)}
-                    >
-                      <Trash2Icon />
-                      Remove
-                    </Button>
+                    {draft.exitCriteria.length > 1 ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-2 text-muted-foreground"
+                        onClick={() => onRemoveCriterion(criterion.id)}
+                      >
+                        <Trash2Icon />
+                        Remove
+                      </Button>
+                    ) : null}
                   </div>
                   <Textarea
                     aria-label={`Exit criteria ${index + 1}`}
@@ -15024,7 +15470,7 @@ function PersonalAccountView({
       setStatusMessage("Photo ready. Save profile to use it.")
     } catch (caughtError: unknown) {
       setStatusTone("error")
-      setStatusMessage(getUserFacingErrorMessage(caughtError, "Photo could not be uploaded."))
+      setStatusMessage(getUserFacingErrorMessage(caughtError, "Photo needs another upload attempt."))
     } finally {
       setAvatarUploadPending(false)
     }
@@ -15075,7 +15521,7 @@ function PersonalAccountView({
       setStatusMessage("Profile saved.")
     } catch (caughtError: unknown) {
       setStatusTone("error")
-      setStatusMessage(getUserFacingErrorMessage(caughtError, "Profile could not be saved."))
+      setStatusMessage(getUserFacingErrorMessage(caughtError, "Profile needs another save attempt."))
     } finally {
       setProfileSavePending(false)
     }
@@ -15107,7 +15553,6 @@ function PersonalAccountView({
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0">
-              <CardDescription>Personal account</CardDescription>
               <h1 className="font-heading text-2xl leading-tight font-semibold">{profile.fullName}</h1>
               <p className="mt-1 text-sm text-muted-foreground">
                 Manage your seller profile, workspace identity, and account-level actions.
@@ -15143,7 +15588,7 @@ function PersonalAccountView({
                 </p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <Input
                 ref={avatarInputRef}
                 id="personal-avatar-upload"
@@ -15157,6 +15602,7 @@ function PersonalAccountView({
               />
               <Button
                 variant="outline"
+                className="w-full gap-2 sm:w-auto"
                 disabled={avatarUploadPending || profileSavePending}
                 onClick={() => avatarInputRef.current?.click()}
               >
@@ -15165,6 +15611,7 @@ function PersonalAccountView({
               </Button>
               <Button
                 variant="outline"
+                className="w-full gap-2 sm:w-auto"
                 disabled={!draft.avatarUrl || avatarUploadPending || profileSavePending}
                 onClick={() => updateDraft("avatarUrl", "")}
               >
@@ -15232,12 +15679,12 @@ function PersonalAccountView({
             value={draft.bio}
             onChange={(value) => updateDraft("bio", value)}
           />
-          <div className="flex flex-wrap gap-2">
-            <Button className="gap-2" disabled={!canSave || !hasChanges} onClick={handleSaveProfile}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button className="w-full gap-2 sm:w-auto" disabled={!canSave || !hasChanges} onClick={handleSaveProfile}>
               <CheckCircle2Icon />
               {profileSavePending ? "Saving..." : "Save profile"}
             </Button>
-            <Button variant="outline" disabled={!hasChanges} onClick={handleResetProfile}>
+            <Button className="w-full sm:w-auto" variant="outline" disabled={!hasChanges} onClick={handleResetProfile}>
               Reset changes
             </Button>
           </div>
@@ -15285,9 +15732,10 @@ function PersonalAccountView({
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <Button
               variant="outline"
+              className="w-full gap-2 sm:w-auto"
               disabled={!workspaceId}
               onClick={() => onOpenCsvImport("accounts")}
             >
@@ -15296,6 +15744,7 @@ function PersonalAccountView({
             </Button>
             <Button
               variant="outline"
+              className="w-full gap-2 sm:w-auto"
               disabled={!workspaceId}
               onClick={() => onOpenCsvImport("opportunities")}
             >
@@ -15332,8 +15781,8 @@ function PersonalAccountView({
               onChange={(event) => setDeletePhrase(event.currentTarget.value)}
             />
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="destructive" disabled={!canRequestDeletion} onClick={handleRequestDeletion}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button className="w-full sm:w-auto" variant="destructive" disabled={!canRequestDeletion} onClick={handleRequestDeletion}>
               Request account deletion
             </Button>
           </div>
@@ -15424,10 +15873,10 @@ function SellerResearchProfileCard({
     }
 
     setStatus("loading")
-    setMessage(`Fetching information for ${normalizedDomain} after you stop typing...`)
+    setMessage(`Looking up ${normalizedDomain} after you stop typing...`)
 
     lookupTimeoutRef.current = window.setTimeout(() => {
-      setMessage(`Fetching information from OpenAI web research for ${normalizedDomain}...`)
+      setMessage(`Reading public information for ${normalizedDomain}...`)
 
       void requestSellerDomainResearch({
         domain: normalizedDomain,
@@ -15442,7 +15891,7 @@ function SellerResearchProfileCard({
             productContext: result.productContext,
           })
           setStatus("success")
-          setMessage(`What you sell was updated from OpenAI web research for ${result.sellerDomain || normalizedDomain}.`)
+          setMessage(`What you sell is ready for ${result.sellerDomain || normalizedDomain}.`)
         })
         .catch((error: unknown) => {
           if (lookupSequenceRef.current !== lookupSequence) return
@@ -15548,7 +15997,7 @@ function SellerResearchProfileCard({
             value={draft.productContext}
             disabled={status === "loading"}
             className="min-h-24 resize-none"
-            placeholder={status === "loading" ? "Fetching information..." : "Describe what the AI should connect to buyer research and live questions."}
+            placeholder={status === "loading" ? "Looking up your company..." : "Describe what SalesFrame should connect to buyer research and live questions."}
             onChange={(event) => updateDraft("productContext", event.currentTarget.value)}
           />
           <p
@@ -15561,16 +16010,16 @@ function SellerResearchProfileCard({
             aria-live={status === "error" ? "assertive" : "polite"}
             role={status === "error" ? "alert" : "status"}
           >
-            {message || "Changing the company domain clears this field, then refreshes it from OpenAI after you stop typing."}
+            {message || "Changing the company domain clears this field, then SalesFrame refreshes it after you stop typing."}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button className="gap-2" disabled={!canSave || !hasChanges} onClick={handleSave}>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <Button className="w-full gap-2 sm:w-auto" disabled={!canSave || !hasChanges} onClick={handleSave}>
             <CheckCircle2Icon />
             Save selling context
           </Button>
-          <Button variant="outline" disabled={!hasChanges && status !== "loading"} onClick={handleReset}>
+          <Button className="w-full sm:w-auto" variant="outline" disabled={!hasChanges && status !== "loading"} onClick={handleReset}>
             Reset changes
           </Button>
         </div>
@@ -15585,7 +16034,7 @@ function WorkspaceSwitchSkeleton({
   workspace: WorkspaceNavItem
 }) {
   return (
-    <div className="grid gap-4" aria-busy="true" aria-live="polite">
+    <div className="sf-fade-in grid gap-4" aria-busy="true" aria-live="polite">
       <Card>
         <CardHeader>
           <div className="flex items-start gap-3">
@@ -15664,7 +16113,7 @@ function PageTransitionSkeleton({
   const label = viewLabels[activeView] ?? "Workspace"
 
   return (
-    <div className="grid gap-4" aria-busy="true" aria-live="polite" data-testid="page-transition-skeleton">
+    <div className="sf-fade-in grid gap-4" aria-busy="true" aria-live="polite" data-testid="page-transition-skeleton">
       <div className="flex items-center justify-between gap-3">
         <div className="grid gap-2">
           <Skeleton className="h-4 w-20" />
@@ -15686,7 +16135,7 @@ function PageTransitionSkeleton({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="grid gap-3 rounded-lg border bg-card p-4">
+        <div className="grid gap-3 rounded-lg bg-muted/30 p-4">
           <Skeleton className="h-5 w-36" />
           <Skeleton className="h-64 rounded-lg" />
           <div className="grid gap-2">
@@ -15695,7 +16144,7 @@ function PageTransitionSkeleton({
             <Skeleton className="h-10 rounded-lg" />
           </div>
         </div>
-        <div className="grid gap-3 rounded-lg border bg-card p-4">
+        <div className="grid gap-3 rounded-lg bg-muted/30 p-4">
           <Skeleton className="h-5 w-32" />
           <Skeleton className="h-10 rounded-lg" />
           <Skeleton className="h-10 rounded-lg" />
@@ -15721,28 +16170,29 @@ function WorkspaceStateView({
   onNavigate: (view: string) => void
   onRetry: () => void
 }) {
-  const stateConfig: Record<Exclude<WorkspaceDataState, "ready">, {
-    eyebrow: string
+  type WorkspaceStateBaseConfig = {
     title: string
     body: string
     icon: React.ReactNode
+  }
+  type WorkspaceStateActionConfig = WorkspaceStateBaseConfig & {
     primaryLabel: string
     primaryAction: () => void
     secondaryLabel: string
     secondaryAction: () => void
-  }> = {
+  }
+  const stateConfig: {
+    loading: WorkspaceStateBaseConfig
+    empty: WorkspaceStateActionConfig
+    error: WorkspaceStateActionConfig
+    "permission-denied": WorkspaceStateActionConfig
+  } = {
     loading: {
-      eyebrow: "Just a moment",
       title: "Getting this workspace ready",
       body: "We are loading the accounts, opportunities, calls, and playbooks that belong here.",
       icon: <Clock3Icon className="size-5" />,
-      primaryLabel: "Try again",
-      primaryAction: onRetry,
-      secondaryLabel: "Open settings",
-      secondaryAction: () => onNavigate("settings"),
     },
     empty: {
-      eyebrow: "Fresh workspace",
       title: "Nothing here yet",
       body: "Start with one account. SalesFrame will build the selling context around it as calls and opportunities come in.",
       icon: <Building2Icon className="size-5" />,
@@ -15752,8 +16202,7 @@ function WorkspaceStateView({
       secondaryAction: () => onNavigate("profile-account"),
     },
     error: {
-      eyebrow: "Something got stuck",
-      title: "We could not load this workspace",
+      title: "This workspace needs another moment",
       body: "Give it another try. If it keeps happening, settings can help confirm the connection is still in shape.",
       icon: <CircleAlertIcon className="size-5" />,
       primaryLabel: "Try again",
@@ -15762,7 +16211,6 @@ function WorkspaceStateView({
       secondaryAction: () => onNavigate("settings"),
     },
     "permission-denied": {
-      eyebrow: "Workspace access",
       title: "This workspace is out of reach",
       body: "You are signed in, but this workspace is not available to your account. Check settings or switch back to a workspace you can access.",
       icon: <ShieldCheckIcon className="size-5" />,
@@ -15773,16 +16221,20 @@ function WorkspaceStateView({
     },
   }
   const config = stateConfig[state]
+  const actionConfig =
+    state === "empty" || state === "error" || state === "permission-denied"
+      ? stateConfig[state]
+      : null
   const body = state === "error" && message ? message : config.body
   const workspaceMoment: Record<Exclude<WorkspaceDataState, "ready">, string> = {
     loading: "SalesFrame is gathering this workspace.",
     empty: "You have a clean start.",
-    error: "This needs another try.",
+    error: "SalesFrame is ready to try again.",
     "permission-denied": "This workspace is not available here.",
   }
 
   return (
-    <div className="grid min-h-[calc(100svh-9rem)] place-items-center">
+    <div className="sf-fade-in grid min-h-[calc(100svh-9rem)] place-items-center">
       <Card className="w-full max-w-3xl">
         <CardHeader>
           <div className="flex items-start gap-3">
@@ -15790,15 +16242,20 @@ function WorkspaceStateView({
               {config.icon}
             </div>
             <div className="min-w-0">
-              <CardDescription>{config.eyebrow}</CardDescription>
               <CardTitle className="text-2xl">{config.title}</CardTitle>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{body}</p>
             </div>
           </div>
         </CardHeader>
         <CardContent className="grid gap-4">
-          {state === "loading" ? (
-            <div className="grid gap-3 rounded-lg border bg-muted/30 p-4">
+          {actionConfig ? (
+            <div className="grid gap-3 md:grid-cols-3">
+              <ContextTile icon={<TargetIcon />} label="You are here" value={viewLabels[activeView] ?? "Workspace"} />
+              <ContextTile icon={state === "empty" ? <Building2Icon /> : <DatabaseIcon />} label="What is happening" value={workspaceMoment[state]} />
+              <ContextTile icon={state === "empty" ? <PlusIcon /> : <ShieldCheckIcon />} label="Best next move" value={actionConfig.primaryLabel} />
+            </div>
+          ) : (
+            <div className="grid gap-3 rounded-lg bg-muted/30 p-4">
               <div className="grid gap-3 md:grid-cols-3">
                 <Skeleton className="h-20 rounded-lg" />
                 <Skeleton className="h-20 rounded-lg" />
@@ -15806,27 +16263,21 @@ function WorkspaceStateView({
               </div>
               <Skeleton className="h-36 rounded-lg" />
             </div>
-          ) : (
-            <div className="grid gap-3 rounded-lg border bg-muted/30 p-4 md:grid-cols-3">
-              <ContextTile icon={<TargetIcon />} label="You are here" value={viewLabels[activeView] ?? "Workspace"} />
-              <ContextTile icon={state === "empty" ? <Building2Icon /> : <DatabaseIcon />} label="What is happening" value={workspaceMoment[state]} />
-              <ContextTile icon={state === "empty" ? <PlusIcon /> : <ShieldCheckIcon />} label="Best next move" value={config.primaryLabel} />
-            </div>
           )}
-          {state === "loading" ? (
+          {actionConfig ? (
+            <div className="flex flex-wrap gap-2">
+              <Button className="gap-2" onClick={actionConfig.primaryAction}>
+                {actionConfig.icon}
+                {actionConfig.primaryLabel}
+              </Button>
+              <Button variant="outline" onClick={actionConfig.secondaryAction}>
+                {actionConfig.secondaryLabel}
+              </Button>
+            </div>
+          ) : (
             <p className="text-sm text-muted-foreground" role="status">
               A few moving pieces are coming together. SalesFrame will bring you in when the workspace is ready.
             </p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              <Button className="gap-2" onClick={config.primaryAction}>
-                {config.icon}
-                {config.primaryLabel}
-              </Button>
-              <Button variant="outline" onClick={config.secondaryAction}>
-                {config.secondaryLabel}
-              </Button>
-            </div>
           )}
         </CardContent>
       </Card>
@@ -15883,7 +16334,7 @@ function SettingsView({
         if (cancelled) return
 
         setSaveMessageTone("error")
-        setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key status could not be loaded."))
+        setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key status needs another check."))
       })
 
     return () => {
@@ -15916,7 +16367,7 @@ function SettingsView({
       setSaveMessage("OpenAI key connection saved.")
     } catch (caughtError: unknown) {
       setSaveMessageTone("error")
-      setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key could not be saved."))
+      setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key connection needs another save attempt."))
     } finally {
       setIsSavingKey(false)
     }
@@ -15938,7 +16389,7 @@ function SettingsView({
       setSaveMessageTone("success")
       setSaveMessage("OpenAI key connection removed.")
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, "OpenAI key could not be removed.")
+      const message = getUserFacingErrorMessage(caughtError, "OpenAI key connection needs another remove attempt.")
       setRemoveKeyError(message)
       setSaveMessageTone("error")
       setSaveMessage(message)
@@ -15972,7 +16423,6 @@ function SettingsView({
         <Card>
           <CardHeader>
             <div>
-              <CardDescription>AI provider</CardDescription>
               <CardTitle>{activeView === "ai" ? "OpenAI API key" : "OpenAI setup"}</CardTitle>
             </div>
           </CardHeader>
@@ -16021,8 +16471,8 @@ function SettingsView({
 
             <div
               className={cn(
-                "grid gap-3 rounded-lg border p-4",
-                hasSavedKey ? "border-emerald-500/30 bg-emerald-500/10" : "bg-muted/30"
+                "grid gap-3 rounded-lg p-4",
+                hasSavedKey ? "bg-emerald-500/10" : "bg-muted/30"
               )}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -16046,7 +16496,7 @@ function SettingsView({
               </div>
 
               {hasSavedKey ? (
-                <div className="grid gap-2 rounded-lg border bg-background/70 p-3 text-sm md:grid-cols-3">
+                <div className="grid gap-2 rounded-lg bg-background/70 p-3 text-sm md:grid-cols-3">
                   <ContextRow label="Masked key" value={savedKeyState.maskedKey} />
                   <ContextRow label="Fingerprint" value={savedKeyState.fingerprint} />
                   <ContextRow label="Saved" value={formatSavedAt(savedKeyState.savedAt)} />
@@ -16071,7 +16521,7 @@ function SettingsView({
                 ["AI notes", "Structured discovery notes and evidence snippets."],
                 ["Post-call outputs", "Follow-up email, next-call plan, and account/opportunity field updates."],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-lg border p-3">
+                <div key={label} className="rounded-lg bg-muted/30 p-3">
                   <div className="mb-2 flex items-center gap-2">
                     <SparklesIcon className="size-4 text-muted-foreground" />
                     <p className="text-sm font-medium">{label}</p>
@@ -16108,7 +16558,7 @@ function SettingsView({
               </DialogDescription>
             </DialogHeader>
             {savedKeyState ? (
-              <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+              <div className="grid gap-2 rounded-lg bg-muted/30 p-3 text-sm">
                 <ContextRow label="Masked key" value={savedKeyState.maskedKey} />
                 <ContextRow label="Fingerprint" value={savedKeyState.fingerprint} />
               </div>
@@ -16136,7 +16586,6 @@ function SettingsView({
 
         <Card>
           <CardHeader>
-            <CardDescription>Product setup</CardDescription>
             <CardTitle>{activeView === "retention" ? "Retention" : activeView === "capture" ? "Audio capture" : "Capture settings"}</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4">
@@ -16154,7 +16603,7 @@ function SettingsView({
                 configurable: true,
               },
             ].map((item) => (
-              <div key={item.id} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div key={item.id} className="flex flex-col gap-3 rounded-lg bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <Label htmlFor={`capture-setting-${item.id}`} className="text-sm font-medium">{item.title}</Label>
                   <p className="mt-1 text-sm text-muted-foreground">{item.body}</p>
@@ -16382,8 +16831,8 @@ function ContextTile({
   value: string
 }) {
   return (
-    <div className="rounded-lg border bg-muted/30 p-3">
-      <div className="mb-3 flex size-8 items-center justify-center rounded-lg bg-background">
+    <div className="rounded-lg bg-muted/30 p-3">
+      <div className="mb-3 flex size-8 items-center justify-center rounded-lg bg-background/70 text-muted-foreground">
         {icon}
       </div>
       <p className="text-xs font-medium text-muted-foreground">{label}</p>

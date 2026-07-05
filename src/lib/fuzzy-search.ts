@@ -1,5 +1,7 @@
 import type { AccountNavItem } from "@/components/nav-projects"
 import type {
+  AccountDraft,
+  CallSummary,
   Opportunity,
   OpportunityCoverageFilter,
   OpportunityDraft,
@@ -60,6 +62,7 @@ export function getOpportunitySearchText(
     opportunity.name,
     account?.name,
     account?.description,
+    account?.website,
     opportunity.stage,
     opportunity.amount,
     opportunity.closeDate,
@@ -81,6 +84,62 @@ export function getOpportunitySearchText(
     ...opportunity.meddicc.flatMap((field) => [field.label, field.status, field.detail]),
     ...opportunity.bant.flatMap((field) => [field.label, field.status, field.detail]),
     ...opportunity.transcript.flatMap((line) => [
+      line.speaker,
+      line.speakerDisplayName,
+      line.speakerLabel,
+      line.time,
+      line.text,
+    ]),
+  ]
+    .filter(Boolean)
+    .join(" ")
+}
+
+export function getAccountSearchText(account: AccountNavItem, draft?: AccountDraft) {
+  return [
+    account.name,
+    account.description,
+    account.website,
+    account.currency,
+    draft?.accountName,
+    draft?.website,
+    draft?.industry,
+    draft?.employeeCount,
+    draft?.region,
+    draft?.currency,
+    draft?.currentTools,
+    draft?.strategicInitiatives,
+    draft?.competitors,
+    draft?.accountNotes,
+    ...account.opportunities.flatMap((opportunity) => [opportunity.name, opportunity.stage]),
+  ]
+    .filter(Boolean)
+    .join(" ")
+}
+
+export function getCallSearchText({
+  account,
+  call,
+  opportunity,
+  opportunityDraft,
+  transcript = [],
+}: {
+  account?: AccountNavItem
+  call: CallSummary
+  opportunity?: Opportunity
+  opportunityDraft?: OpportunityDraft
+  transcript?: Opportunity["transcript"]
+}) {
+  return [
+    call.title,
+    call.date,
+    call.duration,
+    call.type,
+    call.status,
+    opportunity ? getOpportunitySearchText(opportunity, account, opportunityDraft) : "",
+    account?.name,
+    account?.website,
+    ...transcript.flatMap((line) => [
       line.speaker,
       line.speakerDisplayName,
       line.speakerLabel,

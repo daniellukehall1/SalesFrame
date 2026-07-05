@@ -1,21 +1,3 @@
-export const prepChecklist = [
-  {
-    title: "Primary call objective",
-    detail: "Confirm the business problem, success outcome, and next decision step.",
-    status: "ready",
-  },
-  {
-    title: "Must capture",
-    detail: "Customer-stated pain, decision path, stakeholders, timing, and measurable impact.",
-    status: "missing",
-  },
-  {
-    title: "Known context",
-    detail: "Account and opportunity fields, previous calls, selected playbooks, and saved research profile.",
-    status: "ready",
-  },
-]
-
 export const playbooks = [
   {
     id: "meddicc",
@@ -23,7 +5,7 @@ export const playbooks = [
     description: "Strict qualification for enterprise opportunities.",
     bestFor: "Complex enterprise deals with multiple stakeholders and a formal decision process.",
     evidenceStandard: "Every field needs customer-sourced evidence, not seller assumption.",
-    liveGuidance: "OpenAI prioritizes the weakest required field that fits the current conversation topic.",
+    liveGuidance: "SalesFrame prioritizes the weakest required field that fits the current conversation topic.",
     fields: [
       ["Metrics", "Quantified business impact, current baseline, and success target."],
       ["Economic Buyer", "Named person who owns the commercial outcome and approval path."],
@@ -46,7 +28,7 @@ export const playbooks = [
     description: "MEDDICC qualification with explicit paper process coverage.",
     bestFor: "Enterprise deals where procurement, legal, security, privacy, or vendor onboarding can slow signature.",
     evidenceStandard: "Every MEDDICC field plus paper process must have customer-sourced evidence and an owner.",
-    liveGuidance: "OpenAI uses MEDDICC evidence and adds paper process prompts when buying steps or contracting risk become relevant.",
+    liveGuidance: "SalesFrame uses MEDDICC evidence and adds paper process prompts when buying steps or contracting risk become relevant.",
     fields: [
       ["Metrics", "Quantified business impact, current baseline, and success target."],
       ["Economic Buyer", "Named person who owns the commercial outcome and approval path."],
@@ -71,7 +53,7 @@ export const playbooks = [
     description: "Fast qualification for budget, authority, need, and timeline.",
     bestFor: "Early qualification where the seller needs a quick read on whether a deal is real.",
     evidenceStandard: "Each field should be captured as a short, defensible statement with source context.",
-    liveGuidance: "OpenAI uses BANT to expose whether the opportunity is worth deeper discovery.",
+    liveGuidance: "SalesFrame uses BANT to expose whether the opportunity is worth deeper discovery.",
     fields: [
       ["Budget", "Budget exists, budget source is known, or funding path is understood."],
       ["Authority", "The buyer, signer, and influencers are clear enough to navigate the deal."],
@@ -91,7 +73,7 @@ export const playbooks = [
     description: "Value messaging for business pain, required capabilities, positive outcomes, metrics, and differentiation.",
     bestFor: "Discovery and validation calls where the seller needs to connect customer pain to differentiated value.",
     evidenceStandard: "Each field should be linked to customer language, business impact, and a reason the chosen approach is different.",
-    liveGuidance: "OpenAI moves from pain to required capabilities, then tests whether the customer agrees those capabilities create measurable outcomes.",
+    liveGuidance: "SalesFrame moves from pain to required capabilities, then tests whether the customer agrees those capabilities create measurable outcomes.",
     fields: [
       ["Business Pain", "The business problem, current consequence, and reason it matters now."],
       ["Required Capabilities", "The capabilities the customer says are required to solve the pain."],
@@ -112,7 +94,7 @@ export const playbooks = [
     description: "Live discovery coaching across Situation, Problem, Implication, and Need-payoff questions.",
     bestFor: "Early and mid-stage discovery where the seller needs to avoid staying too shallow.",
     evidenceStandard: "The conversation should progress beyond current-state facts into customer-owned pain, consequences, and value.",
-    liveGuidance: "OpenAI detects shallow discovery and prompts the seller to move from situation facts into implication and payoff.",
+    liveGuidance: "SalesFrame detects shallow discovery and prompts the seller to move from situation facts into implication and payoff.",
     fields: [
       ["Situation", "Current-state context, existing process, tools, constraints, and operating environment."],
       ["Problem", "A customer-acknowledged difficulty, dissatisfaction, or gap in the current state."],
@@ -132,7 +114,7 @@ export const playbooks = [
     description: "Consultative selling checkpoints for upfront contracts, pain, budget, decision process, fulfillment, and post-sell.",
     bestFor: "Calls where the seller needs clear mutual expectations, commercial truth, and qualification discipline.",
     evidenceStandard: "The seller should capture explicit customer commitments and avoid advancing without pain, budget, and decision clarity.",
-    liveGuidance: "OpenAI establishes mutual expectations early, then qualifies pain, money, decision, fit, and next commitments.",
+    liveGuidance: "SalesFrame establishes mutual expectations early, then qualifies pain, money, decision, fit, and next commitments.",
     fields: [
       ["Upfront Contract", "Mutual agreement on agenda, outcomes, timing, and what happens next."],
       ["Pain", "Business pain and personal or team impact that is strong enough to act on."],
@@ -154,7 +136,7 @@ export const playbooks = [
     description: "Commercial insight-led selling that teaches, tailors, and takes control of the buying conversation.",
     bestFor: "Calls where the seller needs to challenge the customer's current thinking with credible insight and create urgency for change.",
     evidenceStandard: "The seller should connect a customer-specific insight to a reframed problem, quantified business impact, and differentiated reason to act.",
-    liveGuidance: "OpenAI helps the seller reframe the customer's view, create constructive tension, and move from insight to a customer-owned business case.",
+    liveGuidance: "SalesFrame helps the seller reframe the customer's view, create constructive tension, and move from insight to a customer-owned business case.",
     fields: [
       ["Commercial Insight", "A credible market, operational, or business insight that matters to the customer's context."],
       ["Reframe", "A sharper way for the customer to see the problem, risk, or missed opportunity."],
@@ -177,7 +159,7 @@ export const playbooks = [
     description: "Problem-centric discovery that contrasts current state, future state, root cause, impact, and urgency.",
     bestFor: "Discovery calls where the seller needs to diagnose the real business gap before discussing product fit.",
     evidenceStandard: "The seller should capture the customer's current state, desired future state, root cause, measurable gap, and reason to change now.",
-    liveGuidance: "OpenAI keeps the seller diagnosing the gap until the customer can articulate why the current state must change.",
+    liveGuidance: "SalesFrame keeps the seller diagnosing the gap until the customer can articulate why the current state must change.",
     fields: [
       ["Current State", "How the customer operates today, including process, tools, symptoms, and constraints."],
       ["Future State", "The specific business condition the customer wants instead."],
@@ -200,7 +182,7 @@ export const playbooks = [
     description: "Customer value-led selling that ties business issues to impact, required capabilities, proof, and mutual value.",
     bestFor: "Discovery and business-case conversations where the seller needs the buyer to own the value case.",
     evidenceStandard: "Each field should connect customer-stated issues to quantified value, required capabilities, and buyer-owned success outcomes.",
-    liveGuidance: "OpenAI moves from business issue to reasons, impact, required capabilities, value proof, and a mutual plan without turning the call into an ROI worksheet.",
+    liveGuidance: "SalesFrame moves from business issue to reasons, impact, required capabilities, value proof, and a mutual plan without turning the call into an ROI worksheet.",
     fields: [
       ["Business Issue", "The customer-stated problem, initiative, risk, or opportunity that makes change relevant."],
       ["Reasons", "Why the issue exists now, what changed, and why the current approach is not enough."],
@@ -223,7 +205,7 @@ export const playbooks = [
     description: "Complex-deal strategy for mapping buying influences, win-results, response modes, red flags, and next best actions.",
     bestFor: "Multi-stakeholder enterprise opportunities where political alignment and stakeholder strategy decide the outcome.",
     evidenceStandard: "Each key buying influence should have role, influence level, win-result, attitude, response mode, red flags, and a next action.",
-    liveGuidance: "OpenAI helps the seller find missing buying influences, stakeholder win-results, red flags, and political risk before pushing for commitment.",
+    liveGuidance: "SalesFrame helps the seller find missing buying influences, stakeholder win-results, red flags, and political risk before pushing for commitment.",
     fields: [
       ["Economic Buying Influence", "The person or group with final business authority over funding and business outcome."],
       ["User Buying Influence", "The people whose work, team, or performance will be directly affected by the solution."],
@@ -247,7 +229,7 @@ export const playbooks = [
     description: "Customer-centric recurring revenue qualification across Situation, Pain, Impact, Critical Event, and Decision.",
     bestFor: "SaaS and recurring revenue motions where urgency, impact, and decision alignment determine deal quality.",
     evidenceStandard: "Each SPICED field should be evidenced in the customer's words and connected to a qualified business outcome or buying trigger.",
-    liveGuidance: "OpenAI keeps discovery anchored in the buyer's situation, pain, impact, critical event, and decision path while adapting to flow.",
+    liveGuidance: "SalesFrame keeps discovery anchored in the buyer's situation, pain, impact, critical event, and decision path while adapting to flow.",
     fields: [
       ["Situation", "The customer's current environment, process, tools, team structure, constraints, and operating context."],
       ["Pain", "The problem, friction, risk, or missed opportunity the customer agrees is worth solving."],
@@ -269,7 +251,7 @@ export const playbooks = [
     description: "Configurable fields for internal methodology variants.",
     bestFor: "Team-specific qualification models, internal sales plays, and framework variants.",
     evidenceStandard: "Users define required fields, acceptable evidence, and when a field is considered complete.",
-    liveGuidance: "OpenAI treats configured fields as first-class guidance alongside system playbooks.",
+    liveGuidance: "SalesFrame treats configured fields as first-class guidance alongside system playbooks.",
     fields: [
       ["Required field", "The information that must be captured before the opportunity can progress."],
       ["Evidence standard", "The proof needed before the app marks the field as complete."],
@@ -283,11 +265,4 @@ export const playbooks = [
       "Question prompts can adapt to call flow.",
     ],
   },
-]
-
-export const riskSignals = [
-  "Economic buyer is assumed, not confirmed.",
-  "Decision criteria has not been captured.",
-  "Champion is not validated.",
-  "Timeline is inferred, not committed.",
 ]

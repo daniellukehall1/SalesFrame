@@ -2,6 +2,427 @@
 
 This log tracks launch-readiness issues found during the calm UX audit. Each entry records the practical impact, root cause, fix, and verification evidence.
 
+## 2026-07-05
+
+### Orphaned list records used database-style unknown labels
+
+- Severity: Low
+- Description: Search results, dashboard rows, Opportunities, and Calls could show `Unknown account` or `Unknown opportunity` when a related record was missing or still unavailable.
+- Root cause: List metadata used developer-friendly fallback text rather than seller-facing language for missing relationships.
+- Recommended improvement: Use calm relationship copy that explains the state without implying the app is confused or broken.
+- Fix applied: Replaced visible `Unknown account` and `Unknown opportunity` fallbacks with `No account linked` and `No opportunity linked` across workspace search, dashboard focus, opportunities, and calls.
+- Before impact: Missing relationship data could look like a raw database placeholder and reduce trust in the record list.
+- After impact: Orphaned or incomplete records now communicate the relationship state in plain product language.
+- Verification: Updated production-contract coverage to require the linked-record fallback copy and reject the old unknown-account/opportunity strings.
+
+### Add Opportunity optional fields felt heavier than related modals
+
+- Severity: Low
+- Description: The Add Opportunity modal wrapped optional fields in a bordered panel and squeezed the formatted amount preview into the label row.
+- Root cause: The dialog retained an older framed optional-section pattern while Create Account's opportunity step had already moved to a softer, space-efficient muted section with the amount preview below the input.
+- Recommended improvement: Use the same calm optional-field structure across opportunity creation surfaces and keep formatting feedback close to the field without crowding labels.
+- Fix applied: Replaced the bordered optional-fields wrapper with a muted unframed section and moved the amount preview below the amount input.
+- Before impact: The Add Opportunity modal felt visually inconsistent and the amount preview could crowd the label area on narrower layouts.
+- After impact: Optional opportunity details now align with the rest of the modal system and read more clearly on desktop and mobile.
+- Verification: Updated production-contract coverage for the unframed optional-fields section, side-by-side amount/date layout, and below-input amount preview.
+
+### Confirmation summaries were more framed than necessary
+
+- Severity: Low
+- Description: Delete dialogs, the OpenAI key removal dialog, and the saved OpenAI connection state used bordered summary panels inside already-focused modal or setup surfaces.
+- Root cause: Confirmation and setup summaries reused generic bordered panel styles even though the dialog/card context already provided the required boundary and hierarchy.
+- Recommended improvement: Keep destructive errors and missing-key blockers framed, but show selected-record summaries and saved-connection metadata on quieter muted surfaces.
+- Fix applied: Removed decorative borders from delete summaries, remove-key metadata, and the saved OpenAI connection state while preserving the destructive missing-key frame and destructive confirmation actions.
+- Before impact: Confirmation flows felt more boxed-in than needed, and ordinary saved-key context could look too similar to a warning.
+- After impact: Confirmation dialogs and account setup read cleaner, while true destructive or blocking states still stand out.
+- Verification: Added production-contract coverage for unframed confirmation summaries, unframed saved-key metadata, and framed missing-key blocker treatment.
+
+### Replay passive states looked like boxed warnings
+
+- Severity: Low
+- Description: The call replay status line and empty notes message used bordered background panels even when nothing needed the seller's attention.
+- Root cause: Replay helper text reused the same framed treatment as interactive timeline controls and playback error states.
+- Recommended improvement: Preserve strong treatment for replay controls and real playback errors, but make routine replay status and empty notes feel like quiet supporting text.
+- Fix applied: Changed replay status and empty-notes surfaces to unframed muted panels while leaving the timeline, note list, and destructive playback errors intact.
+- Before impact: Fresh post-call replay could feel more visually busy than necessary and made passive text read as a separate alert.
+- After impact: Replay now keeps the seller focused on Play/Open/Delete actions while routine status copy stays calm.
+- Verification: Extended replay production-contract coverage to require unframed passive replay states and reject the old bordered helper panels.
+
+### Playbook methodology surfaces used too many nested borders
+
+- Severity: Low
+- Description: Read-only playbook required-field descriptions and opportunity methodology summary metrics used bordered mini-panels inside cards.
+- Root cause: Passive methodology context reused the same framed treatment as editable custom-framework fields, even though sellers are only reading these values.
+- Recommended improvement: Reserve bordered rows for editable/custom framework controls and use muted unframed surfaces for static guidance and metrics.
+- Fix applied: Removed decorative borders from system playbook required-field rows and opportunity methodology metric tiles while keeping custom-framework editable rows framed.
+- Before impact: Playbook pages and methodology tabs felt denser and more mechanical than necessary, especially when several frameworks were selected.
+- After impact: Framework guidance now scans more quietly while editable custom-framework sections still have clear boundaries.
+- Verification: Added production-contract coverage for unframed read-only playbook/methodology surfaces and preserved framed custom-framework editor rows.
+
+### Post-call planning surfaces were over-framed
+
+- Severity: Low
+- Description: The post-call next-call plan rows and next-call brief detail blocks used bordered mini-panels inside already-framed cards.
+- Root cause: The post-call surfaces retained older card-within-card styling even though the information is passive guidance rather than an alert, control, or separate object.
+- Recommended improvement: Keep the post-call content structured, but use quiet muted surfaces so the brief feels like one cohesive plan instead of a stack of separate boxes.
+- Fix applied: Removed decorative borders from next-call brief text/list blocks and post-call plan rows while preserving replay controls, destructive errors, and primary actions.
+- Before impact: Post-call pages felt busier than necessary at the exact moment a seller needs a calm summary and clear next action.
+- After impact: Next-call guidance now reads as a softer, more unified brief with less visual noise and better alignment to the app’s calm surface language.
+- Verification: Added production-contract coverage requiring unframed next-call brief blocks and post-call plan rows, and rejecting the old bordered classes.
+
+### Opportunity intelligence summaries were over-framed
+
+- Severity: Low
+- Description: The Opportunity Intel tab used bordered panels for the read-only next-question preview and methodology count summaries.
+- Root cause: The intelligence view retained an older framed-summary style even though the information is passive, read-only context inside an already framed card.
+- Recommended improvement: Keep the hierarchy and counts, but use quiet muted surfaces so the tab feels like analysis rather than a stack of alerts.
+- Fix applied: Removed decorative borders from the question preview panel and methodology summary tiles, and softened the starter-guidance inset to a lighter background.
+- Before impact: Opportunity intelligence felt heavier than necessary and competed visually with the actual call brief and methodology evidence.
+- After impact: The Intel tab is calmer and easier to scan while preserving the same question guidance and selected-playbook gap counts.
+- Verification: Expanded production-contract coverage for the unframed Opportunity Intel surfaces and selected-playbook summary source.
+
+### Start Call steps were framed like cards inside the modal
+
+- Severity: Low
+- Description: Each Start Call modal step wrapped its content in an additional bordered, padded panel inside the dialog.
+- Root cause: The step content retained an earlier card-inside-modal pattern even though the dialog already provides the visual boundary, stepper, scroll region, and footer actions.
+- Recommended improvement: Keep the Start Call flow visually light and space-efficient, especially on mobile, by using the modal surface itself as the frame and reserving borders for actual alerts or controls.
+- Fix applied: Removed the nested bordered wrappers from the Account, Opportunity, Call setup, and Seller Research steps. The OpenAI-key-required alert remains framed because it is a blocking issue.
+- Before impact: The modal felt more cramped and visually heavy, with stacked borders competing with the actual form fields.
+- After impact: Start Call reads as one clean setup flow with more breathing room and less nested-box noise.
+- Verification: Added production-contract coverage requiring unframed step content and rejecting the old bordered step wrapper.
+
+### Live capture rail used alert-style boxes for ordinary states
+
+- Severity: Low
+- Description: The call cockpit right rail used bordered boxes for ordinary waiting states, successful preflight messages, notes, evidence, and empty transcript guidance.
+- Root cause: Live capture UI kept older boxed utility styling after the app moved toward muted, unframed surfaces for normal information and reserved borders for errors or interactive controls.
+- Recommended improvement: Keep the cockpit calm during calls by making routine capture information quiet, while preserving strong treatment for actual audio/capture errors.
+- Fix applied: Removed decorative borders from non-error capture status, successful preflight status, note rows, evidence rows, and live-capture empty states. Destructive capture/preflight errors remain bordered and announced as alerts.
+- Before impact: The highest-pressure product surface had too many repeated boxes, which made normal call activity feel like something needed attention.
+- After impact: The live rail now reads calmer during normal recording while still making real capture failures obvious.
+- Verification: Added production-contract coverage requiring unframed routine live-capture surfaces and preserving bordered destructive preflight errors.
+
+### Record save feedback looked like warning panels
+
+- Severity: Low
+- Description: Routine save and enrichment messages on account, opportunity, and methodology record pages used the same bordered panel treatment as errors.
+- Root cause: Record pages repeated an older inline status block where the base style always included a border, even when the message was a calm saved/saving status.
+- Recommended improvement: Keep destructive/error feedback strongly framed, but make successful and in-progress record feedback feel like quiet status notes.
+- Fix applied: Added a shared `RecordStatusMessage` helper and routed account save, account enrichment save/run, opportunity save, and methodology save feedback through it. Non-error statuses now use a muted unframed surface; errors keep a destructive border and assertive announcement.
+- Before impact: Routine “saved” feedback could visually compete with the form and feel more like a warning than confirmation.
+- After impact: Record pages keep feedback visible and accessible without adding unnecessary visual weight.
+- Verification: Added production-contract coverage requiring the shared helper and rejecting bordered non-error record feedback.
+
+### Record navigation could still inherit lower scroll positions
+
+- Severity: Medium
+- Description: Clicking between accounts, opportunities, calls, playbooks, and other record-style destinations could still sometimes leave the seller lower down the destination page.
+- Root cause: The scroll reset was tied to route changes and record IDs, but the visible page did not expose a single navigation identity and the browser could still apply scroll anchoring while skeletons and record content swapped.
+- Recommended improvement: Make the visible workspace destination explicit, reset from that key, and prevent browser scroll anchoring from preserving stale vertical positions during record/page swaps.
+- Fix applied: Added an `activeNavigationKey` covering workspace, view, account, opportunity, and focused call; attached it to the main app scroll surface; keyed the post-render scroll reset from that identity; and disabled scroll anchoring for top-level app content.
+- Before impact: Navigation could feel random when moving from a scrolled detail page into a different record, especially after late-rendering content settled.
+- After impact: Record and page navigation now consistently lands at the top of the main panel while preserving intentional scroll inside components during normal use.
+- Verification: Added production-contract coverage for the navigation key, main scroll-root wiring, and scroll-anchoring guard.
+
+### Settings panels used decorative nested borders
+
+- Severity: Low
+- Description: The OpenAI key and capture settings screens used redundant section brows plus bordered status, feature, and toggle panels inside cards.
+- Root cause: Settings retained older framed helper-panel styling after the app moved toward quieter muted surfaces for informational content.
+- Recommended improvement: Keep alerts and destructive confirmation states visually distinct, but remove decorative borders from normal setup/status surfaces.
+- Fix applied: Removed the `AI provider` and `Product setup` brows, softened the OpenAI key status panel, unframed saved-key metadata, unframed AI feature tiles, and unframed capture preference rows.
+- Before impact: Settings felt more visually busy than primary workspace pages and made routine setup look heavier than it needed to.
+- After impact: Settings now reads as a calmer utility area with clear actions and less nested-box noise.
+- Verification: Added production-contract coverage rejecting the old bordered settings panels and redundant brows.
+
+### Workspace state guidance was double-framed
+
+- Severity: Low
+- Description: Empty, recovery, and permission workspace states showed a bordered context panel containing three bordered context tiles.
+- Root cause: The workspace state screen retained an older nested-card treatment after the rest of the app moved toward unframed informational surfaces.
+- Recommended improvement: Keep the helpful context labels, but remove decorative nested borders so the primary message and action are easier to scan.
+- Fix applied: Removed the outer bordered context panel, softened the loading skeleton panel, and changed shared context tiles to quiet muted surfaces without decorative borders.
+- Before impact: First-run or recovery screens looked busier than they needed to, especially for an empty workspace where the next action should feel obvious.
+- After impact: Workspace state screens now keep the same guidance with less visual weight and a calmer path to create/import data or recover.
+- Verification: Added production-contract coverage rejecting the old double-framed workspace state classes and requiring the unframed context layout.
+
+### Live coach detail tabs had raw zero states
+
+- Severity: Low
+- Description: The live coach detail tabs could show a raw bordered message for empty intent clusters or parked intents, and the Coach read tab could appear blank when guidance did not include flow or candidate-score details yet.
+- Root cause: The secondary AI detail cards were still using older inline status panels instead of the shared calm empty-state pattern used across primary list and record surfaces.
+- Recommended improvement: Keep the live moment calm and make every detail tab explain what is happening, even when there is no detail to show yet.
+- Fix applied: Replaced raw empty panels with `ListEmptyState` in Gaps, Parked, and Coach read, removed the decorative border from intent-cluster rows, and added a Coach read zero state.
+- Before impact: Sellers could open a detail tab and see an empty or visually heavy panel, which made the live coach feel less deliberate.
+- After impact: The live coach detail tabs now explain the current state with the same icon-led, human empty-state language used elsewhere in the app.
+- Verification: Added production-contract coverage for the three live coach detail zero states and the unframed intent-cluster rows.
+
+### Route navigation needed a post-transition scroll settle
+
+- Severity: Medium
+- Description: Clicking between pages, accounts, opportunities, calls, and other route-style records could still occasionally land below the top of the destination page.
+- Root cause: The shared scroll reset handled the immediate click and early paint passes, but a destination could still finish replacing the page-transition skeleton after those early resets.
+- Recommended improvement: Treat navigation as complete only after the transition window has settled, then reset the main pane and nested scroll containers again.
+- Fix applied: Added post-transition scroll reset passes after the page-load skeleton timing, while keeping the existing immediate, animation-frame, and nested-scroll resets.
+- Before impact: Sellers could feel like the app opened the next account or opportunity at a random lower position.
+- After impact: Route-style navigation has a final settle pass so destination pages land at the top even when content mounts after the transition state.
+- Verification: Added production-contract coverage requiring post-transition scroll reset passes.
+
+### Account page opportunity empty states used raw panel copy
+
+- Severity: Low
+- Description: The account Opportunities tab and Intelligence recommended-focus panel used raw bordered messages for filtered-empty, no-opportunity, and no-focus states.
+- Root cause: The account record view still had older inline empty copy while the broader app had moved to icon-led shared empty states and quieter unframed panels.
+- Recommended improvement: Use the same calm empty-state system inside record pages so sellers understand whether a view is filtered, genuinely empty, or waiting for opportunity data.
+- Fix applied: Replaced the account opportunities filtered-empty and no-opportunity messages with `ListEmptyState`, replaced the recommended-focus zero state with `ListEmptyState`, and removed decorative borders from populated recommended-focus rows.
+- Before impact: Account pages could feel less polished than the main Opportunities and Calls pages, especially for early or filtered accounts.
+- After impact: Account-level empty states now explain the situation and next step in the same visual language as the rest of SalesFrame.
+- Verification: Added production-contract coverage for all three account empty states and the unframed recommended-focus rows.
+
+### Dashboard coverage card could render blank with no opportunities
+
+- Severity: Low
+- Description: The Seller dashboard's `Coverage by opportunity` card rendered an empty content area when the selected workspace had accounts but no opportunities.
+- Root cause: The card assumed `coverageOpportunities` would contain at least one item and did not provide a zero state for early-workspace usage.
+- Recommended improvement: Every dashboard section should explain what is missing and the next useful action, especially in first-run or low-data workspaces.
+- Fix applied: Added a shared `ListEmptyState` to the coverage card with a chart icon and guidance to create an opportunity or start a call when there is a deal to qualify.
+- Before impact: A seller could see a titled dashboard card with no content and no clue whether it was loading, broken, or simply empty.
+- After impact: The dashboard now remains informative and calm even before opportunity coverage exists.
+- Verification: Added production-contract coverage requiring the dashboard coverage zero state and preserving the populated coverage bars.
+
+### Dashboard opportunity focus rows were less interactive than other lists
+
+- Severity: Low
+- Description: The Seller dashboard's Opportunity focus table showed opportunity records, but opening an item relied on the small `Open` action instead of the whole row. A filtered-empty state also used a raw table message.
+- Root cause: The dashboard retained an older table interaction pattern while the account, opportunity, and call lists had moved to full-row record navigation with shared empty states.
+- Recommended improvement: Keep dashboard scanning dense, but make opportunity rows behave like the rest of the app: full-row click/tap, keyboard Enter/Space support, isolated action controls, and a calm empty state when filters miss.
+- Fix applied: Made dashboard Opportunity focus rows openable, added keyboard support and propagation guards for the Open action, and replaced the raw filtered-empty table row with `ListEmptyState`.
+- Before impact: Sellers could miss the intended interaction or feel the dashboard was less polished than the workspace lists.
+- After impact: Dashboard opportunity references now behave consistently with the rest of SalesFrame, reducing click-target hunting and keeping filtered-empty recovery calm.
+- Verification: Added production-contract coverage for dashboard row navigation, keyboard handling, action isolation, and the shared filtered-empty state.
+
+### CSV import modal used too many nested boxes
+
+- Severity: Low
+- Description: The CSV import flow still framed upload, validation, issue, and summary status areas with borders inside the modal.
+- Root cause: The importer was built as a dense utility flow before the app-wide calm design language settled on unframed status surfaces and borders only for real tables, inputs, and alerts.
+- Recommended improvement: Keep structure where the user maps or reviews tabular data, but remove decorative borders from explanatory/status surfaces so the modal feels lighter and consistent with the rest of SalesFrame.
+- Fix applied: Removed decorative borders from the upload intro panel, no-issue validation state, row issue previews, and summary tiles. Mapping and review tables remain structured because they are interactive data tools.
+- Before impact: The import modal felt busier and more boxed-in than the app’s current modal language.
+- After impact: CSV import keeps the same workflow but reads calmer, with the user’s attention going to file choice, column mapping, validation, and final import decisions.
+- Verification: Added production-contract coverage to keep upload, validation, issue, and summary surfaces unframed while preserving the existing import flow controls.
+
+### Opportunity and call list rows only opened from small targets
+
+- Severity: Low
+- Description: The global Opportunities and Calls list rows showed full-row data cards, but opening a record depended on the opportunity title or Actions menu instead of the whole row.
+- Root cause: The list layouts had evolved into aligned app rows, but the interaction model still used isolated button targets from the earlier card-style design.
+- Recommended improvement: Treat primary list rows as openable records with clear hover feedback, keyboard Enter/Space support, and isolated Actions menus for secondary commands.
+- Fix applied: Made Opportunities and Calls rows fully openable, added accessible row labels and keyboard support, and stopped the Actions menu from triggering row navigation.
+- Before impact: Sellers had to hunt for the exact clickable text or menu, which made the dense lists feel less polished than the account opportunity table.
+- After impact: The primary list surfaces behave consistently: click/tap the row to open, use Actions for Open/Delete, and navigate by keyboard when needed.
+- Verification: Added production-contract coverage requiring row-level open behavior, keyboard handling, and propagation guards on the Actions menus for both list surfaces.
+
+### Page and record navigation could keep a stale scroll position
+
+- Severity: Medium
+- Description: Clicking into another page, account, opportunity, call, or breadcrumb could sometimes land the seller part-way down the destination view instead of at the top.
+- Root cause: The shared navigation reset ran on view and record changes, but some content appears after the page-transition skeleton resolves and focused navigation controls can also pull the browser back toward the clicked element.
+- Recommended improvement: Treat route-style navigation as a full context change: blur the clicked navigation control, reset the main pane and nested scroll containers immediately, and repeat once after delayed content has mounted.
+- Fix applied: Hardened the shared scroll reset with a later deferred pass, blurred non-form navigation focus before page/item navigation, and reran the reset after page-transition loading clears. Direct Start Call and workspace-switch transitions now use the same behavior.
+- Before impact: The app could feel like it had “remembered” the wrong position, which is disorienting when moving between dense account and opportunity pages.
+- After impact: Record and page navigation now consistently starts from the top of the destination surface while preserving normal in-page form focus behavior.
+- Verification: Extended production-contract coverage for the delayed reset, focus blur, page-transition reset, and direct Start Call/workspace navigation paths.
+
+### Workspace search miss used blunt database copy
+
+- Severity: Low
+- Description: The global workspace search popover showed a plain `No matching accounts, opportunities, calls, or playbooks.` line when a query missed.
+- Root cause: The search popover kept an older raw empty message instead of the newer human empty-state voice used elsewhere in the app.
+- Recommended improvement: Keep search misses compact, but still use the same calm product language: say what happened and give the seller a useful next search.
+- Fix applied: Replaced the raw empty line with a compact icon-led search miss state: `Nothing matches that search` plus guidance to try an account, opportunity, call, or playbook name.
+- Before impact: A missed search felt more like a database lookup than a polished app interaction.
+- After impact: The workspace search miss state is calmer, clearer, and visually consistent with the app’s empty-state language.
+- Verification: Added production-contract coverage requiring the new workspace-search miss copy and rejecting the old raw `No matching...` line.
+
+### Playbooks search empty state used a one-off box
+
+- Severity: Low
+- Description: The Playbooks page showed a raw bordered message when search or filters returned no results, while Opportunities and Calls used the shared calm empty-state component.
+- Root cause: The Playbooks catalogue kept an older inline empty state instead of using the list-empty pattern introduced for other workspace lists.
+- Recommended improvement: Use the same compact empty-state treatment for every primary list so empty and filtered states feel intentionally designed.
+- Fix applied: Replaced the one-off Playbooks empty box with `ListEmptyState`, using the playbook icon, `Nothing matches that view`, and a clear recovery suggestion to broaden the search or reset the use-case filter.
+- Before impact: The Playbooks page could feel visually less finished than the other list pages when a search missed.
+- After impact: Playbooks, Opportunities, and Calls now share the same calm empty-state rhythm.
+- Verification: Added production-contract coverage requiring the shared Playbooks empty state and rejecting the old raw `No playbooks match this search and filter.` copy.
+
+### Playbook guidance exposed provider language
+
+- Severity: Low
+- Description: Playbook reference pages described realtime guidance with phrases such as `OpenAI prioritizes...` and `OpenAI uses...`.
+- Root cause: The static playbook catalogue mixed implementation/provider language into customer-facing methodology copy.
+- Recommended improvement: Keep provider details in Settings, AI configuration, and technical docs. Reference pages should describe what SalesFrame does for the seller.
+- Fix applied: Reworded every playbook `liveGuidance` line to use SalesFrame as the actor while preserving the actual methodology behavior.
+- Before impact: The playbook pages could feel like a technical wrapper rather than a polished product experience.
+- After impact: Playbook reference content now reads as native SalesFrame product language and stays consistent with the homepage/app voice.
+- Verification: Added production-contract coverage requiring SalesFrame-voiced playbook guidance and rejecting `liveGuidance: "OpenAI...` in the reference catalogue.
+
+### Pre-call prep still used static guidance
+
+- Severity: Medium
+- Description: The call prep brief used a shared static checklist and a hard-coded recommended opening instead of the active opportunity's saved context.
+- Root cause: The prep modal predated the AI-first live coach flow, so it kept generic discovery copy after the rest of the call cockpit moved to account, opportunity, playbook, and evidence-aware guidance.
+- Recommended improvement: Keep pre-call prep compact, but make every line either come from seller-entered opportunity fields, methodology coverage, or the saved next-call brief. Do not show static question scripts before the AI readiness step.
+- Fix applied: Replaced the static prep checklist with opportunity-aware prep items for known pain, decision path, next step, and selected playbook evidence debt. The opening section now uses the saved next-call brief opening when one exists, otherwise it explains that SalesFrame will generate the opener from account context, opportunity record, call type, selected playbooks, and previous evidence before recording begins.
+- Before impact: Sellers could see a generic opening question that might not fit the account, opportunity stage, prior calls, or selected playbooks.
+- After impact: The prep brief is calmer, more trustworthy, and no longer competes with the live AI question engine.
+- Verification: Added production-contract coverage rejecting `prepChecklist`, the old hard-coded opening, and requiring opportunity draft plus next-call brief context in the prep dialog.
+
+### Minimum-item controls looked like dead actions
+
+- Severity: Low
+- Description: The methodology playbook selector and custom framework editor used disabled controls to enforce minimum selections or minimum required fields.
+- Root cause: The data rules were correct, but the UI expressed them as inactive controls instead of explaining the rule or removing unavailable actions.
+- Recommended improvement: Keep minimum-item constraints visible in copy, avoid greyed-out controls that look clickable-but-broken, and only show destructive remove actions when they can act.
+- Fix applied: Methodology playbook buttons now behave like accessible pressed toggles with explicit helper text explaining that at least one playbook is required. Custom framework field and criterion remove actions are hidden when only one item remains, with the one-item rule included in the section descriptions.
+- Before impact: Sellers could see a selected playbook or remove action disabled with no clear reason, which made methodology setup feel slightly brittle.
+- After impact: The setup screens explain the constraint directly and avoid presenting inert remove controls.
+- Verification: Added production-contract coverage for the methodology helper text, toggle semantics, and conditional custom framework remove actions.
+
+### List pages showed reset actions before filters were active
+
+- Severity: Low
+- Description: Dashboard focus, Opportunities, Calls, and Playbooks showed a `Reset` action even when the seller had not searched, filtered, or changed sorting.
+- Root cause: The filter bars were laid out with a permanently visible recovery action instead of making the action conditional on changed filter state.
+- Recommended improvement: Keep filter recovery actions contextual. The page should stay quiet until there is something meaningful to clear.
+- Fix applied: Added active-filter checks to the dashboard focus list, global Opportunities list, Calls library, and Playbooks catalogue so `Reset` appears only after search/filter/sort state changes.
+- Before impact: Sellers could click a visible reset control and see nothing happen, adding a small but real sense of dead UI.
+- After impact: List surfaces are calmer by default, and the reset action appears exactly when it can help.
+- Verification: Added production-contract coverage for contextual reset actions across dashboard focus, Opportunities, Calls, and Playbooks.
+
+### Create Account stepper could squeeze on mobile
+
+- Severity: Low
+- Description: The Create Account modal used a four-column stepper at every viewport size, unlike the Start Call modal which already used a two-column mobile layout.
+- Root cause: The account setup stepper was built before the mobile modal pattern was standardized across setup flows.
+- Recommended improvement: Keep multi-step modals mobile-first: two columns for labeled steps on small screens, four columns once there is room, and min-width guards so labels truncate instead of pushing the modal sideways.
+- Fix applied: Updated the Create Account stepper to `grid-cols-2 sm:grid-cols-4` with `min-w-0` guards and tightened step-item padding on mobile. Added the same overflow guard to the workspace setup progress strip.
+- Before impact: On narrow screens, four labeled step items could feel cramped and risk the same modal-edge pressure previously seen in the Start Call flow.
+- After impact: Create Account now follows the same calm mobile pattern as Start Call, with larger tap-friendly modal controls and stable step labels.
+- Verification: Added production-contract coverage for the mobile-safe Create Account stepper and the overflow-safe workspace setup progress strip.
+
+### Opportunity record card repeated breadcrumb context
+
+- Severity: Low
+- Description: The opportunity record card showed the account name as a small description above `Opportunity record`, even though the breadcrumb already shows the account and opportunity path.
+- Root cause: The record card retained an older contextual brow pattern after the broader page-heading cleanup removed redundant brows elsewhere.
+- Recommended improvement: Let breadcrumbs carry navigation context and let record cards lead with the actual task title.
+- Fix applied: Removed the redundant account-name description from the opportunity record card and added production-contract coverage to keep the record card title-first.
+- Before impact: The record tab had one extra line of repeated context, making the dense opportunity form feel busier than it needed to.
+- After impact: The opportunity record starts directly with the editable record title, while account context remains visible in the breadcrumb and linked account record panel.
+- Verification: Added contract coverage rejecting the account-name card description and guarding record field tiles against duplicated value rendering.
+
+### Command bar showed a disabled Start call fallback
+
+- Severity: Low
+- Description: The active-call command bar could render a disabled red `Start call` control when no valid start-call action was available.
+- Root cause: The command bar used a disabled destructive button as a fallback instead of simply omitting the unavailable action.
+- Recommended improvement: Do not show controls that cannot do anything. In the live-call area, every visible control should either act immediately or clearly report status.
+- Fix applied: Removed the disabled fallback and rendered nothing unless a real start-call action exists; added production-contract coverage rejecting the dead-action pattern.
+- Before impact: Sellers could see a prominent red button that looked important but was intentionally inert, which undermines confidence in the cockpit.
+- After impact: The command bar only shows `Stop call` while recording or a real `Start call` action when one is available.
+- Verification: Added a contract assertion requiring the null branch and rejecting disabled destructive `Start call` fallbacks.
+
+### Post-call brief action looked clickable before a brief existed
+
+- Severity: Low
+- Description: The post-call panel always rendered `View next-call brief` as a disabled button when the opportunity did not yet have a next-call brief.
+- Root cause: The panel treated a missing brief as a disabled action instead of a simple absence of the action.
+- Recommended improvement: Only show an action when it can do something. Let the existing next-call plan empty text explain what is still being prepared.
+- Fix applied: Rendered the `View next-call brief` action only when `opportunity.nextCallBrief` exists and added a production-contract guard against the disabled dead-action pattern.
+- Before impact: Sellers could see a real-looking button that could not be clicked, adding unnecessary friction in a post-call moment.
+- After impact: The post-call panel stays calmer: it shows the plan state, and only shows the brief action when there is a brief to open.
+- Verification: Added production-contract coverage requiring conditional rendering and rejecting `disabled={!opportunity.nextCallBrief}`.
+
+### Runtime recovery copy still used backend-shaped failure language
+
+- Severity: Low
+- Description: Several visible fallback messages in record mutations, post-call replay, speaker editing, workspace setup, profile settings, OpenAI key settings, import functions, live AI functions, and low-level connection helpers still used `could not` phrasing.
+- Root cause: These handlers and functions lived across different feature areas and were not all covered by the earlier copy passes.
+- Recommended improvement: Keep the same recovery semantics, but make every seller-facing fallback state sound like a bounded next attempt instead of a backend failure.
+- Fix applied: Reworded runtime and function fallbacks to `needs another ... attempt/pass/check/refresh` or `needs review` language, removed visible `could not` copy from app UI sources, and updated shared connection/transcription/recording helper messages.
+- Before impact: A routine save, replay, profile, settings, or speaker-label interruption could sound like the app had broken.
+- After impact: These states now tell the seller what needs another attempt while preserving local status surfaces and diagnostic logging.
+- Verification: Expanded production-contract coverage to require the calmer messages and reject `could not` copy in app UI, browser Supabase client, replay URL helper, realtime transcription helper, import functions, and live AI function fallbacks.
+
+### Auth recovery copy sounded like hard failure
+
+- Severity: Low
+- Description: Session restore, sign-in, sign-up, password reset, sign-out, and account creation fallbacks used blunt `could not` language.
+- Root cause: Auth and account-creation handlers had older fallback copy that predated the calmer recovery language used elsewhere in the app.
+- Recommended improvement: Keep validation messages direct, but phrase recoverable service/auth issues as contained retry moments.
+- Fix applied: Reworded fallback messages to `SalesFrame needs a fresh sign-in to continue.`, `Sign-in needs another try.`, `Account setup needs another try.`, `Password reset needs another try.`, and `Sign-out needs another try.`.
+- Before impact: Routine auth or setup interruptions could feel like hard product failures.
+- After impact: The same states now keep the seller oriented and confident that the next action is simply to try again or refresh their sign-in.
+- Verification: Expanded the auth production contract to require the calmer recovery copy and reject the old `could not` messages.
+
+### Record navigation could preserve the previous scroll depth
+
+- Severity: Medium
+- Description: Moving between pages, accounts, opportunities, calls, nested record tabs, or scrollable page panels could occasionally leave the seller near the previous page's lower scroll position instead of starting at the top of the new view.
+- Root cause: The reset targeted the main app scroll container and browser viewport, but nested scrollable regions such as transcript, import, review, and table panels could preserve their own stale scroll positions.
+- Recommended improvement: Treat every page, record, workspace, call, and tab change as a fresh reading position and reset both the app pane and any nested page scroll containers before and after the new content mounts.
+- Fix applied: Hardened the shared scroll reset to clear the main pane, nested scrollable descendants, window, document, and body scroll positions immediately, on the next animation frames, and after content settles; also called the reset on direct Start Call and workspace-change route changes.
+- Before impact: Sellers could click into a new account or opportunity and feel like the page opened in the wrong place.
+- After impact: Navigation starts at the top consistently without changing the calm layout or adding motion.
+- Verification: Expanded the production contract to require viewport, pane, and nested scroll resets, layout-effect navigation handling, direct Start Call/workspace reset calls, and tab-level reset wiring.
+
+### Hidden question queue route survived the calm cockpit model
+
+- Severity: Medium
+- Description: The app still carried a hidden `questions` route and standalone question queue page even though the current live-calling model is one calm recommendation card with inline feedback controls.
+- Root cause: The question queue predated the current cockpit flow and was left behind in breadcrumb, call-surface, and manual-coach code after the product direction changed.
+- Recommended improvement: Keep live question control in the cockpit, and use parked/recovery intent state behind detail tabs instead of exposing a separate queue page.
+- Fix applied: Removed the `questions` route label, breadcrumb surface, `QuestionQueuePage`, stale `Move later` handler, obsolete `move_later` AI feedback action, and unused alternative-question helper, then updated the product spec and production contracts.
+- Follow-up fix: Removed stale product-spec references to `Alternatives`, `Queue`, `Use This Next`, and `Move Later` as visible cockpit controls so the documented control model matches the compact live UI.
+- Before impact: A stale active view or future route hook could expose an out-of-flow question queue and dilute the one-question live coaching experience.
+- After impact: The cockpit remains the single live question control surface; feedback actions now park, skip, soften, or mark the current recommendation without leaving the page.
+- Verification: Added production-contract assertions that reject the hidden queue route, page component, route label, `Move later` handler, obsolete `move_later` feedback action, and unused alternative-question helper.
+
+### Record-save documentation implied autosave
+
+- Severity: Low
+- Description: The product build spec said inline account and opportunity fields save with a short debounce, but the actual UI uses explicit Save changes actions so sellers can review edits before committing.
+- Root cause: The spec retained an older autosave direction after the account and opportunity pages moved to deliberate save controls.
+- Recommended improvement: Keep record-editing expectations explicit: fields can be edited freely, then committed with Save changes.
+- Fix applied: Updated the build spec to describe explicit Save changes actions and added production-contract coverage rejecting the old debounce wording.
+- Before impact: Future implementation could reintroduce autosave and surprise sellers who expect a deliberate commit step.
+- After impact: Documentation, UI, and tests now agree on explicit record saves.
+- Verification: Added a production-contract assertion for the explicit Save changes spec language.
+
+### Shared data hook used hard load-failure copy
+
+- Severity: Low
+- Description: The shared Supabase query hook still fell back to `SalesFrame could not load this data`, which was harsher than the newer workspace recovery language.
+- Root cause: The generic hook copy was separate from the workspace recovery copy pass, so it kept the older failure framing.
+- Recommended improvement: Shared fallback copy should use the same calm recovery language as the primary workspace screens.
+- Fix applied: Reworded the hook fallback to `SalesFrame needs another moment with this data. Try again in a moment.` and added production-contract coverage.
+- Before impact: Any lower-level data surface using the hook could feel like a hard error instead of a recoverable loading issue.
+- After impact: Shared data recovery copy now matches the product’s calmer state language.
+- Verification: Added a production-contract assertion for the new shared hook message and a guard rejecting the old copy.
+
+### Workspace menu actions used hard failure copy
+
+- Severity: Low
+- Description: Workspace edit, duplicate, and delete fallbacks still said the workspace `could not` be saved, duplicated, or deleted.
+- Root cause: The workspace menu predated the newer recovery language pass and kept action-specific hard-failure fallbacks.
+- Recommended improvement: Keep the action and recovery path clear, but phrase these as contained retry moments.
+- Fix applied: Reworded workspace save, duplicate, and delete fallbacks to `Workspace needs another ... attempt.` and added production-contract guards rejecting the old copy.
+- Before impact: Routine workspace-management errors could feel more severe than they were, especially inside a compact menu/dialog.
+- After impact: The workspace switcher now uses the same calm retry language as the rest of the app.
+- Verification: Added production-contract assertions for the new workspace-switcher messages.
+
 ## 2026-07-03
 
 ### AI readiness errors lacked traceable diagnostics
@@ -519,6 +940,41 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 - After impact: SalesFrame now asks OpenAI to reassess the visible question after every meaningful final turn, while the existing stability/lifecycle rules prevent unnecessary churn.
 - Verification: Reran TypeScript and the live guidance/eval production contracts after the change.
 
+## 2026-07-05
+
+### Live cockpit timer routed to a hidden recordings view
+
+- Severity: Low
+- Description: The opportunity command bar showed the elapsed call timer as an outline button that navigated to the workspace `recordings` library view.
+- Root cause: The timer reused an earlier action-button pattern from before the Calls library was simplified, so a status readout still behaved like page navigation.
+- Recommended improvement: Keep the live command bar focused on live-call actions. Elapsed time should be visible as status, not as a route into a secondary library page.
+- Fix applied: Replaced the timer button with a non-interactive status element carrying an accessible elapsed-time label, and added contract coverage rejecting the old `onViewChange("recordings")` path.
+- Before impact: A seller could click the timer during a call and unexpectedly leave the cockpit context for a hidden recordings view.
+- After impact: The timer now quietly reports elapsed time while Start/Stop, Prep brief, and call type remain the only interactive controls in that row.
+- Verification: Added production-contract coverage for the non-interactive elapsed-time status and removed recordings navigation from the command bar.
+
+### Calls library still carried hidden Recordings and Transcripts pages
+
+- Severity: Medium
+- Description: The simplified Calls section still had route, breadcrumb, mobile-action, label, and component branches for global `Recordings` and `Transcripts` views.
+- Root cause: Earlier call-library subpages remained in routing/data code after the product direction moved replay and transcript review into selected call, post-call, and opportunity-history surfaces.
+- Recommended improvement: Keep the global Calls page as the single library entry point. Let users open a call to review its recording, transcript, notes, and post-call outputs.
+- Fix applied: Removed the hidden `recordings` and `transcripts` library branches from breadcrumbs, mobile Start Call surfaces, call view routing, navigation labels, section card content, and CallsView rendering.
+- Before impact: A stale active view or future UI hook could surface alternate Calls pages with subtly different layout and filtering, making navigation feel less intentional.
+- After impact: Calls now has one consistent workspace-level page, while recordings and transcripts remain available in the relevant selected-call context.
+- Verification: Added production-contract coverage requiring `callViews` and `breadcrumbLibraryViews` to contain only `calls`, rejecting hidden Recordings/Transcripts labels and CallsView active-view branching.
+
+### Opportunities still carried hidden Stakeholders and Risks pages
+
+- Severity: Medium
+- Description: The global Opportunities section still had hidden `Stakeholders` and `Risks` route branches, labels, and secondary panels even though the sidebar and product flow now treat those as opportunity-level context.
+- Root cause: Earlier opportunity subpages remained in the route arrays and list component after stakeholder/risk information moved into opportunity record, methodology, intelligence, and live/post-call surfaces.
+- Recommended improvement: Keep the global Opportunities page as one list for finding and opening deals. Show risk and stakeholder evidence inside the selected opportunity where the seller has account and deal context.
+- Fix applied: Removed hidden `stakeholders` and `risks` opportunity routes, navigation labels, global risk signal data, and OpportunitiesView active-view branching. Updated the product spec to describe Opportunity History as previous call recordings.
+- Before impact: A stale active view or future sidebar hook could expose duplicate opportunity pages with weaker context and a busier mental model.
+- After impact: Opportunities now has one consistent global page, while stakeholder and risk context stays attached to the opportunity where it belongs.
+- Verification: Added production-contract coverage requiring `opportunityViews` to contain only `opportunities`, rejecting hidden stakeholder/risk route labels and OpportunitiesView active-view branches.
+
 ### Live coach refresh errors sounded like AI failure
 
 - Severity: Medium
@@ -694,3 +1150,433 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 - Before impact: Future build work could follow stale docs and accidentally reintroduce `Customer Research` into the Start Call modal.
 - After impact: Documentation and UI now agree: Start Call uses Seller Research, while Customer Research belongs to account enrichment.
 - Verification: Added production-contract checks for the spec and smoke checklist wording.
+
+### Page title brows added redundant context
+
+- Severity: Low
+- Description: Several primary page headers used small brow labels above the real title, such as `Methodologies` above Playbooks, `Playbook` above individual playbook names, and `Account workspace` above an account name.
+- Root cause: Earlier page headers copied an editorial eyebrow pattern even though SalesFrame already has breadcrumbs, sidebar navigation, and clear page titles.
+- Recommended improvement: Lead with the useful title and reserve small labels for true form grouping or diagnostic detail, not decorative context above main page headings.
+- Fix applied: Removed redundant brows from Account, personal Account, Playbooks, individual playbook, custom framework, and workspace state headers. Updated the design-language guide to make title-first empty/page states the default.
+- Before impact: Sellers had to scan extra text that repeated what they already knew from navigation or the page title.
+- After impact: These surfaces now read calmer and more direct, with the account/playbook name as the first visual signal.
+- Verification: Added production-contract coverage rejecting the removed brow labels.
+
+### Motion lacked one calm product standard
+
+- Severity: Low
+- Description: SalesFrame had good individual motion pieces, but timing and animation intent were spread across local classes such as generic `duration-100`, `duration-200`, broad `transition-all`, and permanent shimmer-style motion.
+- Root cause: Motion was added organically while building workflows, rather than through a shared enterprise SaaS motion language.
+- Recommended improvement: Centralize motion tokens and apply them to shared primitives first. Keep frequent interactions under 150ms, dialogs under 300ms, and reserve expressive motion for rare moments.
+- Fix applied: Added SalesFrame motion tokens/utilities, tightened buttons, fields, menus, dialogs, sheets, tabs, progress, badges, sidebar reveal, logo loading, transcript messages, workspace loading, and live question refresh.
+- Before impact: Interactions worked, but the product could feel slightly uneven when moving between modals, menus, loading states, and the live cockpit.
+- After impact: Motion now feels more like a calm production SaaS system: fast controls, crisp overlays, brief live-state feedback, and no permanent next-question shimmer.
+- Verification: Added production-contract coverage for motion tokens, reduced-motion support, approved primitive timings, and finite live-question animation.
+
+### Seller Research status copy sounded like a provider log
+
+- Severity: Low
+- Description: Seller Research fields in Start Call, Create Account, and Personal Account used status messages such as `Fetching information from OpenAI web research` and `What you sell was updated from OpenAI web research`.
+- Root cause: The messages described the underlying provider workflow rather than the seller outcome.
+- Recommended improvement: Keep OpenAI visible when a key must be configured, but describe everyday research progress in SalesFrame language.
+- Fix applied: Reworded Seller Research progress and success copy to `Looking up...`, `Reading public information...`, and `What you sell is ready...`. Updated loading placeholders and helper text to say what SalesFrame is doing rather than what provider is being used.
+- Before impact: A seller changing their company domain could feel like they were watching an API task instead of a product feature.
+- After impact: Seller Research now feels calmer and more product-native while preserving the same workflow and OpenAI-key guardrails.
+- Verification: Added production-contract checks for the calmer copy and old provider-log phrasing rejection.
+
+### CSV import summary used harsh failure language
+
+- Severity: Low
+- Description: The CSV import summary labeled unsuccessful rows as `Failed`, described them as failed rows, and offered `Download error CSV`.
+- Root cause: The UI copied backend accounting terms directly into the seller-facing summary.
+- Recommended improvement: Keep row-level outcomes honest, but frame recoverable import rows as review work rather than a product failure.
+- Fix applied: Reworded the summary tile to `Needs review`, changed the recovery alert to `Some rows need a quick review`, and renamed the export action to `Download review CSV`.
+- Before impact: A seller could finish a mostly successful import and still see a red failure-oriented summary.
+- After impact: The same outcome now feels recoverable and task-oriented: created, updated, skipped, and needs review.
+- Verification: Updated production-contract checks to require the calmer CSV import recovery language and reject the older failure labels.
+
+### CSV import used a raw spinner during import
+
+- Severity: Low
+- Description: The CSV import review action used a generic spinning loader icon while rows were being imported.
+- Root cause: The import button predated the newer SalesFrame motion standard and still used a one-off loading animation.
+- Recommended improvement: Use the shared gentle activity pulse for in-progress work and let the button label communicate the state.
+- Fix applied: Replaced the spinner icon with the existing upload icon using `sf-state-pulse` while importing. Added a contract guard rejecting `Loader2Icon` and `animate-spin` in the import dialog.
+- Before impact: The import flow had one small loading treatment that felt more like a default web app spinner than SalesFrame's calm product language.
+- After impact: Import progress now feels consistent with the live cockpit, setup steps, and other stateful app controls.
+- Verification: Updated the CSV import production contract and prepared the focused verification run.
+
+### CSV parse warnings sounded like parser errors
+
+- Severity: Low
+- Description: A few CSV import warnings still used cold parsing language such as `could not read`, `could not be parsed`, and close-date parsing verdicts.
+- Root cause: The import flow had been softened at the summary level, but lower-level parser and row-warning strings still surfaced implementation phrasing.
+- Recommended improvement: Describe what SalesFrame needs next and what will happen to the data, rather than naming parser failure.
+- Fix applied: Reworded unreadable CSV and generic CSV parse messages into standard-file guidance. Reworded invalid close-date warnings to say SalesFrame will keep the value as a note and let the seller choose a calendar date after import.
+- Before impact: A seller fixing a CSV could feel like the app had rejected the file with a technical parser failure.
+- After impact: The import flow now gives clear, calm recovery guidance at both file and row level.
+- Verification: Updated e2e and function contract checks to require the calmer CSV parse messages and reject the older parser wording.
+
+### CSV row review still exposed validation language
+
+- Severity: Low
+- Description: The review CSV export still used an `Error` column header, and row-level warnings for stage and currency still sounded like backend validation output.
+- Root cause: The visible import summary had moved to a review-oriented tone, but the exported recovery file and a few per-row messages retained the older validation vocabulary.
+- Recommended improvement: Keep the same calm review language across the modal, row messages, and downloaded review CSV.
+- Fix applied: Renamed the export column to `Review note`, reworded unknown-stage handling to explain SalesFrame will keep the value, and reworded unsupported-currency handling to say which workspace currency will be used.
+- Before impact: Sellers downloading a review CSV could see harsher terminology than the modal itself, making the import feel less polished and less trustworthy.
+- After impact: CSV import now treats imperfect data as a guided review flow rather than a failure flow.
+- Verification: Added e2e and function contract checks for the review CSV header and the calmer row-level warning copy.
+
+### CSV review step still framed rows as errors
+
+- Severity: Low
+- Description: The CSV review tabs, count tiles, issue prefixes, and downloaded filename still used `Errors`, `Warnings`, and `import-errors.csv`.
+- Root cause: The import review step used validation taxonomy directly in the interface even after the summary copy had been made calmer.
+- Recommended improvement: Keep validation semantics in code, but present the workflow as `Fix first`, `Review notes`, and a review CSV so sellers understand the next action without feeling the import failed.
+- Fix applied: Renamed the review tabs and count tiles, changed row issue prefixes to `Fix first` and `Review`, renamed the empty review message, and changed the downloaded filename to `accounts-import-review.csv` or `opportunities-import-review.csv`.
+- Before impact: The review step could feel more severe than necessary, especially for a mostly successful import with a few rows to tidy.
+- After impact: The importer now feels like a calm guided data-review workflow from upload through export.
+- Verification: Added e2e contract checks requiring the new labels, rejecting the old labels, and verifying the review CSV filename.
+
+### Shared AI error copy sounded like provider plumbing
+
+- Severity: Low
+- Description: Global AI error messages still said things like `OpenAI is receiving too many requests at once` and `The selected OpenAI model is not available`.
+- Root cause: The shared browser and Netlify error mappers exposed provider-level language instead of translating failures into calm SalesFrame guidance.
+- Recommended improvement: Keep the message actionable while making the wording feel like product copy, not an infrastructure log.
+- Fix applied: Reworded shared browser and function-layer AI errors to `The AI is busy right now`, `The connected OpenAI key...`, and `SalesFrame's live AI model...`, while keeping the same failure classification and status handling.
+- Before impact: Sellers could see provider-centric copy during the highest-friction moments, especially live-call AI startup or refresh issues.
+- After impact: AI failures now read as composed product guidance while still pointing the seller to Settings or support when that is the correct next step.
+- Verification: Updated e2e and function security contracts to require the calmer shared copy and reject the older provider-log phrases.
+
+### Workspace recovery copy sounded like a hard failure
+
+- Severity: Low
+- Description: Workspace loading fallbacks and the recovery screen used phrases such as `Workspaces could not be loaded`, `Workspace data could not be loaded`, and `We could not load this workspace`.
+- Root cause: The data-loading layer and workspace state screen were written around failure detection rather than the seller's next action.
+- Recommended improvement: Keep retry available, but phrase the state as a temporary recovery moment instead of a broken workspace.
+- Fix applied: Reworded the workspace list and workspace data fallbacks to `SalesFrame needs another moment...`, changed the recovery title to `This workspace needs another moment`, and updated the context tile to `SalesFrame is ready to try again`.
+- Follow-up fix: Updated the design-language guide so its error-state example uses `This workspace needs another moment` instead of reintroducing the older `We could not load this workspace` phrasing.
+- Before impact: A transient workspace fetch issue could sound like a serious data failure.
+- After impact: Workspace recovery now feels calmer and more recoverable while preserving the same retry/settings path.
+- Verification: Added production-contract checks for the new recovery language and rejection of the older failure phrasing.
+
+### Workspace loading still carried hidden recovery actions
+
+- Severity: Low
+- Description: The workspace loading state no longer rendered retry/settings buttons, but its config still defined `Try again` and `Open settings` actions.
+- Root cause: `WorkspaceStateView` used one config shape for loading, empty, error, and permission states even though loading is informational and the others are actionable.
+- Recommended improvement: Model loading as a passive state and reserve action labels/actions for states where the seller can actually do something.
+- Fix applied: Split the workspace state config into base and actionable shapes. Loading now contains only title, body, and icon, while empty/error/permission states keep their explicit actions.
+- Before impact: A future UI edit could accidentally surface retry/settings controls during ordinary loading and make it feel like something was wrong.
+- After impact: The state model now matches the visible calm UX: loading asks the seller to wait, recovery states offer action.
+- Verification: Added production-contract coverage proving the loading config does not contain hidden action labels or handlers.
+
+### Workspace state actions relied on non-null assertions
+
+- Severity: Low
+- Description: After splitting loading from actionable workspace states, the render path still accessed action config through non-null assertions.
+- Root cause: The UI branch was visually correct, but TypeScript was not given a clear enough model of which states have actions.
+- Recommended improvement: Render actionable workspace states through an explicit action-config branch and let loading fall through to the passive status branch.
+- Fix applied: Replaced non-null assertions with an `actionConfig ? ... : ...` render path and removed the unused loading flag.
+- Before impact: The component was correct today, but future edits could weaken the loading/action separation without TypeScript helping enough.
+- After impact: The workspace state renderer is now easier to reason about and harder to misuse during future UI changes.
+- Verification: Added production-contract coverage rejecting `actionConfig!` in the workspace state view.
+
+### Workspace permission errors could be misclassified
+
+- Severity: Medium
+- Description: Workspace refresh decided whether to show `permission-denied` by checking the user-facing error message after technical details had already been sanitized.
+- Root cause: The app correctly removed RLS/permission implementation details from customer copy, but then reused that sanitized copy for state classification.
+- Recommended improvement: Classify permission errors from the raw error first, then translate the message for the seller.
+- Fix applied: Added `isPermissionDeniedError` to the shared error helper and used it before calling `getUserFacingErrorMessage` in workspace refresh.
+- Before impact: A true workspace permission/RLS issue could appear as a generic workspace load recovery state, reducing clarity and making access issues harder to understand.
+- After impact: Permission issues now route to the dedicated workspace access state while still keeping backend details out of visible copy.
+- Verification: Added production-contract coverage for raw permission classification and rejected the old sanitized-message state check.
+
+### Custom controls had uneven motion feedback
+
+- Severity: Low
+- Description: Visual browser QA showed the shared shadcn controls had the right fast 100ms interaction feedback, but smaller custom controls such as sidebar expand/create buttons, account action buttons, global search rows, playbook selector rows, auth text links, breadcrumbs, table rows, date clear buttons, and replay marker buttons either snapped instantly or only transitioned transform/dimensions.
+- Root cause: Motion had been standardized in shared primitives first, while a handful of bespoke controls still used local hover classes from earlier UI passes.
+- Recommended improvement: Keep enterprise motion restrained, but make hover/focus feedback consistent across custom controls using the same fast token and standard easing.
+- Fix applied: Added explicit `background-color`, `color`, `box-shadow`, `opacity`, and where needed `transform` transitions with `--sf-motion-fast` and `--sf-ease-standard` to the custom controls. Also aligned auth links, breadcrumb links, nested message actions, and compact chevrons. Added production-contract coverage so these controls stay aligned with the shared motion language.
+- Before impact: The app was calm overall, but some dense controls felt slightly less premium because hover feedback jumped while adjacent controls eased.
+- After impact: Buttons, sidebar rows, search results, playbook options, and compact utility controls now feel like one design system.
+- Verification: Re-tested desktop and mobile in the in-app browser, including Start Call modal steps, playbook dropdown, opportunity tabs, and call cockpit. Added contract checks for custom-control motion consistency.
+
+### Navigation could inherit the previous page scroll
+
+- Severity: Medium
+- Description: Clicking between pages, accounts, opportunities, calls, or tabs could sometimes land the seller partway down the next screen instead of at the top.
+- Root cause: The app already reset scroll from the derived navigation key, but some same-view clicks, tab switches, and modal-driven transitions could happen before the next page finished mounting.
+- Recommended improvement: Treat navigation reset as an explicit app-shell signal as well as a derived route/record effect, then run the reset after render and after loading skeletons settle.
+- Fix applied: Added a navigation scroll reset nonce, routed `handleNavigate`, start-call transitions, workspace switching, and record tab switches through a shared reset request, and exposed the nonce on the main scroll root for regression coverage.
+- Before impact: The seller could click into a different record and feel disoriented because the page opened near the bottom or a nested scroll area kept its old position.
+- After impact: Page, record, call, workspace, and tab navigation now consistently returns the main content pane and nested scroll areas to the top.
+- Verification: Added production-contract coverage for the explicit reset signal, reset nonce, post-render layout effect, and the key navigation paths that previously bypassed the central reset.
+
+### Delete dialogs did not close themselves after success
+
+- Severity: Medium
+- Description: Successful record and workspace deletes could leave the destructive confirmation dialog responsible for staying mounted until parent state caught up.
+- Root cause: The dialogs handled failed deletes inline, but after a successful delete they only stopped the submitting state and relied on parent navigation or record refresh to remove the dialog.
+- Recommended improvement: Keep destructive dialogs deliberate, but close them immediately after confirmed success while preserving inline errors when the delete fails.
+- Fix applied: Updated record and workspace delete dialogs to call their cancel/close path after successful confirmation, while error paths still keep the dialog open with the message visible.
+- Before impact: A seller could complete a delete and still momentarily see the confirmation surface, which makes the action feel uncertain or sticky.
+- After impact: Successful destructive actions now resolve cleanly and return the seller to the appropriate list or workspace state.
+- Verification: Added production-contract coverage proving successful delete flows close the dialog and failed flows return before closing.
+
+### Opportunity and call lists repeated row labels on desktop
+
+- Severity: Low
+- Description: The Opportunities and Calls pages showed account names in row content, but desktop layouts repeated small labels like `Account`, `Coverage`, `Status`, and `Date` inside every row instead of presenting a calm column header.
+- Root cause: The list rows used a responsive card pattern for both mobile and desktop, so the account value was present but did not read like a true table column in larger workspaces.
+- Recommended improvement: Keep mobile rows self-labelled, but use a single desktop header row so account name is a real scanable column and dense lists carry less repeated text.
+- Fix applied: Added desktop-only column headers to Opportunities and Calls, including `Account`, and changed repeated row labels to mobile-only helpers.
+- Before impact: Heavy workspaces could feel more verbose and less table-like, making it harder to scan account/opportunity relationships quickly.
+- After impact: Desktop Opportunities and Calls now read like calm SaaS tables, while mobile still keeps each row understandable without relying on hidden headers.
+- Verification: Added production-contract coverage for the desktop column headers and mobile-only row labels on both list pages.
+
+### Page-transition skeletons used heavier framed panels
+
+- Severity: Low
+- Description: The route-loading skeleton still used bordered card-like placeholder panels even after the destination pages had been softened.
+- Root cause: The skeleton component kept an older placeholder layout that did not inherit the app's newer calm, unframed surface treatment.
+- Recommended improvement: Loading states should visually match the surfaces they are preparing, using quiet muted blocks rather than extra borders.
+- Fix applied: Replaced the bordered placeholder panels in the page-transition skeleton with muted unframed panels.
+- Before impact: Page navigation could briefly look more boxed and visually busy than the page that followed.
+- After impact: Loading transitions now feel more continuous with the calmer destination pages.
+- Verification: Added production-contract coverage requiring unframed muted skeleton panels and rejecting the old bordered placeholder classes.
+
+### Create Account modal used card-like step wrappers
+
+- Severity: Low
+- Description: The Create Account wizard wrapped each step in a bordered panel inside the dialog, while the Start Call wizard had already moved to a lighter modal surface.
+- Root cause: The account-creation flow retained an older card-inside-modal pattern after the shared modal system was made calmer.
+- Recommended improvement: Use the dialog itself as the surface for multi-step content, and reserve bordered treatment for true warnings or destructive/errors.
+- Fix applied: Removed decorative bordered wrappers from the Create Account Basics, Context, Research, and Opportunity steps while preserving the duplicate-account warning and blocking OpenAI-key alert styling.
+- Before impact: Creating an account felt more cramped and visually heavier than similar setup flows.
+- After impact: The Create Account wizard now matches the calmer modal design language and gives fields more breathing room.
+- Verification: Added production-contract coverage requiring unframed Create Account step containers and rejecting the old bordered wrappers.
+
+### Record edit modals still used nested bordered sections
+
+- Severity: Low
+- Description: Edit Account, Add Opportunity, and Edit Opportunity still wrapped their main field groups in bordered panels inside the dialog, while newer setup flows were already using the dialog surface directly.
+- Root cause: Earlier modal cleanup focused on multi-step creation flows, leaving the single-record mutation dialogs on the older card-inside-modal pattern.
+- Recommended improvement: Keep modal content unframed by default, and reserve borders for warnings, destructive confirmation, or inline error states.
+- Fix applied: Removed decorative `rounded-lg border p-4` wrappers from account and opportunity edit/create sections while keeping error alert borders intact.
+- Before impact: The most common record-edit flows felt slightly heavier and less consistent than the rest of the app.
+- After impact: Record mutation modals now share the same calm visual rhythm as Start Call and Create Account.
+- Verification: Added production-contract coverage rejecting the old nested bordered section class in record mutation dialogs and requiring unframed account/opportunity sections.
+
+### Playbooks landing cards felt heavier than the rest of the app
+
+- Severity: Low
+- Description: The Playbooks landing page still rendered each playbook as a bordered card with an internal divider, even though the rest of the primary list surfaces had moved to softer unframed rows.
+- Root cause: Playbook cards kept an older repeated-card style after account, opportunity, loading, and modal surfaces were calmed down.
+- Recommended improvement: Keep repeated playbook items scannable, but use a muted unframed surface and remove internal decorative dividers.
+- Fix applied: Changed playbook list items to quiet `bg-muted/30` surfaces, softened the icon well, and removed the footer divider while keeping the explicit Open action.
+- Before impact: The page was functional, but the extra outlines made the Playbooks section feel more boxed-in than comparable SaaS list pages.
+- After impact: Playbooks now sit visually closer to the calmer account and opportunity list language without losing discoverability.
+- Verification: Added production-contract coverage requiring the unframed playbook item treatment and rejecting the old bordered card and divider classes.
+
+### Personal account action rows wrapped unevenly on mobile
+
+- Severity: Low
+- Description: The personal Account page used `flex-wrap` for profile photo, profile save, data import, account deletion, and selling-context actions. On narrow screens this could produce uneven half-width rows instead of clear touch targets.
+- Root cause: Desktop-friendly inline action rows were reused on mobile without switching to a stacked action layout.
+- Recommended improvement: Stack action buttons full-width on mobile, then return to compact inline buttons from the small breakpoint upward.
+- Fix applied: Updated personal Account action groups and Seller Research action buttons to use full-width stacked mobile actions with inline desktop layout.
+- Before impact: Mobile users could see actions wrap unpredictably, making the page feel less deliberate and slightly harder to tap.
+- After impact: Personal Account actions now read as clean mobile rows while preserving the efficient desktop layout.
+- Verification: Added production-contract coverage for mobile-stacked import, deletion, profile photo, profile save, and selling-context actions.
+
+### Post-call replay timeline used a heavier bordered panel
+
+- Severity: Low
+- Description: The post-call recording replay timeline still used a bordered muted panel and bordered event chips, while adjacent replay status and empty-note states had already moved to quieter unframed surfaces.
+- Root cause: Replay UI cleanup previously focused on preventing false playback errors and simplifying notes, leaving the timeline visual treatment on the older framed style.
+- Recommended improvement: Keep the timeline scrubber and event markers obvious, but remove decorative borders so the replay area reads as one calm post-call tool.
+- Fix applied: Changed the replay timeline wrapper to an unframed muted surface and softened timeline event and empty-state chips to background-tinted controls without borders.
+- Before impact: The post-call replay panel looked slightly busier than the surrounding post-call content.
+- After impact: The recording timeline now feels visually consistent with the rest of the replay and post-call surfaces.
+- Verification: Added production-contract coverage requiring the unframed replay timeline and rejecting the old bordered timeline/event styles.
+
+### Record navigation could preserve an old scroll position
+
+- Severity: Medium
+- Description: Clicking into accounts, opportunities, or calls could sometimes land part-way down the destination page instead of at the top.
+- Root cause: Page-level navigation already reset the main scroll container, but record selection changed active account/opportunity/call state before the route fully settled, and browser scroll restoration could still preserve the previous viewport position.
+- Recommended improvement: Treat every record selection as a top-of-page navigation event, and disable browser-assisted scroll restoration for the single-page app shell.
+- Fix applied: Added an immediate scroll reset to account, opportunity, and call selection handlers, kept the existing post-mount reset, and set `history.scrollRestoration` to `manual` while the app is mounted.
+- Before impact: Sellers moving from long lists or lower-page sections could arrive at the bottom or middle of a new record and lose orientation.
+- After impact: Opening any account, opportunity, call, breadcrumb destination, or same-page route intentionally returns the main workspace pane to the top.
+- Verification: Added production-contract coverage for manual scroll restoration and explicit record-selection scroll resets.
+
+### Post-call replay controls wrapped awkwardly on mobile
+
+- Severity: Low
+- Description: The recording replay controls used one wrapping horizontal row for Play, Open recording, volume, and retention copy.
+- Root cause: A desktop-friendly `flex-wrap` layout was reused on narrow screens, so controls could land in uneven partial rows and the volume slider could feel squeezed.
+- Recommended improvement: Use full-width stacked action targets on mobile, then switch back to compact inline controls on larger screens.
+- Fix applied: Changed the replay control row to a mobile-first grid, made Play and Open recording full-width touch targets on mobile, and gave the volume slider a calm full-width mobile row.
+- Before impact: Post-call replay on mobile could feel visually clumsy immediately after a seller ended a call.
+- After impact: Replay controls now read as deliberate touch-friendly rows on mobile while staying compact on desktop.
+- Verification: Added production-contract coverage for the mobile-stacked replay controls and rejection of the old wrapping control row.
+
+### Record card header actions used small mobile buttons
+
+- Severity: Low
+- Description: Common card-header actions like Save account, New opportunity, Save methodologies, Download transcript, Delete call, and Save custom framework could appear as content-width buttons after wrapping below the title on mobile.
+- Root cause: The shared card header moved action areas below titles on small screens, but several individual action groups kept desktop-style wrapping button classes.
+- Recommended improvement: Make header actions mobile-first with full-width stacked touch targets, then restore compact inline layout at the small breakpoint.
+- Fix applied: Updated high-use account, opportunity, methodology, post-call replay, dashboard, and custom framework header actions to use full-width mobile buttons with compact desktop layout.
+- Before impact: Mobile record pages could feel slightly improvised, with small action buttons floating under full-width headers.
+- After impact: Primary record actions now feel deliberate and easier to tap on mobile without making desktop pages heavier.
+- Verification: Added production-contract coverage requiring mobile-stacked card-header actions across the affected record and replay surfaces.
+
+### Workspace search was unavailable on mobile
+
+- Severity: Medium
+- Description: The global workspace search input was hidden below the large-screen breakpoint, leaving mobile sellers without a direct way to find accounts, opportunities, calls, or playbooks from the header.
+- Root cause: Search was implemented as a desktop header input only, with no compact trigger or mobile search surface.
+- Recommended improvement: Keep the desktop search input, but add a mobile icon trigger that opens the same fuzzy search experience in a touch-friendly dialog.
+- Fix applied: Added a mobile Search workspace button, reused the same search result renderer for desktop and mobile, and added a scrollable mobile search dialog with the shared Cancel action.
+- Before impact: Mobile users had to navigate manually through sidebar/list pages even when they knew the account, opportunity, or call they wanted.
+- After impact: Workspace search is now available from the mobile header while keeping the desktop header unchanged.
+- Verification: Added production-contract coverage for the mobile search trigger, dialog copy, shared result renderer, scrollable results area, and Cancel action.
+
+### Account opportunity rows were table-first on mobile
+
+- Severity: Low
+- Description: The Account page Opportunities tab rendered the same fixed table on mobile and desktop.
+- Root cause: The aligned desktop table was reused below the medium breakpoint, so opportunity names, coverage, and the action menu had to share narrow table columns.
+- Recommended improvement: Use a dedicated mobile card/list pattern for account opportunities, while keeping the aligned table for desktop scanning.
+- Fix applied: Added a mobile-only opportunity list with clear name, stage/value, coverage, guidance preview, and actions menu, then limited the table to medium screens and up.
+- Before impact: Mobile account pages could feel cramped when an account had several opportunities, especially around the action column.
+- After impact: Mobile sellers get easier-to-scan opportunity cards, while desktop sellers retain the clean aligned table.
+- Verification: Added production-contract coverage for the mobile list, mobile coverage bar, desktop-only table, and shared Open/Delete actions.
+
+### Workspace search missed record notes and transcripts
+
+- Severity: Medium
+- Description: The global workspace search could find core opportunity text, but account results and call results did not include the seller's account record fields, profile notes, opportunity draft fields, or saved call transcript lines.
+- Root cause: Opportunity search used the shared rich fuzzy-search helper, while account and call entries still built their search text inline from only lightweight labels.
+- Recommended improvement: Centralise search text generation for accounts, opportunities, and calls, then feed current record drafts and call transcripts into the header search.
+- Fix applied: Added shared account and call search-text helpers, passed account drafts, opportunity drafts, and transcripts into the global search component, and wired account/call results through the richer context.
+- Before impact: A seller could search for information they had entered or captured in a call and get no global result, which made navigation feel incomplete.
+- After impact: Header search now covers account fields, opportunity fields, notes, transcript lines, and call context without adding extra visible UI.
+- Verification: Added production-contract coverage requiring the new search helpers and the header wiring for drafts and transcripts.
+
+### List page search used thinner context than global search
+
+- Severity: Low
+- Description: The Opportunities and Calls list pages had visible Account columns, but their local search paths still used lighter context than the global workspace search.
+- Root cause: The list pages kept inline search builders after richer shared fuzzy-search helpers were added for record and transcript search.
+- Recommended improvement: Use the shared search context consistently so sellers can find records from either the header or the page they are already on.
+- Fix applied: Routed Opportunities page search through the opportunity helper with draft fields, and routed Calls page search through the call helper with related account, opportunity, draft, and transcript context.
+- Before impact: A seller could search a call transcript or edited opportunity field from the header and find it, then fail to find the same item from the Calls or Opportunities page.
+- After impact: Global search, Opportunities search, and Calls search now share the same richer context model while keeping the UI calm.
+- Verification: Added production-contract coverage for local page search using opportunity drafts and call transcripts.
+
+### Dense workspace lists rebuilt lookup context too often
+
+- Severity: Low
+- Description: Global search, the seller dashboard, Opportunities, and Calls rebuilt account/opportunity lookup maps and methodology summaries on every render.
+- Root cause: Lookup maps were created inline in render, and some filtered result calculations depended on those fresh map references.
+- Recommended improvement: Memoize stable lookup maps and expensive display opportunity summaries so dense list interactions stay responsive as a workspace grows.
+- Fix applied: Memoized account and opportunity lookup maps in global search, the dashboard, Opportunities, and Calls; memoized dashboard/opportunity methodology summaries; and memoized Calls filters and visible results.
+- Before impact: Search and filter interactions in a heavily populated workspace could do unnecessary recalculation work even when the underlying accounts, opportunities, or calls had not changed.
+- After impact: Heavy-workspace list pages do less repeated work while preserving the same calm UI and search behaviour.
+- Verification: Added production-contract coverage requiring memoized lookup/result preparation on the affected surfaces.
+
+### Create Account research step carried a long source-list footnote
+
+- Severity: Low
+- Description: The Create Account modal's Research step printed the full trusted public-source list under Seller Research.
+- Root cause: Source transparency copy was added directly to the modal body, even though the surrounding card already explained the research behaviour.
+- Recommended improvement: Keep setup modals compact and action-focused; put detailed source provenance in account intelligence/results, not in the step that is trying to get the seller through setup.
+- Fix applied: Removed the long source-list footnote from the Create Account modal and added a clear `Use customer research` label beside the Customer Research toggle for consistency with Seller Research.
+- Before impact: The research step used extra vertical space and made the modal feel more like documentation than a setup workflow.
+- After impact: The step stays calmer and easier to scan while preserving the same Customer Research and Seller Research controls.
+- Verification: Added production-contract coverage rejecting the source-list footnote and requiring the explicit Customer Research toggle label.
+
+### Opportunity amount modals used separate preview text
+
+- Severity: Low
+- Description: Create Account, Add Opportunity, and Edit Opportunity showed a separate amount preview line underneath the amount input.
+- Root cause: The opportunity record page already formatted the amount field on blur, but modal forms kept an older helper-preview pattern.
+- Recommended improvement: Keep currency formatting inside the input itself so amount entry behaves consistently and avoids extra helper text.
+- Fix applied: Added on-blur currency formatting to create, add, and edit opportunity amount inputs, and removed the preview helper lines.
+- Before impact: Opportunity modals had extra visual noise and did not match the calmer opportunity record amount field behaviour.
+- After impact: Sellers can type shorthand amounts like `250k` and see the formatted currency in the field, with less text competing for attention.
+- Verification: Added production-contract coverage requiring modal amount blur formatting and rejecting the old preview copy.
+
+### Account intelligence save action invited duplicate saves
+
+- Severity: Low
+- Description: The Account Intelligence `Save intelligence` action stayed enabled even when the seller had not changed any AI-enriched sales signal fields.
+- Root cause: The editor tracked the current draft but did not compare it with the saved enrichment profile before rendering the action state.
+- Recommended improvement: Make save actions truthful and stateful: invite a save only when there are unsaved edits, and avoid showing a stale saved message after the seller starts editing again.
+- Fix applied: Added an enrichment-draft equality check, disabled `Save intelligence` until fields change, and hid the previous saved message once the draft diverges from the saved profile.
+- Before impact: Sellers could click a real-looking save action that had nothing new to commit, adding subtle uncertainty about whether anything changed.
+- After impact: Account Intelligence now behaves like a calmer editor: unchanged data is clearly settled, edits enable the save action, and status copy stays truthful.
+- Verification: Added production-contract coverage for draft comparison, dirty-state handling, stale saved-message suppression, and disabled unchanged saves.
+
+### Account and opportunity record saves invited no-op clicks
+
+- Severity: Low
+- Description: Account record, Opportunity record, and Opportunity methodology save buttons stayed enabled whenever required fields existed, even if the seller had not changed anything.
+- Root cause: The record pages used editable draft state but did not keep a saved baseline for the visible record editor, so the UI could not tell unchanged data from unsaved edits.
+- Recommended improvement: Treat each record editor like a settled form: disabled when unchanged, enabled when edited, and avoid stale saved feedback once the seller starts changing fields again.
+- Fix applied: Added saved-baseline comparisons for account drafts, opportunity drafts, and playbook selections; disabled save actions until the visible editor changes; and hid saved status messages after subsequent edits.
+- Before impact: Sellers could click real save buttons that had nothing new to commit, adding subtle uncertainty about whether their record state was current.
+- After impact: Record editors now feel calmer and more truthful: unchanged records sit quietly, edits clearly enable the save action, and save feedback stays aligned with the current draft.
+- Verification: Added production-contract coverage for draft equality helpers, disabled unchanged saves, and stale saved-message suppression across account, opportunity, and methodology editors.
+
+### Edit modals invited unchanged record saves
+
+- Severity: Low
+- Description: Right-click/Edit Account and Edit Opportunity modals opened with a real-looking Save action even when the seller had not changed any field.
+- Root cause: The edit dialogs mirrored field values into local component state but did not keep an opening-state baseline to compare against.
+- Recommended improvement: Match the inline record editors: disabled save until a field changes, including linked-account changes on opportunities.
+- Fix applied: Added saved draft baselines to both edit dialogs, compared current modal state against those baselines, and disabled Save until a meaningful change exists.
+- Before impact: Sellers could open an edit modal, click Save without changing anything, and wait on a backend write that did not improve the record.
+- After impact: Edit modals now feel quieter and more intentional: unchanged records can simply be cancelled, while actual edits clearly enable Save.
+- Verification: Added production-contract coverage requiring saved-baseline state and change detection in both edit dialogs.
+
+### Workspace edit modal invited unchanged saves
+
+- Severity: Low
+- Description: The workspace edit dialog showed `Save workspace` as available as soon as the workspace name was present, even if no workspace fields had changed.
+- Root cause: The dialog only validated the required name field and did not compare the current form state with the workspace values loaded when the modal opened.
+- Recommended improvement: Match record editors by keeping Save disabled until the seller changes the workspace name, description, or default currency.
+- Fix applied: Added a saved workspace draft baseline, normalized the current draft, and disabled Save until the form differs from the baseline.
+- Before impact: Sellers could save an unchanged workspace and wait on a backend action that did not change anything.
+- After impact: Workspace editing is calmer and more truthful: unchanged workspaces can be cancelled, and the save action appears only after a real edit.
+- Verification: Added production-contract coverage for workspace edit dirty-state tracking and disabled unchanged saves.
+
+### Navigation sometimes preserved a deep scroll position
+
+- Severity: Medium
+- Description: Opening a different page, account, opportunity, call, breadcrumb, search result, or tab could feel inconsistent if the main content pane had previously been scrolled deep down the app.
+- Root cause: The app shell needed a single navigation scroll reset that covers both route-like view changes and record/tab switches inside the fixed shadcn-style viewport.
+- Recommended improvement: Treat every page and record selection as a fresh reading context: reset the main scroll container, nested non-preserved scroll containers, and browser scroll position immediately and after page skeleton transitions.
+- Fix applied: Centralised navigation top-reset behaviour around the main app scroll root, wired sidebar/header/search/account/opportunity/call/tab paths through it, disabled browser scroll restoration, and kept saved record baselines at app level so navigation does not make unsaved edits look settled.
+- Before impact: Sellers could click into a new account, opportunity, call, or tab and arrive halfway down the destination, making the app feel jumpy and less calm.
+- After impact: Opening a page or record now returns the seller to the top of that surface while preserving intentional nested scroll areas only when marked.
+- Verification: Added production-contract coverage for page and record navigation scroll resets, direct route-change bypasses, and app-level saved draft baselines.
+
+### Navigation could preserve old scroll after slow page loads
+
+- Severity: Medium
+- Description: Some page, account, opportunity, call, and tab navigation paths could land partway down the next screen when the previous page had been scrolled deeply.
+- Root cause: Scroll reset was requested on click, but long workspace/page transitions could finish after the immediate reset had already run.
+- Recommended improvement: Treat scroll reset as a pending navigation action and consume it only once the target page is no longer loading.
+- Fix applied: Added pending scroll-reset state, kept browser scroll restoration manual, and reset the app scroll root after workspace/page loading completes.
+- Before impact: Sellers could click into a record and feel disoriented because the page opened at the previous scroll depth.
+- After impact: Navigation now consistently lands at the top of the target page while avoiding surprise resets during ordinary data refreshes.
+- Verification: Extended production-contract coverage for pending navigation scroll resets and load-aware scroll consumption.

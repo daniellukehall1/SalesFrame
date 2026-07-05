@@ -4,15 +4,10 @@ export const viewLabels: Record<string, string> = {
   "opportunity-record": "Opportunity",
   "opportunity-intelligence": "Next-call Brief",
   "account-detail": "Account",
-  questions: "Question Queue",
   "post-call": "Post-call Outputs",
   opportunities: "Opportunities",
   methodology: "Methodology Fields",
-  stakeholders: "Stakeholders",
-  risks: "Risks",
   calls: "Calls",
-  recordings: "Recordings",
-  transcripts: "Transcripts",
   playbooks: "Playbooks",
   meddicc: "MEDDICC",
   meddpicc: "MEDDPICC",
@@ -38,18 +33,6 @@ export const viewLabels: Record<string, string> = {
 }
 
 export const sectionCards: Record<string, { kicker: string; title: string; body: string }[]> = {
-  recordings: [
-    {
-      kicker: "Library",
-      title: "Replay stored calls",
-      body: "Review call recordings, jump from AI notes to timestamped transcript moments, and keep recordings for the default 90-day retention window.",
-    },
-    {
-      kicker: "Evidence",
-      title: "Trace every field",
-      body: "Each MEDDICC, MEDDPICC, and BANT field can point back to the call moment that created or updated it.",
-    },
-  ],
   playbooks: [
     {
       kicker: "Methodology",

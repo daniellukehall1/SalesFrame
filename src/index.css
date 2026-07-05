@@ -55,6 +55,14 @@
     --font-body: var(--font-sans);
     --salesframe-landing-font-heading: var(--font-sans);
     --salesframe-landing-font-body: var(--font-body);
+    --sf-motion-fast: 100ms;
+    --sf-motion-menu: 140ms;
+    --sf-motion-base: 180ms;
+    --sf-motion-modal: 240ms;
+    --sf-motion-expressive: 300ms;
+    --sf-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+    --sf-ease-enter: cubic-bezier(0, 0.4, 0, 1);
+    --sf-ease-exit: cubic-bezier(0.6, 0, 0.8, 0.6);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -156,6 +164,99 @@
   display: none;
 }
 
+.sf-navigation-scroll-root {
+  scroll-behavior: auto;
+  overflow-anchor: none;
+}
+
+.sf-navigation-scroll-root > * {
+  overflow-anchor: none;
+}
+
+@layer utilities {
+  .sf-press {
+    transition-duration: var(--sf-motion-fast);
+    transition-timing-function: var(--sf-ease-standard);
+  }
+
+  .sf-press:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: translateY(1px) scale(0.995);
+  }
+
+  .sf-fade-in {
+    animation: salesframe-fade-in var(--sf-motion-base) var(--sf-ease-enter) both;
+  }
+
+  .sf-slide-up {
+    animation: salesframe-slide-up var(--sf-motion-modal) var(--sf-ease-enter) both;
+  }
+
+  .sf-scale-in {
+    animation: salesframe-scale-in var(--sf-motion-modal) var(--sf-ease-enter) both;
+  }
+
+  .sf-soft-highlight {
+    animation: salesframe-soft-highlight 1200ms var(--sf-ease-standard) 1 both;
+  }
+
+  .sf-state-pulse {
+    animation: salesframe-state-pulse 1600ms var(--sf-ease-standard) infinite;
+  }
+}
+
+@keyframes salesframe-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes salesframe-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes salesframe-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes salesframe-soft-highlight {
+  0% {
+    text-shadow: 0 0 0 transparent;
+  }
+  18% {
+    text-shadow: 0 0 18px oklch(0.72 0.12 162 / 0.22);
+  }
+  100% {
+    text-shadow: 0 0 0 transparent;
+  }
+}
+
+@keyframes salesframe-state-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.68;
+  }
+}
+
 .next-question-text {
   color: var(--foreground);
   text-wrap: balance;
@@ -177,7 +278,7 @@
     -webkit-text-fill-color: transparent;
     background-clip: text;
     -webkit-background-clip: text;
-    animation: salesframe-question-shimmer 8s ease-in-out infinite;
+    animation: salesframe-question-shimmer 1400ms var(--sf-ease-standard) 1 both;
   }
 }
 

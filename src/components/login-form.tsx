@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 
 const authTextButtonClass =
-  "inline-flex min-h-10 items-center rounded-md px-1 underline underline-offset-4 outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline sm:min-h-7"
+  "inline-flex min-h-10 items-center rounded-md px-1 underline underline-offset-4 outline-none transition-[color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline sm:min-h-7"
 
 export type LoginFormValues = {
   email: string

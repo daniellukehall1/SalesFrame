@@ -61,7 +61,7 @@ export function AccountLogoAvatar({
     >
       <span
         className={cn(
-          "font-medium tracking-normal transition-opacity",
+          "font-medium tracking-normal transition-opacity duration-[var(--sf-motion-base)] ease-[var(--sf-ease-standard)]",
           shouldShowImage && loadedLogoUrl === resolvedLogoUrl ? "opacity-0" : "opacity-100"
         )}
       >
@@ -71,7 +71,7 @@ export function AccountLogoAvatar({
         <img
           alt=""
           className={cn(
-            "absolute inset-0 size-full rounded-[inherit] bg-background object-contain p-1 transition-opacity",
+            "absolute inset-0 size-full rounded-[inherit] bg-background object-contain p-1 transition-opacity duration-[var(--sf-motion-base)] ease-[var(--sf-ease-standard)]",
             loadedLogoUrl === resolvedLogoUrl ? "opacity-100" : "opacity-0"
           )}
           decoding="async"

@@ -182,7 +182,7 @@ export default async (request: Request, _context: Context) => {
       } catch (error) {
         summary.failed += 1
         summary.failures.push({
-          message: getPublicErrorMessageForError(error, "Row could not be imported."),
+          message: getPublicErrorMessageForError(error, "Row needs review before it can be imported."),
           rowNumber: row.rowNumber,
           values: originalRow,
         })

@@ -32,7 +32,7 @@ SalesFrame has Supabase Auth connected on the frontend. Netlify deployment, Supa
 - Main-panel breadcrumbs
   - Breadcrumbs start at Home, not SalesFrame.
   - Account pages show Home > Account name.
-  - Opportunity pages show Home > Account name > Opportunity name, with the section appended for methodology, stakeholders, risks, and next-call brief views.
+  - Opportunity pages show Home > Account name > Opportunity name, with the section appended for methodology, call cockpit, post-call, and next-call brief views.
   - Call surfaces show Home > Account name > Opportunity name > Call page so the seller can see which account and opportunity the call context belongs to.
 - Workspaces
   - The top sidebar selector is called Workspaces, not Teams.
@@ -53,7 +53,7 @@ SalesFrame has Supabase Auth connected on the frontend. Netlify deployment, Supa
   - Opportunity record fields are editable.
   - Intel tab includes Next-call brief and opportunity intelligence.
   - Methodology tab shows framework completion.
-  - History tab shows stakeholders and related opportunity context.
+  - History tab shows previous call recordings for the opportunity.
 - Calls
   - Calls top-level item opens the call library.
   - No sidebar dropdown for calls; call details live inside active call or library views.
@@ -288,7 +288,7 @@ Core behaviour:
 - Live guidance must return a state model with conversation stage, buyer mood, seller move, active intent, intent status, timing, risk, confidence, and UI mode.
 - Candidate ranking must score methodology value, naturalness, timing fit, buyer mood fit, information gain, risk, and overall score.
 - Candidate ranking must score shared intent clusters first, then let OpenAI choose a single natural question and field-level evidence updates.
-- Seller feedback buttons are AI signals, not decorative UI. Asked, Too soon, Softer, Skip, Use this next, and Move later are stored and passed into future guidance calls.
+- Seller feedback controls are AI signals, not decorative UI. Asked, Too soon, Softer, and Skip are visible controls; Use next is an internal signal when seller-selected or softer wording is promoted into the cockpit. These actions are stored and passed into future guidance calls.
 - Opportunity evidence memory is persistent. Live and post-call AI should update opportunity field evidence by playbook field ID with status, confidence, source call, source transcript segment when available, and concise evidence summary. One answer can update multiple fields; partial answers should mark stricter fields as weak rather than confirmed.
 
 Display:
@@ -297,7 +297,7 @@ Display:
 - Reason the question is recommended.
 - Compact chips for selected call type, primary target, intent cluster, buyer mood, stage, timing, confidence, and covered intent count.
 - A subtle "Also updates" line can show up to three other playbook fields the question may update, plus a compact overflow count.
-- Controls: Asked, Too soon, Softer, Skip, Alternatives, Queue.
+- Controls: Asked, Too soon, Softer, Skip.
 - Supporting cards may show ranked intent clusters and candidate reasoning, but the live moment should remain visually calm.
 - The call cockpit rail should show the active recording status/control first. When capture is active, the recording control is a destructive/red button that stops the recording and finalises the call.
 - Live capture should sit directly underneath the recording status/control.
@@ -309,31 +309,28 @@ Display:
 
 ## Live-Call Manual Controls
 
-The frontend has a local manual coaching interaction model before AI wiring.
+The frontend has a local manual coaching interaction model alongside live AI guidance.
 
 State model:
 
 - One manual question can be selected as the active cockpit question.
 - The active manual question overrides the live-generated next best question until the seller marks it asked or selects another question.
 - Asked question IDs are tracked locally for the active opportunity session.
-- Deferred question IDs are tracked locally so queue items can be moved later.
+- Deferred question IDs are tracked locally so skipped or too-soon recommendations stay out of the live card until the conversation naturally returns to them.
 - Manual state resets when the active opportunity changes.
 
 Controls:
 
 - Mark asked records the currently displayed cockpit question as asked and clears it if it was a manual override.
-- Alternatives opens a compact list of alternate question phrasings based on the current target and methodology gap.
-- Use next from Alternatives promotes that alternative to the cockpit.
-- Queue opens the question queue page.
-- Use this next from the queue promotes a queue item to the cockpit and returns the seller to the cockpit.
-- Move later deprioritizes that queue item without deleting it.
+- Softer requests lower-pressure wording for the same intent and can promote the AI-returned softer wording into the cockpit.
+- Too soon parks the current intent for a better conversational moment.
+- Skip deprioritizes the current recommendation unless the buyer naturally returns to it.
 
 Backend AI wiring should treat these controls as seller feedback signals:
 
 - Mark asked should become evidence that the seller asked or covered the intent.
-- Use this next should bias the active recommendation toward seller-selected intent and phrasing.
-- Move later should lower that question's priority for the current call unless conversation context makes it urgent again.
-- Alternatives should eventually be generated from the live transcript, selected playbooks, call type, and customer research context.
+- Use next is an internal feedback signal when seller-selected or softer wording is promoted into the cockpit.
+- Too soon and Skip should lower that recommendation's priority for the current call unless conversation context makes it urgent again.
 
 ## Supported Playbooks
 
@@ -879,7 +876,7 @@ Database-backed search should preserve the same behaviour while moving larger da
 - Account sidebar hierarchy lives in `src/components/nav-projects.tsx`.
 - Front-end account, opportunity, call, workspace, playbook assignment, customer research, and seller research profile state is loaded from Supabase.
 - Create/edit/delete flows for workspaces, accounts, and opportunities write to Supabase and refresh the active workspace.
-- Inline account and opportunity editable fields save back to Supabase with a short debounce.
+- Inline account and opportunity editable fields save back to Supabase through explicit Save changes actions so sellers can review edits before committing them.
 - Custom framework playbook edits save to the active workspace's Supabase playbook record and field rows, with browser cache used only to preserve in-progress edits.
 - The Start Call flow creates missing account/opportunity rows, attaches selected playbooks, creates an active call row, optionally persists customer research settings, and opens the call cockpit.
 - Workspaces show a first-run setup modal until `workspaces.onboarding_completed_at` is set. The modal is a compact multi-step flow for workspace details, seller company context, and a mandatory OpenAI API key that is scoped to the active workspace, with a direct link to `https://platform.openai.com/api-keys`.
@@ -910,9 +907,9 @@ Database-backed search should preserve the same behaviour while moving larger da
   - Replay and Review select a call and update the call-library detail panel.
   - Call replay markers, skip controls, and play/pause update replay state.
   - Custom framework configuration lets users rename the custom framework, add/remove required fields, add/remove exit criteria, and save the active workspace configuration.
-  - Mark Asked, Alternatives, Use This Next, and Move Later update local manual-coaching state with visible feedback.
+  - Asked, Too soon, Softer, and Skip update local manual-coaching state with visible feedback and pass seller feedback into the next live-guidance request.
   - Save Key stores/removes encrypted OpenAI key material through Netlify Functions; no raw key is persisted in the browser.
-  - Login, signup, forgot password, and logout call Supabase Auth. Legal links update clear status text until legal pages exist.
+  - Login, signup, forgot password, and logout call Supabase Auth. Legal links route to the production Terms and Privacy pages.
   - Sidebar top workspace selector supports Supabase-backed workspace switching, create workspace modal, edit workspace modal, duplicate workspace, and guarded delete workspace.
   - Sidebar footer account menu routes Account to a separate personal profile page for seller identity, workspace access, and guarded account deletion; Settings remains for OpenAI key, capture, retention, and product configuration.
   - Billing, notifications, and upgrade stay hidden until billing and notification systems exist.
@@ -936,7 +933,7 @@ Close or intentionally scope these gaps before broader production rollout:
 
 1. Continue auditing action buttons as new UI is added.
    - Current known dead-looking actions have been converted to front-end behaviour or hidden states.
-2. Continue expanding call library detail views as real call records, recordings, transcript timestamps, and generated outputs become available.
+2. Continue expanding selected-call and post-call detail views as real call records, recordings, transcript timestamps, and generated outputs become available.
 3. Expand frontend states once real endpoint boundaries exist.
    - App-level loading, empty, error, and permission-denied states are implemented for async data boundaries.
    - Data wiring should add narrower inline states for individual async panels such as transcript streaming, customer research, and post-call generation.

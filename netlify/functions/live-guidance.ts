@@ -39,7 +39,7 @@ type LiveUiMode = "ask_now" | "listen" | "acknowledge" | "clarify" | "wrap_up" |
 type LiveRiskLevel = "low" | "medium" | "high"
 type LiveQuestionTiming = "now" | "wait" | "too_early" | "follow_up_only"
 type LiveSellerMove = "ask" | "listen" | "acknowledge" | "clarify" | "soften" | "go_deeper" | "close_next_step"
-type LiveFeedbackAction = "asked" | "too_soon" | "softer" | "skip" | "use_next" | "move_later"
+type LiveFeedbackAction = "asked" | "too_soon" | "softer" | "skip" | "use_next"
 type LiveQuestionLifecycleState = "active" | "asked" | "answered" | "stale" | "parked" | "revisit_before_close" | "dropped"
 type LiveStabilityRecommendation = "hold" | "replace" | "park" | "recover"
 type LiveRevisitMoment = "mid_call" | "before_wrap" | "next_call"
@@ -484,7 +484,7 @@ const liveGuidanceSchema = {
           type: "array",
           minItems: 1,
           maxItems: 4,
-          items: { type: "string", enum: ["asked", "too_soon", "softer", "skip", "use_next", "move_later"] },
+          items: { type: "string", enum: ["asked", "too_soon", "softer", "skip", "use_next"] },
         },
       },
     },
@@ -938,7 +938,7 @@ function requiredSellerMove(value: unknown, message: string, code: string): Live
 }
 
 function requiredFeedbackAction(value: unknown, message: string, code: string): LiveFeedbackAction {
-  if (value === "asked" || value === "too_soon" || value === "softer" || value === "skip" || value === "use_next" || value === "move_later") return value
+  if (value === "asked" || value === "too_soon" || value === "softer" || value === "skip" || value === "use_next") return value
 
   throw upstreamFailure(message, code)
 }
@@ -1466,8 +1466,7 @@ function normalizeSellerFeedback(value: unknown): SellerFeedbackSignal[] {
       action !== "too_soon" &&
       action !== "softer" &&
       action !== "skip" &&
-      action !== "use_next" &&
-      action !== "move_later"
+      action !== "use_next"
     ) {
       return []
     }
@@ -1809,7 +1808,7 @@ export default async (request: Request, context: Context) => {
     })
 
     if (!intentClusters.length) {
-      throw upstreamFailure("Live guidance could not build playbook intent clusters.", "live_guidance_intent_clusters_empty")
+      throw upstreamFailure("Live guidance needs another playbook intent check.", "live_guidance_intent_clusters_empty")
     }
 
     const guidanceStartedAt = Date.now()

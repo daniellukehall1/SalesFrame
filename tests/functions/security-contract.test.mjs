@@ -23,7 +23,9 @@ async function loadSharedHttpModule() {
 
 test("protected OpenAI functions use typed envelopes and authorization helpers", async () => {
   const customerResearch = await read("netlify/functions/customer-research.ts")
+  const sharedOpenAi = await read("netlify/functions/_shared/openai.ts")
   const liveGuidance = await read("netlify/functions/live-guidance.ts")
+  const liveState = await read("netlify/functions/live-state.ts")
   const postCallOutputs = await read("netlify/functions/post-call-outputs.ts")
   const realtimeTranscription = await read("netlify/functions/realtime-transcription.ts")
   const speakerAttribution = await read("netlify/functions/speaker-attribution.ts")
@@ -50,6 +52,12 @@ test("protected OpenAI functions use typed envelopes and authorization helpers",
   assert.match(liveGuidance, /source_turn_ids: transcript\.map/)
   assert.match(liveGuidance, /guidance_latency_ms: guidanceLatencyMs/)
   assert.match(liveGuidance, /dataResponse/)
+  assert.match(liveGuidance, /Live guidance needs another playbook intent check\./)
+  assert.doesNotMatch(liveGuidance, /Live guidance could not build playbook intent clusters/)
+  assert.match(liveState, /Live state needs another context check\./)
+  assert.doesNotMatch(liveState, /Live state context could not be loaded/)
+  assert.match(sharedOpenAi, /Realtime transcription session needs another start attempt\./)
+  assert.doesNotMatch(sharedOpenAi, /Realtime transcription session could not be created/)
 
   assert.match(postCallOutputs, /authorizeCall/)
   assert.match(postCallOutputs, /assertPostCallResult/)
@@ -124,7 +132,7 @@ test("shared HTTP errors use structured codes and expected statuses", async () =
   assert.match(http, /rate_limit_exceeded/)
   assert.match(http, /429/)
   assert.match(http, /server_configuration_missing/)
-  assert.match(http, /SalesFrame could not reach its AI services\. Contact support if this keeps happening\./)
+  assert.match(http, /SalesFrame's AI setup needs attention\. Contact support if this keeps happening\./)
   assert.doesNotMatch(http, /not configured/)
   assert.match(http, /new AppError\("server_error", defaultMessage\)/)
   assert.doesNotMatch(http, /new AppError\("server_error", error instanceof Error \? error\.message/)
@@ -135,13 +143,16 @@ test("shared HTTP errors use structured codes and expected statuses", async () =
   assert.match(http, /parameter is not supported/)
   assert.match(http, /SalesFrame needs another moment to prepare this\. Try again in a moment\./)
   assert.match(http, /getPublicAiProviderMessage/)
-  assert.match(http, /This OpenAI key did not work/)
-  assert.match(http, /workspace key needs billing or quota attention/)
-  assert.match(http, /OpenAI is receiving too many requests at once/)
-  assert.match(http, /The selected OpenAI model is not available/)
-  assert.match(http, /SalesFrame is taking longer than expected/)
+  assert.match(http, /The connected OpenAI key did not work/)
+  assert.match(http, /connected OpenAI key needs billing or quota attention/)
+  assert.match(http, /The AI is busy right now/)
+  assert.match(http, /SalesFrame's live AI model is not available right now/)
+  assert.match(http, /SalesFrame is taking longer than expected\. Give it a moment/)
+  assert.doesNotMatch(http, /OpenAI is receiving too many requests at once/)
+  assert.doesNotMatch(http, /The selected OpenAI model is not available/)
   assert.match(http, /isMissingServerConfiguration/)
-  assert.match(browserSupabaseClient, /SalesFrame could not connect to the workspace service\. Contact support if this keeps happening\./)
+  assert.match(browserSupabaseClient, /SalesFrame needs the workspace service connection before it can continue\. Contact support if this keeps happening\./)
+  assert.doesNotMatch(browserSupabaseClient, /SalesFrame could not connect to the workspace service/)
   assert.doesNotMatch(browserSupabaseClient, /Missing Supabase environment variables/)
   assert.match(functionsClient, /async function readFunctionPayload/)
   assert.match(functionsClient, /await response\.text\(\)/)
@@ -182,7 +193,7 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
   assert.equal(quotaPayload.error.code, "openai_quota_exceeded")
   assert.equal(
     quotaPayload.error.message,
-    "This workspace key needs billing or quota attention. Check the key in Settings, then try again."
+    "The connected OpenAI key needs billing or quota attention. Check it in Settings, then try again."
   )
 
   const rateLimitResponse = errorResponse(
@@ -192,7 +203,7 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
 
   assert.equal(rateLimitResponse.status, 502)
   assert.equal(rateLimitPayload.error.code, "openai_rate_limit")
-  assert.equal(rateLimitPayload.error.message, "OpenAI is receiving too many requests at once. Wait a moment, then try again.")
+  assert.equal(rateLimitPayload.error.message, "The AI is busy right now. Wait a moment, then try again.")
 
   const modelResponse = errorResponse(
     upstreamFailure("The model `gpt-example` does not exist.", "openai_model_error")
@@ -201,7 +212,7 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
 
   assert.equal(modelResponse.status, 502)
   assert.equal(modelPayload.error.code, "openai_model_error")
-  assert.equal(modelPayload.error.message, "The selected OpenAI model is not available. Contact support if this keeps happening.")
+  assert.equal(modelPayload.error.message, "SalesFrame's live AI model is not available right now. Contact support if this keeps happening.")
 
   const htmlPlatformResponse = errorResponse(
     upstreamFailure("<!doctype html><html><body>Bad Gateway</body></html>", "openai_gateway_html")
@@ -230,12 +241,12 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
   assert.equal(
     getPublicErrorMessageForError(
       new Error('duplicate key value violates unique constraint "accounts_workspace_name_key"'),
-      "Row could not be imported."
+      "Row needs review before it can be imported."
     ),
-    "Row could not be imported."
+    "Row needs review before it can be imported."
   )
   assert.equal(
-    getPublicErrorMessageForError(new Error("Choose a duplicate account before updating this row."), "Row could not be imported."),
+    getPublicErrorMessageForError(new Error("Choose a duplicate account before updating this row."), "Row needs review before it can be imported."),
     "Choose a duplicate account before updating this row."
   )
 })
@@ -410,7 +421,8 @@ test("CSV import functions authorize the active workspace and reject cross-works
   assert.match(accountImport, /assertAccountInWorkspace/)
   assert.match(accountImport, /\.eq\("id", row\.matchedAccountId\)[\s\S]*\.eq\("workspace_id", workspaceId\)/)
   assert.match(accountImport, /cross_workspace_account_rejected/)
-  assert.match(accountImport, /getPublicErrorMessageForError\(error, "Row could not be imported\."\)/)
+  assert.match(accountImport, /getPublicErrorMessageForError\(error, "Row needs review before it can be imported\."\)/)
+  assert.doesNotMatch(accountImport, /Row could not be imported/)
   assert.doesNotMatch(accountImport, /getDecryptedOpenAiKey/)
   assert.doesNotMatch(accountImport, /openai/i)
 
@@ -427,7 +439,8 @@ test("CSV import functions authorize the active workspace and reject cross-works
   assert.match(opportunityImport, /replaceOpportunityPlaybooks/)
   assert.match(opportunityImport, /callPlaybookAliases/)
   assert.match(opportunityImport, /canonicalPlaybook/)
-  assert.match(opportunityImport, /getPublicErrorMessageForError\(error, "Row could not be imported\."\)/)
+  assert.match(opportunityImport, /getPublicErrorMessageForError\(error, "Row needs review before it can be imported\."\)/)
+  assert.doesNotMatch(opportunityImport, /Row could not be imported/)
   assert.doesNotMatch(opportunityImport, /getDecryptedOpenAiKey/)
   assert.doesNotMatch(opportunityImport, /openai/i)
 
@@ -439,7 +452,13 @@ test("CSV import functions authorize the active workspace and reject cross-works
   assert.match(csvImport, /Account name is required to import opportunities\./)
   assert.match(csvImport, /account website\/domain/)
   assert.match(csvImport, /const action: CsvImportAction = hasErrors \|\| duplicateKind !== "none" \? "skip" : "create"/)
-  assert.match(csvImport, /Close date could not be parsed; it will be saved as a note\./)
-  assert.match(csvImport, /Currency "\$\{values\.currency\}" is not supported; \$\{defaultCurrency\} will be used\./)
+  assert.match(csvImport, /SalesFrame will keep this close date as a note\. Choose a calendar date after import if needed\./)
+  assert.doesNotMatch(csvImport, /Close date could not be parsed/)
+  assert.match(csvImport, /SalesFrame will keep this stage exactly as written\./)
+  assert.doesNotMatch(csvImport, /Stage is not one of the standard SalesFrame stages/)
+  assert.match(csvImport, /SalesFrame will use \$\{defaultCurrency\} for this row because "\$\{values\.currency\}" is not a supported currency\./)
+  assert.doesNotMatch(csvImport, /Currency "\$\{values\.currency\}" is not supported; \$\{defaultCurrency\} will be used\./)
+  assert.match(csvImport, /const headers = \["Row", "Review note", "Values"\]/)
+  assert.doesNotMatch(csvImport, /const headers = \["Row", "Error", "Values"\]/)
   assert.match(csvImport, /normalizeCsvImportPlaybooks/)
 })

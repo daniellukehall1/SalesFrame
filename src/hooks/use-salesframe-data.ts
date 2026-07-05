@@ -54,7 +54,7 @@ function useSupabaseQuery<T>(
       .catch((caughtError: unknown) => {
         if (cancelled) return
 
-        setError(getUserFacingErrorMessage(caughtError, "SalesFrame could not load this data. Try again in a moment."))
+        setError(getUserFacingErrorMessage(caughtError, "SalesFrame needs another moment with this data. Try again in a moment."))
       })
       .finally(() => {
         if (cancelled) return

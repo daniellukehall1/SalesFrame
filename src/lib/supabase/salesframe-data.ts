@@ -476,7 +476,7 @@ export async function createCallRecordingSignedUrl(storagePath: string, client?:
     .createSignedUrl(storagePath, 60 * 60)
 
   if (response.error || !response.data?.signedUrl) {
-    throw new Error(response.error?.message ?? "Recording link could not be refreshed.")
+    throw new Error(response.error?.message ?? "Recording link needs another refresh.")
   }
 
   return response.data.signedUrl

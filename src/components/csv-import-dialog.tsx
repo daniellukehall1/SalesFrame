@@ -6,7 +6,6 @@ import {
   DownloadIcon,
   FileSpreadsheetIcon,
   ListChecksIcon,
-  Loader2Icon,
   Table2Icon,
   UploadIcon,
   XIcon,
@@ -82,10 +81,10 @@ function getCsvParseErrorMessage(error: { code?: string; message?: string } | un
   }
 
   if (/UndetectableDelimiter/i.test(code) || /delimiter/i.test(message)) {
-    return "SalesFrame could not read the CSV format. Export the file as a standard comma-separated CSV, then upload it again."
+    return "SalesFrame needs a standard comma-separated CSV. Export the file as CSV, then upload it again."
   }
 
-  return "CSV could not be parsed. Check the file format, then upload it again."
+  return "SalesFrame needs a cleaner CSV file. Check the format, then upload it again."
 }
 
 export function CsvImportDialog({
@@ -306,7 +305,7 @@ export function CsvImportDialog({
       setStep("summary")
       onImportComplete()
     } catch (error) {
-      setParseMessage(getUserFacingErrorMessage(error, "CSV import failed."))
+      setParseMessage(getUserFacingErrorMessage(error, "SalesFrame needs another look at this CSV before it can import."))
     } finally {
       setIsImporting(false)
     }
@@ -319,7 +318,7 @@ export function CsvImportDialog({
     const url = URL.createObjectURL(blob)
     const link = document.createElement("a")
     link.href = url
-    link.download = `${mode}-import-errors.csv`
+    link.download = `${mode}-import-review.csv`
     link.style.display = "none"
     document.body.appendChild(link)
 
@@ -400,7 +399,7 @@ export function CsvImportDialog({
 
         <div className="min-h-0 overflow-y-auto pr-1">
           {step === "upload" ? (
-            <div className="grid gap-4 rounded-lg border p-4">
+            <div className="grid gap-4 rounded-lg bg-muted/30 p-4">
               <div className="flex items-start gap-3">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted">
                   <FileSpreadsheetIcon className="size-5 text-muted-foreground" />
@@ -505,8 +504,8 @@ export function CsvImportDialog({
               <Tabs value={filter} onValueChange={(value) => setFilter(value as CsvImportFilter)}>
                 <TabsList>
                   <TabsTrigger value="all">All</TabsTrigger>
-                  <TabsTrigger value="errors">Errors</TabsTrigger>
-                  <TabsTrigger value="warnings">Warnings</TabsTrigger>
+                  <TabsTrigger value="errors">Fix first</TabsTrigger>
+                  <TabsTrigger value="warnings">Review notes</TabsTrigger>
                   <TabsTrigger value="duplicates">Duplicates</TabsTrigger>
                   <TabsTrigger value="ready">Ready</TabsTrigger>
                 </TabsList>
@@ -615,18 +614,18 @@ export function CsvImportDialog({
                 <SummaryTile label="Created" value={summary.created} />
                 <SummaryTile label="Updated" value={summary.updated} />
                 <SummaryTile label="Skipped" value={summary.skipped} />
-                <SummaryTile label="Failed" value={summary.failed} destructive={summary.failed > 0} />
+                <SummaryTile label="Needs review" value={summary.failed} destructive={summary.failed > 0} />
               </div>
               {summary.failures.length ? (
                 <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4" role="alert">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-medium text-destructive">Some rows could not be imported</p>
-                      <p className="text-sm text-muted-foreground">Download the failed rows and correct them before trying again.</p>
+                      <p className="text-sm font-medium text-destructive">Some rows need a quick review</p>
+                      <p className="text-sm text-muted-foreground">Download the review CSV, fix those rows, then import again.</p>
                     </div>
                     <Button variant="outline" size="sm" onClick={downloadFailedRows}>
                       <DownloadIcon />
-                      Download error CSV
+                      Download review CSV
                     </Button>
                   </div>
                 </div>
@@ -658,7 +657,7 @@ export function CsvImportDialog({
               </Button>
             ) : step === "review" ? (
               <Button disabled={isImporting || importableRows.length === 0} onClick={handleImport}>
-                {isImporting ? <Loader2Icon className="animate-spin" /> : <UploadIcon />}
+                <UploadIcon className={isImporting ? "sf-state-pulse" : undefined} />
                 {isImporting ? "Importing..." : `Import ${importableRows.length} rows`}
               </Button>
             ) : (
@@ -707,8 +706,8 @@ function ImportCounts({
       <SummaryTile label="Rows" value={total} />
       <SummaryTile label="Ready" value={counts.ready} />
       <SummaryTile label="Duplicates" value={counts.duplicates} />
-      <SummaryTile label="Warnings" value={counts.warnings} />
-      <SummaryTile label="Errors" value={counts.errors} destructive={counts.errors > 0} />
+      <SummaryTile label="Review notes" value={counts.warnings} />
+      <SummaryTile label="Fix first" value={counts.errors} destructive={counts.errors > 0} />
     </div>
   )
 }
@@ -718,8 +717,8 @@ function IssueList({ rows }: { rows: CsvImportPreviewRow[] }) {
 
   if (issueRows.length === 0) {
     return (
-      <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-        No blocking issues found. Review the rows before importing.
+      <div className="rounded-lg bg-muted/30 p-4 text-sm text-muted-foreground">
+        Everything important looks ready. Review the rows before importing.
       </div>
     )
   }
@@ -727,7 +726,7 @@ function IssueList({ rows }: { rows: CsvImportPreviewRow[] }) {
   return (
     <div className="grid gap-2">
       {issueRows.map((row) => (
-        <div key={row.id} className="rounded-lg border p-3">
+        <div key={row.id} className="rounded-lg bg-muted/30 p-3">
           <div className="mb-2 flex items-center gap-2">
             <AlertTriangleIcon className="size-4 text-amber-600" />
             <p className="text-sm font-medium">Row {row.rowNumber}</p>
@@ -739,7 +738,7 @@ function IssueList({ rows }: { rows: CsvImportPreviewRow[] }) {
                 key={`${row.id}-${index}`}
                 className={cn("text-sm", issue.severity === "error" ? "text-destructive" : "text-muted-foreground")}
               >
-                {issue.severity === "error" ? "Error" : "Warning"}: {issue.message}
+                {issue.severity === "error" ? "Fix first" : "Review"}: {issue.message}
               </p>
             ))}
           </div>
@@ -751,7 +750,7 @@ function IssueList({ rows }: { rows: CsvImportPreviewRow[] }) {
 
 function SummaryTile({ destructive, label, value }: { destructive?: boolean; label: string; value: number }) {
   return (
-    <div className={cn("rounded-lg border p-3", destructive && "border-destructive/30 bg-destructive/5")}>
+    <div className={cn("rounded-lg bg-muted/30 p-3", destructive && "bg-destructive/10")}>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className={cn("mt-1 text-xl font-semibold", destructive && "text-destructive")}>{value}</p>
     </div>

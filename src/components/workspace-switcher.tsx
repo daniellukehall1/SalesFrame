@@ -144,7 +144,7 @@ export function WorkspaceSwitcher({
 
       setEditingWorkspaceId(null)
     } catch (error: unknown) {
-      setStatusMessage(getUserFacingErrorMessage(error, "Workspace could not be saved."))
+      setStatusMessage(getUserFacingErrorMessage(error, "Workspace needs another save attempt."))
     } finally {
       setIsSaving(false)
     }
@@ -157,7 +157,7 @@ export function WorkspaceSwitcher({
       const duplicatedWorkspace = await onDuplicateWorkspace(workspace)
       onWorkspaceChange?.(duplicatedWorkspace)
     } catch (error: unknown) {
-      setStatusMessage(getUserFacingErrorMessage(error, "Workspace could not be duplicated."))
+      setStatusMessage(getUserFacingErrorMessage(error, "Workspace needs another duplicate attempt."))
     }
   }
 
@@ -177,7 +177,7 @@ export function WorkspaceSwitcher({
       }
       setDeletingWorkspaceId(null)
     } catch (error: unknown) {
-      const message = getUserFacingErrorMessage(error, "Workspace could not be deleted.")
+      const message = getUserFacingErrorMessage(error, "Workspace needs another delete attempt.")
       setStatusMessage(message)
       throw new Error(message)
     }
@@ -322,25 +322,39 @@ function WorkspaceFormDialog({
   const [name, setName] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [defaultCurrency, setDefaultCurrency] = React.useState<CurrencyCode>(defaultCurrencyCode)
+  const [savedDraft, setSavedDraft] = React.useState<WorkspaceSavePayload | null>(null)
 
   React.useEffect(() => {
     if (!open) return
 
-    setName(workspace?.name ?? "")
-    setDescription(workspace?.description ?? "Seller workspace")
-    setDefaultCurrency(normalizeCurrencyCode(workspace?.defaultCurrency))
+    const nextDraft = {
+      name: workspace?.name ?? "",
+      description: workspace?.description ?? "Seller workspace",
+      defaultCurrency: normalizeCurrencyCode(workspace?.defaultCurrency),
+    }
+
+    setName(nextDraft.name)
+    setDescription(nextDraft.description)
+    setDefaultCurrency(nextDraft.defaultCurrency)
+    setSavedDraft(nextDraft)
   }, [open, workspace])
 
-  const canSave = name.trim().length > 0
+  const currentDraft = React.useMemo<WorkspaceSavePayload>(() => ({
+    name: name.trim(),
+    description: description.trim() || "Seller workspace",
+    defaultCurrency,
+  }), [defaultCurrency, description, name])
+  const hasChanges = savedDraft
+    ? currentDraft.name !== savedDraft.name.trim() ||
+      currentDraft.description !== (savedDraft.description.trim() || "Seller workspace") ||
+      currentDraft.defaultCurrency !== savedDraft.defaultCurrency
+    : false
+  const canSave = name.trim().length > 0 && hasChanges
 
   const handleSubmit = () => {
     if (!canSave) return
 
-    onSave({
-      name: name.trim(),
-      description: description.trim() || "Seller workspace",
-      defaultCurrency,
-    })
+    onSave(currentDraft)
   }
 
   return (
@@ -441,8 +455,10 @@ function DeleteWorkspaceDialog({
 
     try {
       await onConfirm()
+      setDeleteSubmitting(false)
+      onCancel()
     } catch (error: unknown) {
-      setDeleteError(getUserFacingErrorMessage(error, "Workspace could not be deleted."))
+      setDeleteError(getUserFacingErrorMessage(error, "Workspace needs another delete attempt."))
       setDeleteSubmitting(false)
     }
   }
@@ -464,7 +480,7 @@ function DeleteWorkspaceDialog({
             This removes the workspace from your account, including its accounts, opportunities, calls, and settings.
           </DialogDescription>
         </DialogHeader>
-        <div className="rounded-lg border bg-muted/30 p-3">
+        <div className="rounded-lg bg-muted/30 p-3">
           <p className="text-sm font-medium">{workspace.name}</p>
           <p className="mt-1 text-sm text-muted-foreground">{workspace.description}</p>
         </div>

@@ -132,7 +132,7 @@ export async function connectRealtimeTranscription({
   })
 
   if (!response.ok) {
-    throw new Error("Realtime transcription connection could not be established.")
+    throw new Error("Realtime transcription needs another connection attempt.")
   }
 
   await peerConnection.setRemoteDescription({

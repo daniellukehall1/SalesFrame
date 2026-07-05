@@ -52,6 +52,12 @@ function getRawErrorMessage(error: unknown) {
   return ""
 }
 
+export function isPermissionDeniedError(error: unknown) {
+  const message = getRawErrorMessage(error)
+
+  return /permission denied|row-level security|rls|not authorized|forbidden|violates row-level security policy/i.test(message)
+}
+
 export function getUserFacingErrorMessage(error: unknown, fallback: string) {
   const message = getRawErrorMessage(error)
   if (!message) return fallback
@@ -65,23 +71,23 @@ export function getUserFacingErrorMessage(error: unknown, fallback: string) {
   }
 
   if (/incorrect api key|invalid api key|authentication.*openai/i.test(message)) {
-    return "This OpenAI key did not work. Check the key in Settings, then try again."
+    return "The connected OpenAI key did not work. Check it in Settings, then try again."
   }
 
   if (/insufficient_quota|quota|billing|hard limit|usage limit|credits/i.test(message)) {
-    return "This workspace key needs billing or quota attention. Check the key in Settings, then try again."
+    return "The connected OpenAI key needs billing or quota attention. Check it in Settings, then try again."
   }
 
   if (/rate.?limit|too many requests|\b429\b/i.test(message)) {
-    return "OpenAI is receiving too many requests at once. Wait a moment, then try again."
+    return "The AI is busy right now. Wait a moment, then try again."
   }
 
   if (/model_not_found|model .* does not exist|unsupported model|model .* unavailable/i.test(message)) {
-    return "The selected OpenAI model is not available. Contact support if this keeps happening."
+    return "SalesFrame's live AI model is not available right now. Contact support if this keeps happening."
   }
 
   if (/timeout|timed out|service unavailable|temporarily unavailable|overloaded/i.test(message)) {
-    return "SalesFrame is taking longer than expected. Try again in a moment."
+    return "SalesFrame is taking longer than expected. Give it a moment, then try again."
   }
 
   if (technicalErrorPatterns.some((pattern) => pattern.test(message))) {

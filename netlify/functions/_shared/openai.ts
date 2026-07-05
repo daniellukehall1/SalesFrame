@@ -269,7 +269,7 @@ export async function createRealtimeTranscriptionSession(
 
   if (!response.ok) {
     throw upstreamFailure(
-      getOpenAiErrorMessage(data, "Realtime transcription session could not be created."),
+      getOpenAiErrorMessage(data, "Realtime transcription session needs another start attempt."),
       "openai_realtime_session_failed"
     )
   }

@@ -457,7 +457,6 @@ export type LiveSellerFeedbackAction =
   | "softer"
   | "skip"
   | "use_next"
-  | "move_later"
 
 export type LiveEvidenceItem = {
   label: string
