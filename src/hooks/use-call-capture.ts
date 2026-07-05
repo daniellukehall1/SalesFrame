@@ -1089,7 +1089,7 @@ function getSourceAttribution(source: CapturedAudioSource): SpeakerAttribution {
         : source.kind === "meeting_audio"
           ? "Initial label from the meeting or tab audio stream."
           : source.kind === "in_person_microphone"
-            ? "Initial label from in-person room microphone audio. AI refinement and manual review may be needed."
+            ? "Initial label from one-channel room audio. AI refinement and manual review may be needed."
             : "Initial label from mixed microphone audio. Model refinement and manual review may be needed.",
     speakerLabel: source.speakerHint,
     source: "source_stream",

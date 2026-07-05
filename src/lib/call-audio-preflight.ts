@@ -95,10 +95,10 @@ function createAudioPreflightResult(
   const warnings: string[] = []
 
   if (mode === "microphone") {
-    warnings.push("Microphone-only mode can miss the buyer if their audio is playing through headphones or another device.")
+    warnings.push("One-channel mode can miss the buyer if their audio is playing through headphones or another device.")
   }
   if (mode === "in_person_microphone") {
-    warnings.push("In-person mode uses mixed room audio, so speaker labels are lower confidence and remain editable.")
+    warnings.push("One-channel mode uses mixed audio, so speaker labels are lower confidence and remain editable.")
   }
   if (mode === "meeting_audio" && customerAudioTrackReady) {
     const hasVoiceDuringPreflight = meetingSources.some((source) => source.level >= preflightVoiceThreshold)
@@ -144,28 +144,28 @@ function getAudioPreflightStatusMessage({
   if (mode === "meeting_audio") {
     return customerAudioReady
       ? "Customer audio detected: start call."
-      : "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, in-person mic mode, or install SalesFrame Audio Connector."
+      : "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, one-channel mode, or install SalesFrame Audio Connector."
   }
   if (mode === "in_person_microphone") {
     return mixedRoomReady
-      ? "Room microphone detected: start call."
-      : "Room microphone audio was not detected. Keep the browser open, allow microphone access, and try again."
+      ? "One-channel audio detected: start call."
+      : "One-channel audio was not detected. Keep the browser open, allow microphone access, and try again."
   }
 
   return sellerMicReady
-    ? "Microphone detected: start call."
-    : "Microphone audio was not detected. Allow microphone access and try again."
+    ? "One-channel audio detected: start call."
+    : "One-channel audio was not detected. Allow microphone access and try again."
 }
 
 function getAudioPreflightFailureMessage(preflight: AudioPreflightResult) {
   if (preflight.mode === "meeting_audio" && !preflight.customerAudioReady) {
-    return "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, in-person mic mode, or install SalesFrame Audio Connector."
+    return "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, one-channel mode, or install SalesFrame Audio Connector."
   }
   if (!preflight.sellerMicReady) {
     return "SalesFrame needs access to your microphone before the call can start."
   }
   if (preflight.mode === "in_person_microphone" && !preflight.mixedRoomReady) {
-    return "SalesFrame cannot hear the room audio. Keep the browser open, allow microphone access, and try again."
+    return "SalesFrame cannot hear one-channel audio. Keep the browser open, allow microphone access, and try again."
   }
 
   return "SalesFrame needs one more audio check before the call can start."
@@ -182,7 +182,7 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
   if (mode === "meeting_audio") {
     if (!("getDisplayMedia" in mediaDevices)) {
       throw new Error(
-        "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, in-person mic mode, or install SalesFrame Audio Connector."
+        "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, one-channel mode, or install SalesFrame Audio Connector."
       )
     }
 
@@ -204,7 +204,7 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
       } else {
         displayStream.getTracks().forEach((track) => track.stop())
         throw new Error(
-          "SalesFrame cannot hear customer audio from that share. Choose a browser tab or Entire Screen with Share audio/System audio turned on, or switch to in-person microphone mode."
+          "SalesFrame cannot hear customer audio from that share. Choose a browser tab or Entire Screen with Share audio/System audio turned on, or switch to one-channel mode."
         )
       }
     } catch (caughtError: unknown) {
@@ -214,12 +214,12 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
       }
       if (isDisplayCapturePermissionError(caughtError)) {
         throw new Error(
-          "SalesFrame needs customer-side audio before this call can start. Share a meeting tab or Entire Screen with Share audio/System audio turned on, or switch to in-person microphone mode."
+          "SalesFrame needs customer-side audio before this call can start. Share a meeting tab or Entire Screen with Share audio/System audio turned on, or switch to one-channel mode."
         )
       }
 
       throw new Error(
-        "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, in-person mic mode, or install SalesFrame Audio Connector."
+        "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, one-channel mode, or install SalesFrame Audio Connector."
       )
     }
   }
@@ -253,8 +253,8 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
         sources.length > 0
           ? "Seller microphone captured separately for seller-side attribution."
           : isInPersonMicrophone
-            ? "In-person microphone capture is listening through this device. Keep the browser open and the phone awake; speaker labels use AI attribution and low-confidence labels stay editable."
-            : "Only microphone audio is available. SalesFrame will listen for both seller and buyer speech from this mic; speaker labels use AI attribution and low-confidence labels stay editable.",
+            ? "One-channel capture is listening through this device. Keep the browser open and the phone awake; speaker labels use AI attribution and low-confidence labels stay editable."
+            : "One-channel audio is available. SalesFrame will listen for both seller and buyer speech from this mic; speaker labels use AI attribution and low-confidence labels stay editable.",
       speakerHint: microphoneSpeakerHint,
       stream: microphoneStream,
     })

@@ -102,6 +102,7 @@ import {
   MessageGroup,
   MessageHeader,
 } from "@/components/ui/message"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -415,6 +416,8 @@ type CaptureSettings = {
   inPersonMic: boolean
 }
 
+type AudioSourceChoice = "one_channel" | "two_channels" | "meeting_bot"
+
 const defaultCaptureSettings: CaptureSettings = {
   browserTab: true,
   inPersonMic: true,
@@ -475,6 +478,17 @@ function isAudioCaptureModeEnabled(settings: CaptureSettings, mode: CallAudioCap
   if (mode === "in_person_microphone") return settings.inPersonMic
 
   return true
+}
+
+function getAudioSourceChoice(mode: CallAudioCaptureMode): AudioSourceChoice {
+  return mode === "meeting_audio" ? "two_channels" : "one_channel"
+}
+
+function getAudioCaptureModeForChoice(choice: AudioSourceChoice, settings: CaptureSettings): CallAudioCaptureMode {
+  if (choice === "two_channels") return "meeting_audio"
+  if (choice === "one_channel") return settings.inPersonMic ? "in_person_microphone" : "microphone"
+
+  return getPreferredAudioCaptureMode(settings)
 }
 
 function getLegalPageFromPath(): LegalPageId | null {
@@ -3613,7 +3627,7 @@ function App() {
       })
       throwIfStartCancelled()
 
-      updatePreparationStep("audio", "Ready for the microphone and meeting audio step.")
+      updatePreparationStep("audio", "Ready for the selected channel setup.")
       await callCapture.startCall({
         abortSignal: payload.abortSignal,
         audioCaptureMode: payload.audioCaptureMode,
@@ -6833,6 +6847,7 @@ function StartRecordingDialog({
   const canUseOpenAi = hasSavedOpenAiKey
   const canStart = canContinueAccount && canContinueOpportunity && canContinueCall && canUseResearch && canUseOpenAi
   const canContinue = step === 1 ? canContinueAccount : step === 2 ? canContinueOpportunity : canContinueCall
+  const selectedAudioSourceChoice = getAudioSourceChoice(audioCaptureMode)
   const accountSummary =
     accountMode === "new" ? accountName.trim() || "New account" : selectedAccount?.name ?? "Selected account"
   const opportunitySummary =
@@ -6882,10 +6897,8 @@ function StartRecordingDialog({
       label: "Getting ready to listen",
       description:
         audioCaptureMode === "meeting_audio"
-          ? "Next up: microphone plus customer-side app, tab, or system audio."
-          : audioCaptureMode === "in_person_microphone"
-            ? "Next up: room microphone capture for an in-person conversation."
-            : "Next up: microphone capture for the live transcript.",
+          ? "Next up: two-channel capture with your mic plus customer-side app, tab, or system audio."
+          : "Next up: one-channel capture through this device microphone.",
       icon: Mic2Icon,
       progress: 94,
     },
@@ -7477,13 +7490,13 @@ function StartRecordingDialog({
               ) : null}
 
               {step === 3 ? (
-                <div className="grid min-w-0 gap-4">
+                <div className="grid min-w-0 gap-3">
                   <div className="flex items-center gap-2">
                     <PhoneCallIcon className="size-4 text-muted-foreground" />
                     <p className="text-sm font-medium">Call setup</p>
                   </div>
-                  <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,240px)]">
-                    <div className="grid min-w-0 gap-3 rounded-lg bg-muted/40 p-3">
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,240px)] sm:gap-3">
+                    <div className="grid min-w-0 grid-cols-2 gap-2 rounded-lg bg-muted/40 p-2.5 sm:grid-cols-1 sm:gap-3 sm:p-3">
                       <div>
                         <p className="text-xs font-medium text-muted-foreground">Account</p>
                         <p className="mt-1 truncate text-sm font-medium">{accountSummary}</p>
@@ -7492,14 +7505,14 @@ function StartRecordingDialog({
                         <p className="text-xs font-medium text-muted-foreground">Opportunity</p>
                         <p className="mt-1 truncate text-sm font-medium">{opportunitySummary}</p>
                       </div>
-                      <div>
+                      <div className="hidden sm:block">
                         <p className="text-xs font-medium text-muted-foreground">Guidance</p>
                         <p className="mt-1 text-sm text-muted-foreground">
                           The live cockpit will only ask for fields required by the selected playbooks.
                         </p>
                       </div>
                     </div>
-                    <div className="grid min-w-0 content-start gap-4">
+                    <div className="grid min-w-0 content-start gap-3 sm:gap-4">
                       <div className="grid min-w-0 gap-2">
                         <Label htmlFor="recording-call-type">Call type</Label>
                         <Select value={callType} onValueChange={setCallType}>
@@ -7520,32 +7533,35 @@ function StartRecordingDialog({
                       <div className="grid min-w-0 gap-2">
                         <Label htmlFor="recording-audio-source">Audio source</Label>
                         <Select
-                          value={audioCaptureMode}
-                          onValueChange={(value) => setAudioCaptureMode(value as CallAudioCaptureMode)}
+                          value={selectedAudioSourceChoice}
+                          onValueChange={(value) => {
+                            const nextChoice = value as AudioSourceChoice
+
+                            if (nextChoice === "meeting_bot") return
+                            setAudioCaptureMode(getAudioCaptureModeForChoice(nextChoice, capturePreferences))
+                          }}
                         >
                           <SelectTrigger id="recording-audio-source" className="w-full min-w-0 [&>span]:truncate">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="microphone">Microphone only</SelectItem>
-                            <SelectItem value="in_person_microphone" disabled={!capturePreferences.inPersonMic}>
-                              In-person meeting / phone mic
+                            <SelectItem value="one_channel">One channel</SelectItem>
+                            <SelectItem value="two_channels" disabled={!capturePreferences.browserTab}>
+                              Two channels
                             </SelectItem>
-                            <SelectItem value="meeting_audio" disabled={!capturePreferences.browserTab}>
-                              Meeting audio + microphone
+                            <SelectItem value="meeting_bot" disabled>
+                              Meeting bot - coming later
                             </SelectItem>
                           </SelectContent>
                         </Select>
-                        <p className="text-xs text-muted-foreground">
-                          {audioCaptureMode === "meeting_audio"
-                            ? "When prompted, share the meeting tab if the call is in-browser, or Entire Screen for native Zoom/Teams when available. Tick Share audio/System audio so SalesFrame can hear the buyer."
-                            : audioCaptureMode === "in_person_microphone"
-                              ? "Use this on iPhone or in-person meetings. Keep Safari open and the phone awake so the microphone can capture transcript and live questions."
-                              : "Uses your microphone only. This will not ask you to share your screen."}
+                        <p className="text-xs leading-snug text-muted-foreground">
+                          {selectedAudioSourceChoice === "two_channels"
+                            ? "Use this when you can share meeting/system audio and your microphone separately. Best for Zoom, Teams, or Meet on desktop."
+                            : "Use this when SalesFrame hears the room or call through this device microphone. Best for in-person, phone speaker, or mobile."}
                         </p>
                         {!capturePreferences.browserTab || !capturePreferences.inPersonMic ? (
                           <p className="text-xs text-muted-foreground">
-                            Capture choices follow this workspace's Settings. Microphone only is always available.
+                            Capture choices follow this workspace's Settings. One channel is always available.
                           </p>
                         ) : null}
                       </div>
@@ -9534,79 +9550,72 @@ function PlaybookMultiSelect({
   }
 
   return (
-    <div
-      className="relative min-w-0"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) {
-          setOpen(false)
-        }
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          id={id}
+          type="button"
+          variant="outline"
+          className="h-auto min-h-9 w-full min-w-0 justify-between gap-2 px-3 py-2 text-left font-normal"
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          aria-label={`Selected playbooks: ${selectedPlaybookLabel}`}
+          title={selectedPlaybookLabel}
+        >
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-sm">
+            <span className="truncate">{visiblePlaybooks.length ? visiblePlaybooks.join(", ") : "Select playbooks"}</span>
+            {hiddenPlaybookCount > 0 ? (
+              <span className="shrink-0 text-muted-foreground">+{hiddenPlaybookCount} more</span>
+            ) : null}
+          </span>
+          <ChevronDownIcon className={cn("size-4 shrink-0 transition-transform duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-standard)]", open && "rotate-180")} />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        side="top"
+        sideOffset={6}
+        collisionPadding={12}
+        role="listbox"
+        aria-multiselectable="true"
+        className="z-[80] grid max-h-[min(18rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) min-w-64 gap-1 overflow-y-auto overscroll-contain rounded-lg p-1 shadow-lg"
+        onEscapeKeyDown={(event) => {
           event.preventDefault()
           event.stopPropagation()
           setOpen(false)
-        }
-      }}
-    >
-      <Button
-        id={id}
-        type="button"
-        variant="outline"
-        className="h-auto min-h-9 w-full min-w-0 justify-between gap-2 px-3 py-2 text-left font-normal"
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-label={`Selected playbooks: ${selectedPlaybookLabel}`}
-        title={selectedPlaybookLabel}
-        onClick={() => setOpen((value) => !value)}
+        }}
       >
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-sm">
-          <span className="truncate">{visiblePlaybooks.length ? visiblePlaybooks.join(", ") : "Select playbooks"}</span>
-          {hiddenPlaybookCount > 0 ? (
-            <span className="shrink-0 text-muted-foreground">+{hiddenPlaybookCount} more</span>
-          ) : null}
-        </span>
-        <ChevronDownIcon className={cn("size-4 shrink-0 transition-transform duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-standard)]", open && "rotate-180")} />
-      </Button>
+        {callPlaybookOptions.map((playbook) => {
+          const isSelected = selectedPlaybooks.includes(playbook)
 
-      {open ? (
-        <div
-          role="listbox"
-          aria-multiselectable="true"
-          className="absolute right-0 top-full z-50 mt-1 grid max-h-[min(18rem,calc(100vh-12rem))] w-full max-w-[min(28rem,calc(100vw-2rem))] min-w-0 gap-1 overflow-y-auto overscroll-contain rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg transition-none duration-[var(--sf-motion-menu)] ease-[var(--sf-ease-enter)] animate-in fade-in-0 zoom-in-95 max-sm:top-auto max-sm:bottom-full max-sm:mt-0 max-sm:mb-1 max-sm:max-h-[min(14rem,calc(100dvh-10rem))] sm:min-w-64"
-        >
-          {callPlaybookOptions.map((playbook) => {
-            const isSelected = selectedPlaybooks.includes(playbook)
-
-            return (
-              <button
-                key={playbook}
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => togglePlaybook(playbook)}
+          return (
+            <button
+              key={playbook}
+              type="button"
+              role="option"
+              aria-selected={isSelected}
+              className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-[var(--sf-motion-fast)] ease-[var(--sf-ease-standard)] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => togglePlaybook(playbook)}
+            >
+              <span
+                className={cn(
+                  "mt-0.5 flex size-4 items-center justify-center rounded border",
+                  isSelected && "border-primary bg-primary text-primary-foreground"
+                )}
               >
-                <span
-                  className={cn(
-                    "mt-0.5 flex size-4 items-center justify-center rounded border",
-                    isSelected && "border-primary bg-primary text-primary-foreground"
-                  )}
-                >
-                  {isSelected ? <CheckIcon className="size-3" /> : null}
+                {isSelected ? <CheckIcon className="size-3" /> : null}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">{playbook}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {callPlaybookDescriptions[playbook]}
                 </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">{playbook}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {callPlaybookDescriptions[playbook]}
-                  </span>
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      ) : null}
-    </div>
+              </span>
+            </button>
+          )
+        })}
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -13343,11 +13352,11 @@ function getAudioHealthIndicators({
   const customerAudio: CaptureSignalIndicator = audioPreflight
     ? audioPreflight.requiredCustomerAudio
       ? audioPreflight.customerAudioReady
-        ? { label: "Customer audio", tone: isLive ? "live" : "building", value: isLive ? "Listening" : "Connected" }
+        ? { label: "Customer audio", tone: isLive ? "live" : "building", value: isLive ? "Two channels" : "Connected" }
         : { label: "Customer audio", tone: needsAttention ? "error" : "warning", value: "Not detected" }
       : audioPreflight.mixedRoomReady
-        ? { label: "Customer audio", tone: isLive ? "live" : "building", value: isLive ? "Room mic" : "Connected" }
-        : { label: "Customer audio", tone: "muted", value: "Mic only" }
+        ? { label: "Customer audio", tone: isLive ? "live" : "building", value: isLive ? "One channel" : "Connected" }
+        : { label: "Customer audio", tone: "muted", value: "One channel" }
     : isStarting
       ? { label: "Customer audio", tone: "building", value: "Checking" }
       : { label: "Customer audio", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
@@ -13384,7 +13393,7 @@ function getCaptureStatusDescription(
   permissionState: CallCapturePermissionState
 ) {
   if (status === "recording") return "Transcript, notes, and evidence are being saved to this call."
-  if (status === "requesting-permission") return "Choose the selected audio source and allow microphone access when prompted."
+  if (status === "requesting-permission") return "Choose the selected channel setup and allow microphone access when prompted."
   if (status === "connecting") return "Getting live transcription ready."
   if (status === "permission-denied") return "Allow audio capture to record and transcribe this call."
   if (status === "upload-failed") return "Transcript is saved. The audio recording needs another upload attempt."
@@ -13392,7 +13401,7 @@ function getCaptureStatusDescription(
   if (status === "stopped") return "The call, transcript, and recording are saved."
   if (permissionState === "capture-unavailable") return "This browser cannot share audio with SalesFrame."
 
-  return "Start a call to capture meeting audio, microphone audio, or an in-person room conversation."
+  return "Start a call with one-channel audio or two-channel mic plus system audio."
 }
 
 function OpportunityProfile({
@@ -16592,14 +16601,14 @@ function SettingsView({
             {[
               {
                 id: "browserTab" as const,
-                title: "Browser tab capture",
-                body: "Desktop browser capture can listen to a shared meeting tab or window when the browser supports it.",
+                title: "Two-channel mic + system audio",
+                body: "Desktop capture can listen to shared meeting, app, window, tab, or system audio alongside your microphone when the browser supports it.",
                 configurable: true,
               },
               {
                 id: "inPersonMic" as const,
-                title: "In-person / iPhone microphone",
-                body: "Phone or laptop microphone capture for in-person meetings. Keep the browser open and the device awake while recording.",
+                title: "One-channel microphone capture",
+                body: "Phone or laptop microphone capture for in-person, mobile, or speakerphone calls where SalesFrame hears everyone through one stream.",
                 configurable: true,
               },
             ].map((item) => (

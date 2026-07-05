@@ -113,11 +113,11 @@ Realtime transcription must feel like a clean human conversation, not raw subtit
   - Mixed room audio is required for in-person/iPhone mode.
   - If remote meeting mode cannot hear buyer audio, block start and explain that SalesFrame can hear the mic but not the buyer.
 - Store preflight output on the call as `audio_preflight`, `audio_source_summary`, and `guidance_readiness` so poor transcript quality can be diagnosed later.
-- OpenAI realtime transcription sessions use `gpt-realtime-whisper` by default, with an English language hint. Dedicated seller mic and meeting/tab audio default to `high` delay for extra context and cleaner words; microphone-only and in-person room capture default to `xhigh` delay because those mixed sources need the most audio context.
+- OpenAI realtime transcription sessions use `gpt-realtime-whisper` by default, with an English language hint. Dedicated seller mic and meeting/tab audio default to `high` delay for extra context and cleaner words; one-channel microphone capture defaults to `xhigh` delay because mixed sources need the most audio context.
 - `turn_detection` remains `null` for `gpt-realtime-whisper`; SalesFrame commits the audio buffer from browser-side speech activity rather than on a fixed timer.
 - Never reintroduce a blind fixed-interval transcript commit loop. It chops speakers mid-thought and causes duplicate fragments.
 - Browser audio is committed when speech has lasted long enough and then reached a silence boundary, with a max-turn guard for long monologues.
-- Commit timing is source-aware: dedicated seller mic and meeting/tab audio still feel live, but they use slightly longer speech windows than before; microphone-only and in-person room capture wait longer for a natural speech boundary so OpenAI receives enough context for accurate words. Browser-side speech detection also tracks the ambient noise floor and requires short sustained voice activity before committing audio so background noise is less likely to create transcript fragments.
+- Commit timing is source-aware: dedicated seller mic and meeting/tab audio still feel live, but they use slightly longer speech windows than before; one-channel microphone capture waits longer for a natural speech boundary so OpenAI receives enough context for accurate words. Browser-side speech detection also tracks the ambient noise floor and requires short sustained voice activity before committing audio so background noise is less likely to create transcript fragments.
 - Transcript events are reconciled by OpenAI `item_id`/segment identity from official delta, segment, and completed events only. Unknown transcription-like events should not become UI rows.
 - Live transcript rows are durable conversation turns:
   - Deltas update a temporary live row and must be joined with word-boundary logic so transcript text never renders as squashed words.
@@ -126,13 +126,14 @@ Realtime transcription must feel like a clean human conversation, not raw subtit
   - Saved rows include OpenAI reconciliation metadata: `openai_item_id`, `openai_segment_id`, `audio_source_kind`, `client_turn_id`, `turn_sequence`, `transcription_delay`, and `quality_flags`.
   - Duplicate final events within the same source/time window are suppressed.
   - Adjacent same-speaker turns are merged when they occur inside the turn-continuity window.
-- `meeting_audio` plus `seller_mic` is the preferred desktop capture path:
+- Seller-facing audio setup uses `One channel`, `Two channels`, and a disabled `Meeting bot` option. Internally, V1 keeps `microphone`, `in_person_microphone`, and `meeting_audio` for compatibility; new one-channel selections prefer `in_person_microphone`, while `microphone` remains a legacy fallback.
+- `Two channels` maps to `meeting_audio` plus `seller_mic` and is the preferred desktop capture path:
   - Seller mic is the likely seller stream.
   - Meeting/tab audio is the likely customer-side stream.
   - Meeting/tab audio is captured with audio processing disabled where the browser supports it so the customer-side stream is not altered before transcription.
   - The separate seller microphone uses echo cancellation and noise suppression where supported because customer-side audio is already captured separately.
-  - Mixed microphone or in-person/mobile capture stays editable and confidence-aware.
-- Microphone-only and in-person/mobile modes use mono speech-oriented capture where supported, avoid aggressive echo/noise suppression that can remove far-side voices, and warn the seller that customer audio may be incomplete if the buyer is not audible to the device microphone.
+  - One-channel microphone capture stays editable and confidence-aware.
+- `One channel` uses mono speech-oriented capture where supported, avoids aggressive echo/noise suppression that can remove far-side voices, and warns the seller that customer audio may be incomplete if the buyer is not audible to the device microphone.
 - Rolling diarization is not part of the default live path. It can run as an opt-in/background or post-call correction layer, but live coaching must not depend on it or show repeated diarization error notes.
 - If rolling diarization is re-enabled, it must reconcile into existing transcript turns rather than create extra transcript lines, and failures must stay quiet unless the seller explicitly opens diagnostics.
 - Live guidance is AI-first only:
@@ -793,7 +794,7 @@ Model choices should be revalidated against current official OpenAI API docs bef
 Expected AI services:
 
 - Real-time transcription and turn detection.
-- Speaker diarization or speaker role assignment. Browser V1 captures meeting/tab audio and seller microphone separately where possible, uses source streams for instant labels, runs `/api/openai/speaker-attribution` for realtime Seller/Customer/Customer 2/Customer 3 attribution with confidence, keeps low-confidence rows editable, and reprocesses the full transcript during `/api/openai/post-call-outputs` for post-call speaker correction. iPhone Safari and in-person meetings use microphone-only room capture; the seller must keep Safari open and the device awake, and speaker labels should be treated as lower-confidence because seller and customer audio arrive in one stream.
+- Speaker diarization or speaker role assignment. Browser V1 captures meeting/tab audio and seller microphone separately where possible, uses source streams for instant labels, runs `/api/openai/speaker-attribution` for realtime Seller/Customer/Customer 2/Customer 3 attribution with confidence, keeps low-confidence rows editable, and reprocesses the full transcript during `/api/openai/post-call-outputs` for post-call speaker correction. iPhone Safari and in-person meetings use one-channel room capture; the seller must keep Safari open and the device awake, and speaker labels should be treated as lower-confidence because seller and customer audio arrive in one stream.
 - Sellers do not need to record an onboarding voice sample to begin. Live calls use call-scoped provisional labels (`Speaker 1`, `Speaker 2`, `Seller`, `Customer`) and a cockpit speaker map where the seller can rename a speaker to a person or mark that speaker as `Me`. These aliases update the visible transcript and future live lines for the active call, persist to the call speaker row, and are not treated as cross-call biometric voice references.
 - Rolling 30-second audio windows are sent to `/api/openai/call-diarization`, which uses OpenAI diarized audio transcription and returns timestamped speaker segments without storing the temporary chunk. The client conservatively reconciles those diarized segments back into matching transcript lines by timing/text. No reference voices are stored beyond the individual call in this implementation path.
 - Live intent detection against selected playbook fields.
@@ -913,9 +914,9 @@ Database-backed search should preserve the same behaviour while moving larger da
   - Sidebar top workspace selector supports Supabase-backed workspace switching, create workspace modal, edit workspace modal, duplicate workspace, and guarded delete workspace.
   - Sidebar footer account menu routes Account to a separate personal profile page for seller identity, workspace access, and guarded account deletion; Settings remains for OpenAI key, capture, retention, and product configuration.
   - Billing, notifications, and upgrade stay hidden until billing and notification systems exist.
-  - Settings capture switches show microphone, browser tab/app/window audio, and in-person/iPhone microphone capture as active browser modes, with extension and meeting bot coverage kept as later integrations.
-  - Browser meeting capture requests app/window/tab/system audio where the browser supports it. SalesFrame treats the shared audio track as the customer side and the microphone stream as the seller side; it does not send or record display video.
-  - Meeting audio preflight shows a plain status: `Customer audio detected: start call.` when the shared source returns customer audio, or `Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, in-person mic mode, or install SalesFrame Audio Connector.` when the selected native app/window does not expose audio.
+  - Settings capture switches show `One-channel microphone capture` and `Two-channel mic + system audio` as active browser modes, with the Start Call modal also showing a disabled `Meeting bot` option for later integrations.
+  - Two-channel capture requests app/window/tab/system audio where the browser supports it. SalesFrame treats the shared audio track as the customer side and the microphone stream as the seller side; it does not send or record display video.
+  - Two-channel preflight shows a plain status: `Customer audio detected: start call.` when the shared source returns customer audio, or `Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, one-channel mode, or install SalesFrame Audio Connector.` when the selected native app/window does not expose audio.
   - Non-settings pages render loading, empty, error, and permission-denied states so async data boundaries can reuse the same UI.
   - Loading, empty, error, permission, onboarding, and zero-state surfaces must follow `docs/design-language-states.md` so the app keeps the same human voice as the public homepage.
 - Sidebar context menu rule:

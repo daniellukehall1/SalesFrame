@@ -4,6 +4,28 @@ This log tracks launch-readiness issues found during the calm UX audit. Each ent
 
 ## 2026-07-05
 
+### Start Call audio source choices used implementation language
+
+- Severity: Medium
+- Description: The Start Call `Call` step exposed technical capture labels like microphone-only, in-person phone mic, and meeting audio plus microphone.
+- Root cause: The UI mirrored internal browser capture modes instead of the seller's mental model: one audio stream, two separate audio streams, or a future meeting bot.
+- Recommended improvement: Keep the capture engine stable, but translate the selector into a simple channel model with clear helper copy and a disabled future bot option.
+- Fix applied: Replaced the visible audio source choices with `One channel`, `Two channels`, and disabled `Meeting bot - coming later`; mapped one-channel selections to the tuned mixed-microphone path with a legacy microphone fallback, and mapped two-channel selections to the existing meeting-audio plus seller-mic path.
+- Before impact: Sellers had to infer which browser/device option matched their call setup, increasing hesitation before the call could start.
+- After impact: The modal now asks sellers to choose the number of audio channels, which is calmer, more device-agnostic, and easier to reason about across desktop and mobile.
+- Verification: Production-contract coverage now requires the new selector labels, rejects the old visible labels, and keeps the disabled meeting bot non-actionable until the integration exists.
+
+### Start Call playbook menu stretched the Call step
+
+- Severity: Low
+- Description: Opening the Playbooks selector on the Start Call `Call` step could make the modal feel cramped and risk clipping the dropdown below the field.
+- Root cause: The selector rendered its option list inside the modal layout with a downward-first absolute menu, so tight modal viewports depended on the dialog scroll area instead of a collision-aware floating surface.
+- Recommended improvement: Use the shared popover behavior for the playbook selector, keep the dropdown out of modal layout flow, prefer opening upward inside modals, and let the options scroll internally.
+- Fix applied: Rebuilt `PlaybookMultiSelect` with the shadcn/Radix `Popover`, capped the list height with viewport-aware bounds, set internal list scrolling, and made the selector open upward by default with collision padding.
+- Before impact: The modal could gain visual clutter from unnecessary scroll behavior and the dropdown could feel cut off when the trigger sat low in the dialog.
+- After impact: The menu floats calmly above the trigger, stays inside the viewport, and no longer changes the dialog height when opened.
+- Verification: Production-contract test coverage now asserts the portal-backed popover, internal scrolling, compact selected summary, and removal of the old absolute menu; browser QA confirmed desktop and mobile dropdown geometry has no clipping and no modal-height change on open.
+
 ### Orphaned list records used database-style unknown labels
 
 - Severity: Low
