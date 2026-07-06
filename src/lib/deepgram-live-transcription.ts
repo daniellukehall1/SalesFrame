@@ -88,7 +88,7 @@ type DeepgramWord = {
 
 const deepgramChunkMs = 80
 const deepgramKeepAliveMs = 5000
-const deepgramSocketOpenTimeoutMs = 4500
+const deepgramSocketOpenTimeoutMs = 10000
 const deepgramStartupAttempts = 3
 const deepgramReconnectAttempts = 2
 const maxBufferedAudioChunks = Math.ceil(4000 / deepgramChunkMs)
@@ -259,10 +259,7 @@ async function openDeepgramSocket({
   const tokenResponse = normalizeDeepgramTokenResponse(session)
   const providerSessionId = createProviderSessionId(sourceKind)
   const websocketUrl = getDeepgramWebsocketUrl(tokenResponse.websocketUrl)
-  const socket = new WebSocket(websocketUrl, ["token", tokenResponse.accessToken])
-
-  socket.binaryType = "arraybuffer"
-  await waitForDeepgramSocketOpen(socket)
+  const socket = await createOpenedDeepgramSocket(websocketUrl, tokenResponse.accessToken)
 
   socket.addEventListener("message", (event) => {
     const transcriptEvent = extractDeepgramTranscriptEvent({
@@ -281,6 +278,39 @@ async function openDeepgramSocket({
   socket.addEventListener("error", onUnexpectedClose)
 
   return socket
+}
+
+async function createOpenedDeepgramSocket(websocketUrl: string, accessToken: string) {
+  let lastError: unknown
+
+  for (const protocols of getDeepgramAuthProtocolAttempts(accessToken)) {
+    const socket = new WebSocket(websocketUrl, protocols)
+    socket.binaryType = "arraybuffer"
+
+    try {
+      await waitForDeepgramSocketOpen(socket)
+      return socket
+    } catch (error) {
+      lastError = error
+      try {
+        socket.close()
+      } catch {
+        // The socket may already be closed after a failed handshake.
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("This browser or network blocked the live transcript connection.")
+}
+
+function getDeepgramAuthProtocolAttempts(accessToken: string) {
+  return [
+    ["bearer", accessToken],
+    ["Bearer", accessToken],
+    ["token", accessToken],
+  ]
 }
 
 function waitForDeepgramSocketOpen(socket: WebSocket) {

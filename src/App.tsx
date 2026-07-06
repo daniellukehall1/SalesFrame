@@ -7014,17 +7014,17 @@ function StartCallPreparingView({
   const currentDescription = detail || activeStep?.description || "Preparing the call workspace."
 
   return (
-    <div className="grid h-full min-h-[420px] place-items-center">
-      <div className="grid w-full max-w-xl gap-5">
-        <div className="flex items-start gap-3">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+    <div className="grid h-full min-h-[300px] place-items-center overflow-hidden">
+      <div className="grid w-full max-w-lg gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <SparklesIcon className="size-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-muted-foreground">Preparing live call</p>
-            <h3 className="mt-1 text-xl font-semibold tracking-tight">Almost there. Let's make the first question a good one.</h3>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              SalesFrame is checking the essentials before the cockpit opens, so you are not dropped into a blank screen.
+            <p className="text-sm font-medium text-muted-foreground">Getting the live coach ready</p>
+            <h3 className="mt-1 text-lg font-semibold tracking-tight">Almost there. We’re lining up the first move.</h3>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              Keep this open; the cockpit will launch when the essentials are ready.
             </p>
           </div>
         </div>
@@ -7042,7 +7042,7 @@ function StartCallPreparingView({
           </p>
         </div>
 
-        <div className="grid gap-2">
+        <div className="hidden grid-cols-2 gap-2 sm:grid sm:grid-cols-3">
           {steps.map((item, index) => {
             const Icon = item.icon
             const isComplete = progress >= item.progress || progress === 100
@@ -7052,22 +7052,21 @@ function StartCallPreparingView({
               <div
                 key={item.id}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg bg-muted/30 px-3 py-2 text-sm",
+                  "flex min-w-0 items-center gap-2 rounded-lg bg-muted/30 px-2.5 py-2 text-sm",
                   isActive && "bg-primary/10 text-primary"
                 )}
               >
                 <span
                   className={cn(
-                    "flex size-8 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground",
+                    "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground",
                     isActive && "border-primary text-primary",
                     isComplete && "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
                   )}
                 >
                   {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
                 </span>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{item.label}</p>
-                  <p className="truncate text-xs text-muted-foreground">{item.description}</p>
                 </div>
               </div>
             )
@@ -7680,10 +7679,7 @@ function StartRecordingDialog({
     <>
         {startSubmitting ? (
           <>
-            <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-              Keep this window open. The call will open automatically as soon as AI guidance and capture are ready.
-            </div>
-            <div className="min-h-0 overflow-y-auto pr-1">
+            <div className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 max-sm:pr-0">
               <StartCallPreparingView
                 activeIndex={startPhaseIndex}
                 detail={startPreparationDetail}
@@ -7692,7 +7688,7 @@ function StartRecordingDialog({
               />
             </div>
             <DialogActions
-              className="max-sm:-mx-3 max-sm:-mb-3"
+              className="min-w-0 overflow-hidden max-sm:-mx-3 max-sm:-mb-3"
               onCancel={handleCancelStart}
               primaryAction={
                 <Button disabled className="gap-2">
@@ -7749,7 +7745,7 @@ function StartRecordingDialog({
               })}
             </ol>
 
-            <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain pr-1 max-sm:pr-0">
+            <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain pr-1 max-sm:pr-0">
               {step === 1 ? (
                 <div className="grid min-w-0 gap-4">
                   <div className="flex items-center gap-2">
@@ -7967,7 +7963,7 @@ function StartRecordingDialog({
               ) : null}
 
                   {step === 4 ? (
-                    <div className="grid min-w-0 gap-4">
+                    <div className="grid min-w-0 max-w-full gap-4 overflow-x-hidden">
                       {!hasSavedOpenAiKey ? (
                     <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3" role="alert">
                       <div className="min-w-0">
@@ -8004,8 +8000,8 @@ function StartRecordingDialog({
                     </div>
                   </div>
 
-                  <div className="grid min-w-0 max-w-full gap-3">
-                    <div className="grid min-w-0 max-w-full gap-3">
+                  <div className="grid min-w-0 max-w-full gap-3 overflow-x-hidden">
+                    <div className="grid min-w-0 max-w-full gap-3 overflow-x-hidden">
                       <div className="grid gap-1">
                         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Seller context</p>
                         <p className="text-xs text-muted-foreground">Your company and offer shape how SalesFrame frames the opener.</p>
@@ -8098,14 +8094,14 @@ function StartRecordingDialog({
               ) : null}
 
               {startError ? (
-                <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+                <div className="min-w-0 max-w-full whitespace-normal break-words rounded-lg bg-destructive/10 p-3 text-sm text-destructive" role="alert">
                   {startError}
                 </div>
               ) : null}
             </div>
 
         <DialogActions
-          className="max-sm:-mx-3 max-sm:-mb-3"
+          className="min-w-0 overflow-hidden max-sm:-mx-3 max-sm:-mb-3"
           leftActions={
             <div className="grid gap-2 sm:flex sm:flex-row">
               <Button variant="outline" onClick={handleCancelStart}>
