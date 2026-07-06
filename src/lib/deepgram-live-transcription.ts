@@ -46,6 +46,7 @@ type DeepgramTokenResponse = {
   }
   expiresIn: number
   websocketUrl: string
+  websocketUrls?: string[]
 }
 
 type DeepgramTurnMessage = {
@@ -258,8 +259,8 @@ async function openDeepgramSocket({
   const session = await createDeepgramTranscriptionToken(callId, { sourceKind })
   const tokenResponse = normalizeDeepgramTokenResponse(session)
   const providerSessionId = createProviderSessionId(sourceKind)
-  const websocketUrl = getDeepgramWebsocketUrl(tokenResponse.websocketUrl)
-  const socket = await createOpenedDeepgramSocket(websocketUrl, tokenResponse.accessToken)
+  const websocketUrls = getDeepgramWebsocketUrls(tokenResponse)
+  const socket = await createOpenedDeepgramSocket(websocketUrls, tokenResponse.accessToken)
 
   socket.addEventListener("message", (event) => {
     const transcriptEvent = extractDeepgramTranscriptEvent({
@@ -280,24 +281,27 @@ async function openDeepgramSocket({
   return socket
 }
 
-async function createOpenedDeepgramSocket(websocketUrl: string, accessToken: string) {
+async function createOpenedDeepgramSocket(websocketUrls: string[], accessToken: string) {
   let lastError: unknown
   const failures: string[] = []
 
-  for (const protocols of getDeepgramAuthProtocolAttempts(accessToken)) {
-    const socket = new WebSocket(websocketUrl, protocols)
-    socket.binaryType = "arraybuffer"
+  for (const websocketUrl of websocketUrls) {
+    for (const protocols of getDeepgramAuthProtocolAttempts(accessToken)) {
+      let socket: WebSocket | null = null
 
-    try {
-      await waitForDeepgramSocketOpen(socket)
-      return socket
-    } catch (error) {
-      lastError = error
-      failures.push(`${protocols[0]}: ${getDeepgramErrorMessage(error)}`)
       try {
-        socket.close()
-      } catch {
-        // The socket may already be closed after a failed handshake.
+        socket = new WebSocket(websocketUrl, protocols)
+        socket.binaryType = "arraybuffer"
+        await waitForDeepgramSocketOpen(socket)
+        return socket
+      } catch (error) {
+        lastError = error
+        failures.push(`${getDeepgramSocketHost(websocketUrl)} ${protocols[0]}: ${getDeepgramErrorMessage(error)}`)
+        try {
+          socket?.close()
+        } catch {
+          // The socket may already be closed after a failed handshake.
+        }
       }
     }
   }
@@ -316,6 +320,14 @@ function getDeepgramAuthProtocolAttempts(accessToken: string) {
     ["Bearer", accessToken],
     ["token", accessToken],
   ]
+}
+
+function getDeepgramSocketHost(websocketUrl: string) {
+  try {
+    return new URL(websocketUrl).host
+  } catch {
+    return "deepgram"
+  }
 }
 
 function waitForDeepgramSocketOpen(socket: WebSocket) {
@@ -430,15 +442,24 @@ function normalizeDeepgramTokenResponse(value: unknown): DeepgramTokenResponse {
     },
     expiresIn: getNumber(record.expiresIn, 30),
     websocketUrl,
+    websocketUrls: Array.isArray(record.websocketUrls)
+      ? record.websocketUrls.filter((url): url is string => typeof url === "string" && Boolean(url.trim()))
+      : undefined,
   }
 }
 
-function getDeepgramWebsocketUrl(websocketUrl: string) {
-  const url = new URL(websocketUrl)
-  url.searchParams.set("encoding", "linear16")
-  url.searchParams.set("sample_rate", "16000")
+function getDeepgramWebsocketUrls(tokenResponse: DeepgramTokenResponse) {
+  const urls = tokenResponse.websocketUrls?.length
+    ? tokenResponse.websocketUrls
+    : [tokenResponse.websocketUrl]
 
-  return url.toString()
+  return Array.from(new Set(urls.map((websocketUrl) => {
+    const url = new URL(websocketUrl)
+    url.searchParams.set("encoding", "linear16")
+    url.searchParams.set("sample_rate", "16000")
+
+    return url.toString()
+  })))
 }
 
 async function createPcmAudioPipeline({

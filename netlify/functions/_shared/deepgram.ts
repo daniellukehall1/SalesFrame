@@ -11,8 +11,23 @@ export type DeepgramGrantResult = {
   expiresIn: number
 }
 
+export type DeepgramSocketVerificationResult = {
+  host: string
+  protocol: string
+}
+
 export const deepgramGrantUrl = "https://api.deepgram.com/v1/auth/grant"
 export const deepgramListenUrl = "wss://api.deepgram.com/v2/listen"
+const defaultDeepgramListenHosts = ["api.au.deepgram.com", "api.deepgram.com"]
+
+type DeepgramFluxConfig = {
+  eagerEotThreshold: number
+  encoding: string
+  eotThreshold: number
+  eotTimeoutMs: number
+  model: string
+  sampleRate: number
+}
 
 export async function createDeepgramTemporaryToken(context: Record<string, unknown> = {}): Promise<DeepgramGrantResult> {
   const apiKey = getEnv("DEEPGRAM_API_KEY")
@@ -56,6 +71,160 @@ export async function createDeepgramTemporaryToken(context: Record<string, unkno
     accessToken: payload.access_token,
     expiresIn: typeof payload.expires_in === "number" ? payload.expires_in : 30,
   }
+}
+
+export function getDeepgramFluxConfig() {
+  return {
+    eagerEotThreshold: getNumberEnv("DEEPGRAM_FLUX_EAGER_EOT_THRESHOLD", 0.4, 0.3, 0.9),
+    encoding: "linear16",
+    eotThreshold: getNumberEnv("DEEPGRAM_FLUX_EOT_THRESHOLD", 0.75, 0.5, 0.9),
+    eotTimeoutMs: Math.round(getNumberEnv("DEEPGRAM_FLUX_EOT_TIMEOUT_MS", 5000, 500, 10000)),
+    model: getEnv("DEEPGRAM_FLUX_MODEL", "flux-general-en"),
+    sampleRate: 16000,
+  }
+}
+
+export function createDeepgramListenUrls(config: DeepgramFluxConfig) {
+  return getDeepgramListenHosts().map((host) => {
+    const url = new URL(`wss://${host}/v2/listen`)
+
+    url.searchParams.set("model", config.model)
+    url.searchParams.set("encoding", config.encoding)
+    url.searchParams.set("sample_rate", String(config.sampleRate))
+    url.searchParams.set("eager_eot_threshold", String(config.eagerEotThreshold))
+    url.searchParams.set("eot_threshold", String(config.eotThreshold))
+    url.searchParams.set("eot_timeout_ms", String(config.eotTimeoutMs))
+
+    return url.toString()
+  })
+}
+
+export async function verifyDeepgramListenSocket(
+  config: DeepgramFluxConfig,
+  accessToken: string
+): Promise<DeepgramSocketVerificationResult> {
+  const WebSocketCtor = globalThis.WebSocket
+  if (!WebSocketCtor) {
+    throw new AppError("deepgram_socket_unavailable", "Deepgram socket verification is not available in this runtime.", 503)
+  }
+
+  const failures: string[] = []
+
+  for (const websocketUrl of createDeepgramListenUrls(config)) {
+    for (const protocols of getDeepgramAuthProtocolAttempts(accessToken)) {
+      let socket: WebSocket | null = null
+      try {
+        socket = new WebSocketCtor(websocketUrl, protocols)
+        await waitForSocketOpen(socket)
+        socket.close(1000, "health_check")
+
+        return {
+          host: new URL(websocketUrl).host,
+          protocol: protocols[0],
+        }
+      } catch (error) {
+        failures.push(`${getDeepgramSocketHost(websocketUrl)} ${protocols[0]}: ${getErrorMessage(error)}`)
+        try {
+          socket?.close()
+        } catch {
+          // The socket may already be closed after a failed handshake.
+        }
+      }
+    }
+  }
+
+  logSafeEvent("error", "deepgram_socket_verification_failed", {
+    attempts: failures,
+  })
+  throw new AppError(
+    "deepgram_socket_failed",
+    "Deepgram accepted the key, but the live transcript socket did not open.",
+    503
+  )
+}
+
+function getDeepgramAuthProtocolAttempts(accessToken: string) {
+  return [
+    ["bearer", accessToken],
+    ["Bearer", accessToken],
+    ["token", accessToken],
+  ]
+}
+
+function waitForSocketOpen(socket: WebSocket) {
+  return new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      cleanup()
+      reject(new Error("socket open timeout"))
+    }, 7000)
+    const cleanup = () => {
+      clearTimeout(timeoutId)
+      socket.removeEventListener("open", handleOpen)
+      socket.removeEventListener("close", handleClose)
+      socket.removeEventListener("error", handleError)
+    }
+    const handleOpen = () => {
+      cleanup()
+      resolve()
+    }
+    const handleClose = (event: CloseEvent) => {
+      cleanup()
+      reject(new Error(`closed ${event.code} ${event.reason}`.trim()))
+    }
+    const handleError = () => {
+      cleanup()
+      reject(new Error("socket error"))
+    }
+
+    socket.addEventListener("open", handleOpen)
+    socket.addEventListener("close", handleClose)
+    socket.addEventListener("error", handleError)
+  })
+}
+
+function getDeepgramSocketHost(websocketUrl: string) {
+  try {
+    return new URL(websocketUrl).host
+  } catch {
+    return "deepgram"
+  }
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error.trim()) return error
+
+  return "unknown"
+}
+
+function getDeepgramListenHosts() {
+  const hosts = getEnv("DEEPGRAM_LISTEN_HOSTS", defaultDeepgramListenHosts.join(","))
+    .split(",")
+    .map(normalizeDeepgramListenHost)
+    .filter((host): host is string => Boolean(host))
+
+  const uniqueHosts = Array.from(new Set(hosts))
+
+  return uniqueHosts.length > 0 ? uniqueHosts : defaultDeepgramListenHosts
+}
+
+function normalizeDeepgramListenHost(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return ""
+
+  try {
+    const url = new URL(trimmed.includes("://") ? trimmed : `wss://${trimmed}`)
+    return url.host
+  } catch {
+    return ""
+  }
+}
+
+function getNumberEnv(name: string, fallback: number, min: number, max: number) {
+  const value = Number(getEnv(name, String(fallback)))
+  if (!Number.isFinite(value)) return fallback
+
+  return Math.max(min, Math.min(max, value))
 }
 
 function getDeepgramTokenFailureCode(status: number) {

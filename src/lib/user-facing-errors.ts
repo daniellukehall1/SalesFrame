@@ -44,6 +44,7 @@ const actionableErrorPatterns = [
   /csv/i,
   /close date/i,
   /this browser/i,
+  /content blocker/i,
 ]
 
 function getRawErrorMessage(error: unknown) {
