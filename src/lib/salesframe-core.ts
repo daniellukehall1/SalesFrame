@@ -618,6 +618,13 @@ export type LiveContextUsed = {
   influence: string
 }
 
+export type LiveEvidenceCommit = {
+  answeredCurrentIntent: boolean
+  bankedIntentNote: string
+  sourceTurnIds: string[]
+  summary: string
+}
+
 export type LiveGuidance = {
   nextQuestion: string
   questionReason: string
@@ -635,6 +642,7 @@ export type LiveGuidance = {
   gaps: MethodField[]
   questionLifecycle?: LiveQuestionLifecycle
   parkedIntents?: LiveParkedIntent[]
+  evidenceCommit?: LiveEvidenceCommit
   sellerFeedbackRequest?: LiveSellerFeedbackRequest
   contextUsed?: LiveContextUsed[]
   uiMode?: LiveUiMode

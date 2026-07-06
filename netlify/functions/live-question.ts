@@ -1,6 +1,6 @@
 import type { Config, Context } from "@netlify/functions"
 
-import { buildPlaybookIntentClusters } from "../../src/lib/salesframe-intent-clusters"
+import { buildPlaybookIntentClusters, type PlaybookIntentCluster } from "../../src/lib/salesframe-intent-clusters"
 import { getEnv } from "./_shared/env"
 import { badRequest, dataResponse, errorResponse, forbidden, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { callOpenAiJson } from "./_shared/openai"
@@ -48,6 +48,19 @@ type LiveQuestionPayload = {
   transcript?: TranscriptLine[]
 }
 
+type IntentLedgerStatus =
+  | "missing"
+  | "suggested"
+  | "asked"
+  | "answered"
+  | "weak_evidence"
+  | "confirmed"
+  | "parked"
+  | "do_not_repeat_this_call"
+  | "dropped"
+
+type StakeholderStatus = "mentioned" | "weak_evidence" | "confirmed" | "dismissed"
+
 type LiveQuestionResult = {
   question: string
   shortReason: string
@@ -86,6 +99,41 @@ type LiveQuestionResult = {
     field: string
     influence: string
     source: "account" | "opportunity"
+  }[]
+  evidenceCommit: {
+    answeredCurrentIntent: boolean
+    bankedIntentNote: string
+    sourceTurnIds: string[]
+    summary: string
+  }
+  intentLedgerUpdates: {
+    confidence: number
+    expiresAt: string
+    intentClusterId: string
+    intentLabel: string
+    lastAnswer: string
+    lastQuestion: string
+    reason: string
+    relatedPlaybookFieldIds: string[]
+    sourceTurnIds: string[]
+    status: IntentLedgerStatus
+    summary: string
+    value: string
+  }[]
+  stakeholderUpdates: {
+    confidence: number
+    evidenceSummary: string
+    influenceLabel: string
+    name: string
+    roleLabel: string
+    sourceTurnIds: string[]
+    status: StakeholderStatus
+  }[]
+  doNotRepeat: {
+    expiresAt: string
+    intentClusterId: string
+    questionText: string
+    reason: string
   }[]
   mustReplacePreviousQuestion: boolean
 }
@@ -245,6 +293,84 @@ function compactEvidenceRows(rows: Record<string, unknown>[]) {
   }))
 }
 
+function cleanStringArray(value: unknown, limit = 12) {
+  return Array.isArray(value)
+    ? value
+        .slice(0, limit)
+        .flatMap((item) => {
+          const text = cleanText(item)
+          return text ? [text] : []
+        })
+    : []
+}
+
+function clampConfidence(value: unknown) {
+  const number = cleanNumber(value)
+  return Math.min(1, Math.max(0, number))
+}
+
+function normalizeStakeholderName(value: unknown) {
+  return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+}
+
+function isIntentLedgerStatus(value: unknown): value is IntentLedgerStatus {
+  return value === "missing" ||
+    value === "suggested" ||
+    value === "asked" ||
+    value === "answered" ||
+    value === "weak_evidence" ||
+    value === "confirmed" ||
+    value === "parked" ||
+    value === "do_not_repeat_this_call" ||
+    value === "dropped"
+}
+
+function isStakeholderStatus(value: unknown): value is StakeholderStatus {
+  return value === "mentioned" ||
+    value === "weak_evidence" ||
+    value === "confirmed" ||
+    value === "dismissed"
+}
+
+function compactIntentLedgerRows(rows: Record<string, unknown>[]) {
+  return rows.slice(0, 32).map((row) => ({
+    confidence: clampConfidence(row.confidence),
+    expiresAt: cleanText(row.expires_at),
+    intentClusterId: cleanText(row.intent_cluster_id),
+    intentLabel: cleanText(row.intent_label),
+    lastAnswer: cleanText(row.last_answer),
+    lastQuestion: cleanText(row.last_question),
+    reason: cleanText(row.reason),
+    relatedPlaybookFieldIds: cleanStringArray(row.related_playbook_field_ids),
+    sourceTurnIds: cleanStringArray(row.source_turn_ids),
+    status: cleanText(row.status),
+    summary: cleanText(row.summary),
+    updatedAt: cleanText(row.updated_at),
+    value: cleanText(row.value),
+  }))
+}
+
+function compactStakeholders(rows: Record<string, unknown>[]) {
+  return rows.slice(0, 24).map((row) => ({
+    confidence: clampConfidence(row.confidence),
+    evidenceSummary: cleanText(row.evidence_summary),
+    influenceLabel: cleanText(row.influence_label),
+    lastSeenAt: cleanText(row.last_seen_at),
+    name: cleanText(row.name),
+    roleLabel: cleanText(row.role_label),
+    sourceTurnIds: cleanStringArray(row.source_turn_ids),
+    status: cleanText(row.status),
+  }))
+}
+
+function mapEvidenceStatusForPersistence(status: IntentLedgerStatus): "missing" | "asked" | "weak" | "confirmed" {
+  if (status === "confirmed") return "confirmed"
+  if (status === "answered") return "confirmed"
+  if (status === "weak_evidence") return "weak"
+  if (status === "asked") return "asked"
+  return "missing"
+}
+
 function latestActedQuestion(feedback: SellerFeedbackSignal[]) {
   return [...feedback]
     .reverse()
@@ -284,6 +410,80 @@ function requireLiveQuestionResult(
     throw upstreamFailure("Live question did not return question lifecycle reasoning.", "openai_invalid_live_question_lifecycle")
   }
 
+  const evidenceCommitRecord = result.evidenceCommit
+  if (!evidenceCommitRecord || typeof evidenceCommitRecord !== "object" || Array.isArray(evidenceCommitRecord)) {
+    throw upstreamFailure("Live question did not return an evidence commit.", "openai_invalid_live_question_evidence_commit")
+  }
+  const evidenceCommit = {
+    answeredCurrentIntent: evidenceCommitRecord.answeredCurrentIntent === true,
+    bankedIntentNote: cleanText(evidenceCommitRecord.bankedIntentNote),
+    sourceTurnIds: cleanStringArray(evidenceCommitRecord.sourceTurnIds),
+    summary: cleanText(evidenceCommitRecord.summary),
+  }
+
+  const intentLedgerUpdates = Array.isArray(result.intentLedgerUpdates)
+    ? result.intentLedgerUpdates.slice(0, 8).flatMap((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return []
+        const record = item as LiveQuestionResult["intentLedgerUpdates"][number]
+        const intentClusterId = cleanText(record.intentClusterId)
+        const intentLabel = cleanText(record.intentLabel)
+        const status = isIntentLedgerStatus(record.status) ? record.status : null
+        if (!intentClusterId || !intentLabel || !status) return []
+
+        return [{
+          confidence: clampConfidence(record.confidence),
+          expiresAt: cleanText(record.expiresAt),
+          intentClusterId,
+          intentLabel,
+          lastAnswer: cleanText(record.lastAnswer),
+          lastQuestion: cleanText(record.lastQuestion),
+          reason: cleanText(record.reason),
+          relatedPlaybookFieldIds: cleanStringArray(record.relatedPlaybookFieldIds),
+          sourceTurnIds: cleanStringArray(record.sourceTurnIds),
+          status,
+          summary: cleanText(record.summary),
+          value: cleanText(record.value),
+        }]
+      })
+    : []
+
+  const stakeholderUpdates = Array.isArray(result.stakeholderUpdates)
+    ? result.stakeholderUpdates.slice(0, 8).flatMap((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return []
+        const record = item as LiveQuestionResult["stakeholderUpdates"][number]
+        const name = cleanText(record.name)
+        const status = isStakeholderStatus(record.status) ? record.status : null
+        if (!name || !status) return []
+
+        return [{
+          confidence: clampConfidence(record.confidence),
+          evidenceSummary: cleanText(record.evidenceSummary),
+          influenceLabel: cleanText(record.influenceLabel),
+          name,
+          roleLabel: cleanText(record.roleLabel),
+          sourceTurnIds: cleanStringArray(record.sourceTurnIds),
+          status,
+        }]
+      })
+    : []
+
+  const doNotRepeat = Array.isArray(result.doNotRepeat)
+    ? result.doNotRepeat.slice(0, 8).flatMap((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return []
+        const record = item as LiveQuestionResult["doNotRepeat"][number]
+        const intentClusterId = cleanText(record.intentClusterId)
+        const reason = cleanText(record.reason)
+        if (!intentClusterId || !reason) return []
+
+        return [{
+          expiresAt: cleanText(record.expiresAt),
+          intentClusterId,
+          questionText: cleanText(record.questionText),
+          reason,
+        }]
+      })
+    : []
+
   if (blockedQuestions.includes(normalizeQuestion(question))) {
     throw upstreamFailure("Live question repeated the acted-on question.", "openai_repeated_live_question")
   }
@@ -296,6 +496,10 @@ function requireLiveQuestionResult(
     playbookLabel,
     primaryIntentClusterId,
     primaryIntentLabel,
+    evidenceCommit,
+    intentLedgerUpdates,
+    stakeholderUpdates,
+    doNotRepeat,
     questionLifecycle: {
       ...result.questionLifecycle,
       replacementReason,
@@ -329,6 +533,10 @@ const liveQuestionSchema = {
     "topicShiftConfidence",
     "questionLifecycle",
     "contextUsed",
+    "evidenceCommit",
+    "intentLedgerUpdates",
+    "stakeholderUpdates",
+    "doNotRepeat",
     "mustReplacePreviousQuestion",
   ],
   properties: {
@@ -398,6 +606,96 @@ const liveQuestionSchema = {
         },
       },
     },
+    evidenceCommit: {
+      type: "object",
+      additionalProperties: false,
+      required: ["answeredCurrentIntent", "bankedIntentNote", "sourceTurnIds", "summary"],
+      properties: {
+        answeredCurrentIntent: { type: "boolean" },
+        bankedIntentNote: { type: "string" },
+        sourceTurnIds: { type: "array", items: { type: "string" } },
+        summary: { type: "string" },
+      },
+    },
+    intentLedgerUpdates: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "confidence",
+          "expiresAt",
+          "intentClusterId",
+          "intentLabel",
+          "lastAnswer",
+          "lastQuestion",
+          "reason",
+          "relatedPlaybookFieldIds",
+          "sourceTurnIds",
+          "status",
+          "summary",
+          "value",
+        ],
+        properties: {
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          expiresAt: { type: "string" },
+          intentClusterId: { type: "string" },
+          intentLabel: { type: "string" },
+          lastAnswer: { type: "string" },
+          lastQuestion: { type: "string" },
+          reason: { type: "string" },
+          relatedPlaybookFieldIds: { type: "array", items: { type: "string" } },
+          sourceTurnIds: { type: "array", items: { type: "string" } },
+          status: {
+            type: "string",
+            enum: [
+              "missing",
+              "suggested",
+              "asked",
+              "answered",
+              "weak_evidence",
+              "confirmed",
+              "parked",
+              "do_not_repeat_this_call",
+              "dropped",
+            ],
+          },
+          summary: { type: "string" },
+          value: { type: "string" },
+        },
+      },
+    },
+    stakeholderUpdates: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["confidence", "evidenceSummary", "influenceLabel", "name", "roleLabel", "sourceTurnIds", "status"],
+        properties: {
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          evidenceSummary: { type: "string" },
+          influenceLabel: { type: "string" },
+          name: { type: "string" },
+          roleLabel: { type: "string" },
+          sourceTurnIds: { type: "array", items: { type: "string" } },
+          status: { type: "string", enum: ["mentioned", "weak_evidence", "confirmed", "dismissed"] },
+        },
+      },
+    },
+    doNotRepeat: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expiresAt", "intentClusterId", "questionText", "reason"],
+        properties: {
+          expiresAt: { type: "string" },
+          intentClusterId: { type: "string" },
+          questionText: { type: "string" },
+          reason: { type: "string" },
+        },
+      },
+    },
     mustReplacePreviousQuestion: { type: "boolean" },
   },
 }
@@ -447,6 +745,7 @@ function hydrateGuidance(result: LiveQuestionResult) {
     gaps: [],
     questionLifecycle: result.questionLifecycle,
     parkedIntents: [],
+    evidenceCommit: result.evidenceCommit,
     sellerFeedbackRequest: {
       prompt: "Use Asked, Too soon, Softer, or Skip to steer the live coach.",
       preferredActions: ["asked", "too_soon", "softer", "skip"],
@@ -457,6 +756,173 @@ function hydrateGuidance(result: LiveQuestionResult) {
       label: "Live coach",
       detail: result.shortReason,
     }],
+  }
+}
+
+function getClusterFieldLookup(intentClusters: PlaybookIntentCluster[]) {
+  const validClusterIds = new Set<string>()
+  const validPlaybookFieldIds = new Set<string>()
+  const fieldById = new Map<string, PlaybookIntentCluster["fields"][number]>()
+  const validClusterFieldPairs = new Set<string>()
+
+  for (const cluster of intentClusters) {
+    validClusterIds.add(cluster.id)
+    for (const field of cluster.fields) {
+      validPlaybookFieldIds.add(field.playbookFieldId)
+      validClusterFieldPairs.add(`${cluster.id}:${field.playbookFieldId}`)
+      fieldById.set(field.playbookFieldId, field)
+    }
+  }
+
+  return {
+    fieldById,
+    validClusterFieldPairs,
+    validClusterIds,
+    validPlaybookFieldIds,
+  }
+}
+
+async function persistLiveQuestionMemory({
+  accountId,
+  callId,
+  intentClusters,
+  opportunityId,
+  result,
+  supabase,
+  workspaceId,
+}: {
+  accountId: string
+  callId: string
+  intentClusters: PlaybookIntentCluster[]
+  opportunityId: string
+  result: LiveQuestionResult
+  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"]
+  workspaceId: string
+}) {
+  const {
+    fieldById,
+    validClusterFieldPairs,
+    validClusterIds,
+    validPlaybookFieldIds,
+  } = getClusterFieldLookup(intentClusters)
+
+  const ledgerUpdates = result.intentLedgerUpdates.flatMap((update) => {
+    if (!validClusterIds.has(update.intentClusterId)) return []
+    const relatedPlaybookFieldIds = update.relatedPlaybookFieldIds
+      .filter((fieldId) => validPlaybookFieldIds.has(fieldId))
+      .filter((fieldId) => validClusterFieldPairs.has(`${update.intentClusterId}:${fieldId}`))
+
+    return [{
+      call_id: callId,
+      confidence: update.confidence,
+      expires_at: update.expiresAt || null,
+      intent_cluster_id: update.intentClusterId,
+      intent_label: update.intentLabel,
+      last_answer: update.lastAnswer || null,
+      last_question: update.lastQuestion || null,
+      opportunity_id: opportunityId,
+      reason: update.reason || null,
+      related_playbook_field_ids: relatedPlaybookFieldIds,
+      source_turn_ids: update.sourceTurnIds,
+      status: update.status,
+      summary: update.summary,
+      value: update.value || null,
+      workspace_id: workspaceId,
+    }]
+  })
+
+  const doNotRepeatUpdates = result.doNotRepeat.flatMap((blocked) => {
+    if (!validClusterIds.has(blocked.intentClusterId)) return []
+    const cluster = intentClusters.find((item) => item.id === blocked.intentClusterId)
+
+    return [{
+      call_id: callId,
+      confidence: 1,
+      expires_at: blocked.expiresAt || null,
+      intent_cluster_id: blocked.intentClusterId,
+      intent_label: cleanText(cluster?.label, blocked.intentClusterId),
+      last_answer: null,
+      last_question: blocked.questionText || null,
+      opportunity_id: opportunityId,
+      reason: blocked.reason,
+      related_playbook_field_ids: [],
+      source_turn_ids: [],
+      status: "do_not_repeat_this_call",
+      summary: blocked.reason,
+      value: null,
+      workspace_id: workspaceId,
+    }]
+  })
+
+  const combinedLedgerUpdates = [...ledgerUpdates, ...doNotRepeatUpdates]
+  if (combinedLedgerUpdates.length) {
+    const { error } = await supabase
+      .from("call_intent_ledger")
+      .upsert(combinedLedgerUpdates, { onConflict: "call_id,intent_cluster_id" })
+
+    if (error && !isMissingRelationError(error)) throw new Error(error.message)
+  }
+
+  const fieldEvidenceWrites = result.intentLedgerUpdates.flatMap((update) => {
+    if (update.status !== "answered" && update.status !== "weak_evidence" && update.status !== "confirmed") return []
+    if (!validClusterIds.has(update.intentClusterId)) return []
+
+    return update.relatedPlaybookFieldIds
+      .filter((fieldId) => validPlaybookFieldIds.has(fieldId))
+      .filter((fieldId) => validClusterFieldPairs.has(`${update.intentClusterId}:${fieldId}`))
+      .slice(0, 8)
+      .flatMap((playbookFieldId) => {
+        const field = fieldById.get(playbookFieldId)
+        if (!field) return []
+
+        return [{
+          confidence: update.confidence,
+          evidence_summary: update.summary || update.lastAnswer || result.evidenceCommit.summary,
+          opportunity_id: opportunityId,
+          playbook_field_id: playbookFieldId,
+          source: "live_question",
+          source_call_id: callId,
+          status: mapEvidenceStatusForPersistence(update.status),
+          value: update.value || update.lastAnswer || null,
+        }]
+      })
+  })
+
+  if (fieldEvidenceWrites.length) {
+    const { error } = await supabase
+      .from("opportunity_field_evidence")
+      .upsert(fieldEvidenceWrites, { onConflict: "opportunity_id,playbook_field_id" })
+
+    if (error && !isMissingRelationError(error)) throw new Error(error.message)
+  }
+
+  const stakeholderUpdates = result.stakeholderUpdates.flatMap((update) => {
+    const normalizedName = normalizeStakeholderName(update.name)
+    if (!normalizedName) return []
+
+    return [{
+      account_id: accountId,
+      confidence: update.confidence,
+      evidence_summary: update.evidenceSummary,
+      influence_label: update.influenceLabel,
+      last_seen_at: new Date().toISOString(),
+      name: update.name,
+      normalized_name: normalizedName,
+      opportunity_id: opportunityId,
+      role_label: update.roleLabel,
+      source_call_id: callId,
+      source_turn_ids: update.sourceTurnIds,
+      status: update.status,
+      workspace_id: workspaceId,
+    }]
+  })
+
+  if (stakeholderUpdates.length) {
+    const { error } = await supabase
+      .from("opportunity_stakeholders")
+      .upsert(stakeholderUpdates, { onConflict: "opportunity_id,normalized_name" })
+
+    if (error && !isMissingRelationError(error)) throw new Error(error.message)
   }
 }
 
@@ -502,6 +968,8 @@ export default async (request: Request, _context: Context) => {
       { data: accountEnrichmentProfile, error: accountEnrichmentError },
       { data: playbookRows, error: playbookError },
       { data: opportunityEvidence, error: evidenceError },
+      { data: intentLedgerRows, error: intentLedgerError },
+      { data: stakeholderRows, error: stakeholderError },
     ] = await Promise.all([
       supabase.from("accounts").select("*").eq("id", authorizedAccount.id).single(),
       supabase.from("opportunities").select("*").eq("id", authorizedOpportunity.id).single(),
@@ -521,6 +989,16 @@ export default async (request: Request, _context: Context) => {
         .select("*")
         .eq("opportunity_id", authorizedOpportunity.id)
         .order("updated_at", { ascending: false }),
+      supabase
+        .from("call_intent_ledger")
+        .select("*")
+        .eq("call_id", authorizedCall.id)
+        .order("updated_at", { ascending: false }),
+      supabase
+        .from("opportunity_stakeholders")
+        .select("*")
+        .eq("opportunity_id", authorizedOpportunity.id)
+        .order("last_seen_at", { ascending: false }),
     ])
 
     if (accountError) throw new Error(accountError.message)
@@ -531,6 +1009,8 @@ export default async (request: Request, _context: Context) => {
     }
     if (playbookError) throw new Error(playbookError.message)
     if (evidenceError) throw new Error(evidenceError.message)
+    if (intentLedgerError && !isMissingRelationError(intentLedgerError)) throw new Error(intentLedgerError.message)
+    if (stakeholderError && !isMissingRelationError(stakeholderError)) throw new Error(stakeholderError.message)
 
     const selectedPlaybookRows = (playbookRows ?? []).filter((playbook) => {
       const nameKey = normalizeKey(playbook.name)
@@ -577,7 +1057,7 @@ export default async (request: Request, _context: Context) => {
       schema: liveQuestionSchema,
       schemaName: "salesframe_live_question",
       system:
-        "You are SalesFrame's low-latency live sales coach. Return only schema-valid JSON for the single visible Ask this next card. Use selected intent clusters and previous evidence to decide what must be learned, but use account and opportunity context to make the wording specific and avoid asking what is already known. The transcript window contains final Deepgram Flux turns only; use audioSourceKind, providerTurnIndex, diarizationSpeaker, endOfTurnConfidence, and wordConfidence to understand source separation, turn order, speaker confidence, and whether a turn is reliable enough to act on. Keep the current question stable only if it still fits the live conversation. If sellerFeedback says asked, skip, or too_soon, do not repeat the acted-on question. Asked means either wait for the buyer answer if there is no answer yet, or move to the next best intent if the buyer answered. Skip means choose another intent or a listen/acknowledge move. Too soon means park that intent. Softer means keep the intent but lower the pressure. Never invent deterministic fallback copy; return one AI-ranked seller move. Never ask heavy budget, procurement, economic buyer, metrics, or decision-process questions in opening unless the buyer raised the topic. Keep the question concise, natural, and customer-language led.",
+        "You are SalesFrame's low-latency live sales coach. Return only schema-valid JSON for the single visible Ask this next card. Every response must first commit what the latest final Deepgram turns taught SalesFrame, then choose the next best seller move. Use selected intent clusters, current intentLedger, opportunityFieldEvidence, stakeholders, and sellerFeedback to decide what is already asked, answered, weakly evidenced, confirmed, parked, skipped, or blocked. Use account and opportunity context to make wording specific and avoid asking what is already known. The transcript window contains final Deepgram Flux turns only; use audioSourceKind, providerTurnIndex, diarizationSpeaker, endOfTurnConfidence, and wordConfidence to understand source separation, turn order, speaker confidence, and whether a turn is reliable enough to act on. Keep the current question stable only if it still fits the live conversation. If sellerFeedback says asked, skip, or too_soon, do not repeat the acted-on question or the same intent. Asked means mark the intent asked and either wait/listen if there is no buyer answer yet, or move to the next best intent if the buyer answered. Skip means mark the exact question and intent do_not_repeat_this_call and choose another intent or a listen/acknowledge move. Too soon means park that intent until the buyer naturally reopens it or wrap-up recovery starts. Softer means keep the same intent but change the wording and lower pressure. Never ask lazy label-confirmation questions such as 'So Bob is the champion, right?' after the buyer has already confirmed or implied it. If champion or coach evidence is weak, ask for proof, actions, influence, access, or who they need to bring with them, not the same label again. Do not ask yes/no confirmation questions unless in wrap-up validation. Never invent deterministic fallback copy; return one AI-ranked seller move. Never ask heavy budget, procurement, economic buyer, metrics, or decision-process questions in opening unless the buyer raised the topic. Keep the question concise, natural, and customer-language led.",
       input: JSON.stringify({
         selectedContext: {
           call: {
@@ -587,6 +1067,9 @@ export default async (request: Request, _context: Context) => {
           },
           currentGuidance: payload.currentGuidance ?? null,
           customerResearch: payload.customerResearch ?? null,
+          intentLedger: intentLedgerError
+            ? []
+            : compactIntentLedgerRows((intentLedgerRows ?? []) as Record<string, unknown>[]),
           opportunityEvidence: compactEvidenceRows((opportunityEvidence ?? []) as Record<string, unknown>[]),
           recordContext,
           selectedPlaybooks: selectedPlaybookRows.map((playbook) => ({
@@ -594,6 +1077,9 @@ export default async (request: Request, _context: Context) => {
             name: playbook.name,
             slug: playbook.slug,
           })),
+          stakeholders: stakeholderError
+            ? []
+            : compactStakeholders((stakeholderRows ?? []) as Record<string, unknown>[]),
           intentClusters: intentClusters.slice(0, 10),
           sellerFeedback,
           blockedQuestions,
@@ -601,10 +1087,15 @@ export default async (request: Request, _context: Context) => {
         },
         latestTranscriptWindow: transcript,
         rules: [
+          "First populate evidenceCommit, intentLedgerUpdates, stakeholderUpdates, and doNotRepeat from the latest transcript and sellerFeedback.",
+          "A buyer answer can update multiple selected playbook fields through relatedPlaybookFieldIds, but only when those field ids exist in intentClusters.",
+          "If a person is named as champion, coach, authority, blocker, or stakeholder, use stakeholderUpdates and do not keep re-confirming the same label.",
+          "For champion_coach, answered/weak evidence should advance to proof/action/access/influence, or move to another higher-value intent if that fits better.",
           "Return a replacement quickly when the buyer answered the active intent, the seller clicked a control, or the topic moved.",
           "Treat low-confidence Deepgram turns as useful context but avoid making brittle evidence decisions from them.",
           "If the right move is to listen or acknowledge, still return the exact words the seller can say if they need to speak.",
           "Do not repeat any blockedQuestions.",
+          "Do not repeat any intent in intentLedger with status answered, confirmed, do_not_repeat_this_call, dropped, or parked unless there is a clear buyer re-entry cue.",
           "mustReplacePreviousQuestion must be true for seller feedback, answered intent, topic shift, or periodic audit replacement.",
           "contextUsed should name only the account or opportunity fields that actually shaped the wording or timing.",
         ],
@@ -619,6 +1110,23 @@ export default async (request: Request, _context: Context) => {
       primaryIntentLabel: cleanText(fallbackIntentCluster?.label, "Selected intent"),
       target: cleanText(fallbackIntentCluster?.label, "Selected intent"),
     })
+
+    try {
+      await persistLiveQuestionMemory({
+        accountId: authorizedAccount.id,
+        callId: authorizedCall.id,
+        intentClusters,
+        opportunityId: authorizedOpportunity.id,
+        result,
+        supabase,
+        workspaceId: authorizedCall.workspace_id,
+      })
+    } catch (memoryError) {
+      console.warn("live_question_memory_persist_failed", {
+        callId: authorizedCall.id,
+        error: memoryError instanceof Error ? memoryError.message : String(memoryError),
+      })
+    }
 
     return dataResponse({ guidance: hydrateGuidance(result) })
   } catch (error) {

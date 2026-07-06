@@ -605,6 +605,68 @@ export type Database = {
           updated_at?: string
         }
       >
+      call_intent_ledger: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          call_id: string
+          opportunity_id: string
+          intent_cluster_id: string
+          intent_label: string
+          status: string
+          confidence: number
+          summary: string
+          value: string | null
+          last_question: string | null
+          last_answer: string | null
+          source_turn_ids: Json
+          related_playbook_field_ids: Json
+          reason: string | null
+          expires_at: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          call_id: string
+          opportunity_id: string
+          intent_cluster_id: string
+          intent_label?: string
+          status?: string
+          confidence?: number
+          summary?: string
+          value?: string | null
+          last_question?: string | null
+          last_answer?: string | null
+          source_turn_ids?: Json
+          related_playbook_field_ids?: Json
+          reason?: string | null
+          expires_at?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          call_id?: string
+          opportunity_id?: string
+          intent_cluster_id?: string
+          intent_label?: string
+          status?: string
+          confidence?: number
+          summary?: string
+          value?: string | null
+          last_question?: string | null
+          last_answer?: string | null
+          source_turn_ids?: Json
+          related_playbook_field_ids?: Json
+          reason?: string | null
+          expires_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
       opportunity_field_evidence: TableDefinition<
         {
           id: string
@@ -645,6 +707,62 @@ export type Database = {
           source?: string | null
           source_call_id?: string | null
           source_transcript_segment_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      opportunity_stakeholders: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          normalized_name: string
+          name: string
+          role_label: string
+          influence_label: string
+          status: string
+          confidence: number
+          evidence_summary: string
+          source_call_id: string | null
+          source_turn_ids: Json
+          last_seen_at: string
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          normalized_name: string
+          name: string
+          role_label?: string
+          influence_label?: string
+          status?: string
+          confidence?: number
+          evidence_summary?: string
+          source_call_id?: string | null
+          source_turn_ids?: Json
+          last_seen_at?: string
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          normalized_name?: string
+          name?: string
+          role_label?: string
+          influence_label?: string
+          status?: string
+          confidence?: number
+          evidence_summary?: string
+          source_call_id?: string | null
+          source_turn_ids?: Json
+          last_seen_at?: string
           created_at?: string
           updated_at?: string
         }

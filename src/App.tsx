@@ -959,6 +959,7 @@ const LIVE_COACH_AI_RECHECK_MS = LIVE_COACH_AI_RECHECK_SECONDS * 1000
 const LIVE_COACH_FAST_CHECK_MS = 10 * 1000
 const LIVE_COACH_FORCE_REFRESH_TURNS = 1
 const RECORDING_LINK_SILENT_REFRESH_LIMIT = 2
+const RECORDING_PLAYBACK_READY_TIMEOUT_MS = 1200
 
 function mapAiLiveGuidanceResponse(value: unknown): LiveGuidance | null {
   const root = asRecord(value)
@@ -1005,6 +1006,7 @@ function mapAiLiveGuidanceResponse(value: unknown): LiveGuidance | null {
     gaps: mapAiGaps(guidance.gaps),
     questionLifecycle: mapAiQuestionLifecycle(guidance.questionLifecycle),
     parkedIntents: mapAiParkedIntents(guidance.parkedIntents),
+    evidenceCommit: mapAiEvidenceCommit(guidance.evidenceCommit),
     sellerFeedbackRequest: mapAiSellerFeedbackRequest(guidance.sellerFeedbackRequest),
     contextUsed: mapAiContextUsed(guidance.contextUsed),
     uiMode: isLiveUiMode(guidance.uiMode) ? guidance.uiMode : displayRecommendation?.uiMode,
@@ -1245,6 +1247,28 @@ function mapAiContextUsed(value: unknown): LiveGuidance["contextUsed"] {
   })
 
   return contextUsed.length ? contextUsed : undefined
+}
+
+function mapAiEvidenceCommit(value: unknown): LiveGuidance["evidenceCommit"] | undefined {
+  const record = asRecord(value)
+  const summary = stringValue(record.summary)
+  const bankedIntentNote = stringValue(record.bankedIntentNote)
+  const sourceTurnIds = Array.isArray(record.sourceTurnIds)
+    ? record.sourceTurnIds
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .slice(0, 12)
+    : []
+
+  if (!summary && !bankedIntentNote && sourceTurnIds.length === 0 && record.answeredCurrentIntent !== true) {
+    return undefined
+  }
+
+  return {
+    answeredCurrentIntent: record.answeredCurrentIntent === true,
+    bankedIntentNote,
+    sourceTurnIds,
+    summary,
+  }
 }
 
 function mapAiQuestionLifecycle(value: unknown): LiveGuidance["questionLifecycle"] | undefined {
@@ -3036,7 +3060,7 @@ function App() {
         : [...state.askedQuestionIds, question.id],
       deferredQuestionIds: state.deferredQuestionIds.filter((id) => id !== question.id),
       feedbackSignals: [...state.feedbackSignals.slice(-19), signal],
-      lastAction: `Marked asked: "${question.question}"`,
+      lastAction: `Listening for the answer to: "${question.question}"`,
     }))
     persistLiveCoachFeedback(signal)
   }
@@ -12587,6 +12611,7 @@ function NextQuestionCard({
   const questionLifecycle = guidance?.questionLifecycle
   const parkedIntents = guidance?.parkedIntents ?? []
   const primaryParkedIntent = parkedIntents[0]
+  const bankedIntentNote = guidance?.evidenceCommit?.bankedIntentNote
   const flowNote =
     guidance?.conversationState?.shouldRefreshQuestion
       ? `Following the buyer's thread: ${guidance.conversationState.refreshReason || "checking if this recommendation still fits"}`
@@ -12599,6 +12624,8 @@ function NextQuestionCard({
           questionLifecycle?.currentQuestionState === "parked" ||
           questionLifecycle?.currentQuestionState === "stale"
         ? `Parked for a better moment: ${primaryParkedIntent?.intentLabel ?? primaryIntentLabel ?? "a high-value intent"}`
+        : bankedIntentNote
+          ? `Banked: ${bankedIntentNote}`
         : guidance?.conversationState && !guidance.conversationState.shouldAskNow
           ? `Best move right now: ${guidance.conversationState.naturalnessGuidance}`
           : ""
@@ -12659,7 +12686,7 @@ function NextQuestionCard({
           {typeof confidence === "number" ? (
             <p>{Math.round(confidence * 100)}% confidence</p>
           ) : null}
-          {isAsked ? <p>Marked asked</p> : null}
+          {isAsked ? <p>Listening for the answer</p> : null}
         </div>
         {visibleAlsoCovers.length ? (
           <div className="rounded-lg bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
@@ -14002,7 +14029,7 @@ function CallReplayContent({
       call.recordingUrl ? "ready" : call.recordingStoragePath ? "loading" : "idle"
     )
   const [recordingLinkError, setRecordingLinkError] = React.useState("")
-  const [openError, setOpenError] = React.useState("")
+  const [downloadError, setDownloadError] = React.useState("")
   const [replaySeconds, setReplaySeconds] = React.useState(0)
   const [replayVolume, setReplayVolume] = React.useState(0.85)
   const [isReplayPlaying, setIsReplayPlaying] = React.useState(false)
@@ -14024,7 +14051,7 @@ function CallReplayContent({
   const displayedReplayProgress = Math.min(100, Math.max(0, (replaySeconds / replayDuration) * 100))
   const displayedReplayTime = formatTime(Math.round(replaySeconds))
   const hasPlayableRecording = Boolean(call.recordingStoragePath || call.recordingUrl)
-  const canPlayRecording = Boolean(recordingUrl) && recordingLinkStatus === "ready" && mediaReady
+  const hasReadyRecordingUrl = Boolean(recordingUrl) && recordingLinkStatus === "ready"
   const isRecordingLinkLoading = recordingLinkStatus === "loading"
 
   const loadRecordingUrl = React.useCallback(
@@ -14088,6 +14115,7 @@ function CallReplayContent({
     setRecordingUrl("")
     setRecordingLinkStatus(call.recordingStoragePath || call.recordingUrl ? "loading" : "idle")
     setRecordingLinkError("")
+    setDownloadError("")
     setReplaySeconds(0)
     setIsReplayPlaying(false)
     setMediaReady(false)
@@ -14154,26 +14182,29 @@ function CallReplayContent({
     }
 
     let playableUrl = recordingUrl
-    if (!canPlayRecording) {
+    if (!hasReadyRecordingUrl) {
       playableUrl = await loadRecordingUrl({ announce: true })
       if (!playableUrl) return
-    }
-
-    if (!mediaReady) {
-      setLastReplayAction("Replay is getting ready.")
-      return
     }
 
     if (audioRef.current) {
       try {
         recordingAutoRefreshAttemptRef.current = 0
         replayPlayIntentRef.current = true
+        setLastReplayAction("Replay is getting ready.")
         if (audioRef.current.src !== playableUrl) {
           audioRef.current.src = playableUrl
+          setMediaReady(false)
           audioRef.current.load()
         }
 
         audioRef.current.volume = replayVolume
+        const readyBeforePlay = await waitForRecordingPlaybackReadiness(audioRef.current)
+        if (readyBeforePlay) {
+          setMediaReady(true)
+          setRecordingLinkStatus("ready")
+          setRecordingLinkError("")
+        }
         await audioRef.current.play()
         setIsReplayPlaying(true)
         setLastReplayAction("Replay playing")
@@ -14191,53 +14222,40 @@ function CallReplayContent({
     setLastReplayAction("Audio player is still loading.")
   }
 
-  const handleOpenRecording = async () => {
-    if (!hasPlayableRecording) {
-      setOpenError("No recording is available for this call.")
-      return
-    }
-
-    setOpenError("")
-    const targetWindow = window.open("about:blank", "_blank", "noopener,noreferrer")
-    if (targetWindow) targetWindow.opener = null
-
-    try {
-      const nextUrl = recordingUrl || (await loadRecordingUrl({ announce: true }))
-      if (!nextUrl) throw new Error("No recording is available for this call.")
-
-      if (targetWindow) {
-        targetWindow.location.href = nextUrl
-      } else {
-        window.open(nextUrl, "_blank", "noopener,noreferrer")
-      }
-    } catch (caughtError: unknown) {
-      targetWindow?.close()
-      setOpenError(getUserFacingErrorMessage(caughtError, "Recording needs another open attempt."))
-    }
-  }
-
   const handleDownloadRecording = async () => {
     if (!hasPlayableRecording) {
-      setOpenError("No recording is available for this call.")
+      setDownloadError("No recording is available for this call.")
       return
     }
 
-    setOpenError("")
+    setDownloadError("")
 
     try {
       const nextUrl = recordingUrl || (await loadRecordingUrl({ announce: true }))
       if (!nextUrl) throw new Error("No recording is available for this call.")
 
+      setLastReplayAction("Preparing audio download")
+      const response = await fetch(nextUrl)
+      if (!response.ok) throw new Error("Recording download failed.")
+      const blob = await response.blob()
+      if (blob.size <= 0) throw new Error("Recording download was empty.")
+
+      const objectUrl = URL.createObjectURL(blob)
       const link = document.createElement("a")
-      link.href = nextUrl
+      link.href = objectUrl
       link.download = getRecordingDownloadFileName(call)
       link.rel = "noopener noreferrer"
-      document.body.append(link)
-      link.click()
-      link.remove()
+      link.style.display = "none"
+      document.body.appendChild(link)
+      try {
+        link.click()
+      } finally {
+        link.remove()
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+      }
       setLastReplayAction("Recording download started")
     } catch (caughtError: unknown) {
-      setOpenError(getUserFacingErrorMessage(caughtError, "Recording needs another download attempt."))
+      setDownloadError(getUserFacingErrorMessage(caughtError, "Recording needs another download attempt."))
     }
   }
 
@@ -14343,7 +14361,7 @@ function CallReplayContent({
               setRecordingLinkStatus("error")
               const message = getAudioPlaybackErrorMessage(
                 audioRef.current,
-                "Recording link needs a refresh. Press Retry playback, or open the recording in a new tab."
+                "Recording link needs a refresh. Press Retry playback, or download the audio."
               )
               setRecordingLinkError(message)
               setLastReplayAction(message)
@@ -14435,20 +14453,10 @@ function CallReplayContent({
             size="sm"
             className="w-full gap-2 sm:w-auto"
             disabled={!hasPlayableRecording || isRecordingLinkLoading}
-            onClick={() => void handleOpenRecording()}
-          >
-            <ExternalLinkIcon />
-            Open recording
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full gap-2 sm:w-auto"
-            disabled={!hasPlayableRecording || isRecordingLinkLoading}
             onClick={() => void handleDownloadRecording()}
           >
             <DownloadIcon />
-            Download recording
+            Download audio
           </Button>
           <div className="flex w-full items-center gap-2 rounded-lg bg-muted/30 px-3 py-2 sm:min-w-36 sm:flex-1 sm:justify-end sm:bg-transparent sm:px-0 sm:py-0">
             <Volume2Icon className="size-4 shrink-0 text-muted-foreground" />
@@ -14473,9 +14481,9 @@ function CallReplayContent({
             {recordingLinkError}
           </div>
         ) : null}
-        {openError ? (
+        {downloadError ? (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
-            {openError}
+            {downloadError}
           </div>
         ) : null}
         <div className="grid gap-2">
@@ -14544,7 +14552,7 @@ function getReplayReadiness({
   if (recordingStatus === "failed" || linkStatus === "error") {
     return {
       controlsDisabled: false,
-      description: "Replay needs attention. Retry playback, open the file, or download the recording.",
+      description: "Replay needs attention. Retry playback or download the audio.",
       progress: 100,
       title: "Recording needs attention",
     }
@@ -14570,9 +14578,9 @@ function getReplayReadiness({
 
   if (recordingStatus === "processing" || linkStatus === "loading" || (hasRecordingUrl && !mediaReady)) {
     return {
-      controlsDisabled: recordingStatus !== "processing" || !hasRecordingSource || linkStatus === "loading",
+      controlsDisabled: !hasRecordingSource || linkStatus === "loading",
       description: hasRecordingSource
-        ? "SalesFrame is preparing the replay link and checking the audio file. You can retry playback if it feels stuck."
+        ? "SalesFrame is preparing the replay link and checking the audio file. You can press Play if it feels stuck."
         : "SalesFrame is preparing the replay link and checking the audio file.",
       progress: 82,
       title: "Preparing replay",
@@ -14610,11 +14618,11 @@ function getAudioPlaybackErrorMessage(audio: HTMLAudioElement | null, fallback: 
   if (!mediaError) return fallback
 
   if (mediaError.code === 4) {
-    return "The recording was saved, but this browser cannot play the audio format. Download or open the recording while SalesFrame prepares a better replay path."
+    return "The recording was saved, but this browser cannot play the audio format. Download the audio while SalesFrame prepares a better replay path."
   }
 
   if (mediaError.code === 2) {
-    return "SalesFrame needs another moment to load the recording link. Retry playback, then open or download the recording if it still does not play."
+    return "SalesFrame needs another moment to load the recording link. Retry playback, then download the audio if it still does not play."
   }
 
   if (mediaError.code === 3) {
@@ -14622,6 +14630,30 @@ function getAudioPlaybackErrorMessage(audio: HTMLAudioElement | null, fallback: 
   }
 
   return fallback
+}
+
+function waitForRecordingPlaybackReadiness(audio: HTMLAudioElement) {
+  if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve(true)
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    const finish = (ready: boolean) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeoutId)
+      audio.removeEventListener("loadedmetadata", handleReady)
+      audio.removeEventListener("canplay", handleReady)
+      audio.removeEventListener("error", handleError)
+      resolve(ready)
+    }
+    const handleReady = () => finish(true)
+    const handleError = () => finish(false)
+    const timeoutId = window.setTimeout(() => finish(false), RECORDING_PLAYBACK_READY_TIMEOUT_MS)
+
+    audio.addEventListener("loadedmetadata", handleReady, { once: true })
+    audio.addEventListener("canplay", handleReady, { once: true })
+    audio.addEventListener("error", handleError, { once: true })
+  })
 }
 
 function getRecordingDownloadFileName(call: CallSummary) {
