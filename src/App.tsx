@@ -7001,66 +7001,98 @@ type StartCallPreparationStep = {
 
 function StartCallPreparingView({
   activeIndex,
+  accountSummary,
+  audioSourceLabel,
   detail,
+  opportunitySummary,
   progress,
   steps,
 }: {
   activeIndex: number
+  accountSummary: string
+  audioSourceLabel: string
   detail?: string
+  opportunitySummary: string
   progress: number
   steps: StartCallPreparationStep[]
 }) {
   const activeStep = steps[Math.min(activeIndex, steps.length - 1)] ?? steps[0]
   const currentDescription = detail || activeStep?.description || "Preparing the call workspace."
+  const ActiveIcon = activeStep?.icon ?? SparklesIcon
 
   return (
-    <div className="grid min-h-[260px] min-w-0 content-start gap-4 overflow-hidden py-1">
-      <div className="grid min-w-0 gap-1">
-        <p className="text-base font-semibold tracking-tight">Starting call</p>
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          SalesFrame is checking the transcript connection, preparing the first question, and then the cockpit will open.
-        </p>
-      </div>
-
-      <div className="grid min-w-0 gap-2" aria-live="polite">
-        <div className="flex min-w-0 items-center justify-between gap-3">
-          <p className="truncate text-sm font-medium">{activeStep?.label ?? "Preparing call"}</p>
-          <p className="shrink-0 text-sm tabular-nums text-muted-foreground">{Math.round(progress)}%</p>
+    <div className="grid min-w-0 gap-3 py-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,260px)] sm:gap-4">
+      <div className="grid min-w-0 gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <SparklesIcon className="size-4 text-muted-foreground" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Preparing live coach</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              SalesFrame is getting the transcript and first question ready before opening the cockpit.
+            </p>
+          </div>
         </div>
-        <Progress className="h-2" value={progress} />
-        <p className="text-sm leading-relaxed text-muted-foreground">{currentDescription}</p>
+
+        <div className="grid min-w-0 gap-2 rounded-lg bg-muted/40 p-2.5 sm:p-3">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Account</p>
+            <p className="mt-1 truncate text-sm font-medium">{accountSummary}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Opportunity</p>
+            <p className="mt-1 truncate text-sm font-medium">{opportunitySummary}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Audio</p>
+            <p className="mt-1 truncate text-sm font-medium">{audioSourceLabel}</p>
+          </div>
+        </div>
       </div>
 
-      <div className="grid min-w-0 gap-1.5">
-        {steps.map((item, index) => {
-          const Icon = item.icon
-          const isComplete = progress >= item.progress || progress === 100
-          const isActive = index === activeIndex && progress < 100
+      <div className="grid min-w-0 content-start gap-3">
+        <div className="grid min-w-0 gap-2" aria-live="polite">
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-primary">
+                <ActiveIcon className="size-4" />
+              </span>
+              <p className="truncate text-sm font-medium">{activeStep?.label ?? "Preparing call"}</p>
+            </div>
+            <p className="shrink-0 text-sm tabular-nums text-muted-foreground">{Math.round(progress)}%</p>
+          </div>
+          <Progress className="h-2" value={progress} />
+          <p className="text-xs leading-relaxed text-muted-foreground">{currentDescription}</p>
+        </div>
 
-          return (
-            <div
-              key={item.id}
-              className={cn(
-                "flex min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground",
-                isActive && "bg-muted/45 text-foreground",
-                isComplete && "text-foreground"
-              )}
-            >
-              <span
+        <div className="grid min-w-0 gap-1">
+          {steps.map((item, index) => {
+            const Icon = item.icon
+            const isComplete = progress >= item.progress || progress === 100
+            const isActive = index === activeIndex && progress < 100
+
+            return (
+              <div
+                key={item.id}
                 className={cn(
-                  "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground",
-                  isActive && "text-primary",
-                  isComplete && "text-emerald-600"
+                  "flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground",
+                  isActive && "bg-muted/55 text-foreground",
+                  isComplete && "text-foreground"
                 )}
               >
-                {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
-              </span>
-              <div className="min-w-0 flex-1">
+                <span
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+                    isActive && "text-primary",
+                    isComplete && "text-emerald-600"
+                  )}
+                >
+                  {isComplete ? <CheckIcon className="size-3.5" /> : <Icon className="size-3.5" />}
+                </span>
                 <p className="truncate font-medium">{item.label}</p>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -7180,6 +7212,7 @@ function StartRecordingDialog({
     { label: "Call", icon: PhoneCallIcon },
     { label: "Seller Research", icon: SearchIcon },
   ]
+  const preparationStepItem = { label: "Preparing", icon: SparklesIcon }
   const currentRecordingStepLabel = recordingSteps[step - 1]?.label ?? recordingSteps[0].label
   const canNavigateToRecordingStep = (targetStep: 1 | 2 | 3 | 4) => {
     if (targetStep === 1) return true
@@ -7663,14 +7696,82 @@ function StartRecordingDialog({
   const startCallDescription = startSubmitting
     ? "SalesFrame is preparing the live coach before opening the cockpit."
     : "Attach the call to the right context before live guidance begins."
+  const audioSourceSummary = selectedAudioSourceChoice === "two_channels" ? "Two channels" : "One channel"
+  const renderStartCallSteps = (isPreparing = false) => {
+    const visibleSteps = isPreparing ? [...recordingSteps, preparationStepItem] : recordingSteps
+    const activeStep = isPreparing ? visibleSteps.length : step
+    const activeLabel = visibleSteps[activeStep - 1]?.label ?? currentRecordingStepLabel
+
+    return (
+      <>
+        <p className="sr-only" aria-live="polite">
+          Step {activeStep} of {visibleSteps.length}: {activeLabel}
+        </p>
+        <ol
+          className={cn(
+            "grid min-w-0 grid-cols-2 gap-2",
+            isPreparing ? "sm:grid-cols-5" : "sm:grid-cols-4"
+          )}
+          aria-label={isPreparing ? "Start call progress" : "Start call steps"}
+        >
+          {visibleSteps.map(({ label, icon: Icon }, index) => {
+            const itemStep = (index + 1) as 1 | 2 | 3 | 4
+            const isActive = activeStep === index + 1
+            const isComplete = activeStep > index + 1
+            const canNavigate = !isPreparing && index < recordingSteps.length && canNavigateToRecordingStep(itemStep)
+
+            return (
+              <li
+                key={label}
+                className="min-w-0"
+              >
+                <button
+                  type="button"
+                  aria-current={isActive ? "step" : undefined}
+                  aria-label={isPreparing ? label : `Go to ${label} step`}
+                  disabled={!canNavigate}
+                  onClick={() => {
+                    if (!canNavigate) return
+                    setStep(itemStep)
+                  }}
+                  className={cn(
+                    "flex min-h-12 w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-left text-sm transition-colors duration-150 sm:px-3",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    canNavigate && "hover:bg-muted/50",
+                    !canNavigate && "cursor-not-allowed opacity-55",
+                    isActive && "border-primary bg-primary/5 opacity-100",
+                    isComplete && "bg-muted/50 opacity-100"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background",
+                      isActive && "border-primary text-primary"
+                    )}
+                  >
+                    {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
+                  </span>
+                  <span className="truncate font-medium">{label}</span>
+                </button>
+              </li>
+            )
+          })}
+        </ol>
+      </>
+    )
+  }
   const startCallContent = (
     <>
         {startSubmitting ? (
           <>
-            <div className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 max-sm:pr-0 sm:row-span-2">
+            {renderStartCallSteps(true)}
+            <div className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 max-sm:pr-0">
               <StartCallPreparingView
                 activeIndex={startPhaseIndex}
+                accountSummary={accountSummary}
+                audioSourceLabel={audioSourceSummary}
                 detail={startPreparationDetail}
+                opportunitySummary={opportunitySummary}
                 progress={startProgress}
                 steps={startPreparationSteps}
               />
@@ -7688,50 +7789,7 @@ function StartRecordingDialog({
           </>
         ) : (
           <>
-            <p className="sr-only" aria-live="polite">
-              Step {step} of {recordingSteps.length}: {currentRecordingStepLabel}
-            </p>
-            <ol className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Start call steps">
-              {recordingSteps.map(({ label, icon: Icon }, index) => {
-                const itemStep = (index + 1) as 1 | 2 | 3 | 4
-                const isActive = step === itemStep
-                const isComplete = step > itemStep
-                const canNavigate = canNavigateToRecordingStep(itemStep)
-
-                return (
-                  <li
-                    key={label}
-                    className="min-w-0"
-                  >
-                    <button
-                      type="button"
-                      aria-current={isActive ? "step" : undefined}
-                      aria-label={`Go to ${label} step`}
-                      disabled={!canNavigate}
-                      onClick={() => setStep(itemStep)}
-                      className={cn(
-                        "flex min-h-12 w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-left text-sm transition-colors duration-150 sm:px-3",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                        canNavigate && "hover:bg-muted/50",
-                        !canNavigate && "cursor-not-allowed opacity-55",
-                        isActive && "border-primary bg-primary/5",
-                        isComplete && "bg-muted/50"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background",
-                          isActive && "border-primary text-primary"
-                        )}
-                      >
-                        {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
-                      </span>
-                      <span className="truncate font-medium">{label}</span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ol>
+            {renderStartCallSteps(false)}
 
             <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain pr-1 max-sm:pr-0">
               {step === 1 ? (
