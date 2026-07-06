@@ -313,14 +313,9 @@ async function createOpenedDeepgramSocket(websocketUrls: string[], accessToken: 
 }
 
 function getDeepgramAuthProtocolAttempts(accessToken: string) {
-  // Temporary tokens authenticate as Bearer on normal requests. Deepgram's
-  // browser WebSocket docs also support the "token" subprotocol pattern, so
-  // keep it as a fallback for browsers/proxies that reject bearer casing.
-  return [
-    ["bearer", accessToken],
-    ["Bearer", accessToken],
-    ["token", accessToken],
-  ]
+  // Browser WebSockets cannot set an Authorization header. Deepgram's browser
+  // WebSocket docs use the Sec-WebSocket-Protocol form: token, credential.
+  return [["token", accessToken]]
 }
 
 function getDeepgramSocketHost(websocketUrl: string) {

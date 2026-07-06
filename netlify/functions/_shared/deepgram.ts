@@ -18,7 +18,7 @@ export type DeepgramSocketVerificationResult = {
 
 export const deepgramGrantUrl = "https://api.deepgram.com/v1/auth/grant"
 export const deepgramListenUrl = "wss://api.deepgram.com/v2/listen"
-const defaultDeepgramListenHosts = ["api.au.deepgram.com", "api.deepgram.com"]
+const defaultDeepgramListenHosts = ["api.deepgram.com", "api.au.deepgram.com"]
 
 type DeepgramFluxConfig = {
   diarizeModel: string
@@ -149,11 +149,7 @@ export async function verifyDeepgramListenSocket(
 }
 
 function getDeepgramAuthProtocolAttempts(accessToken: string) {
-  return [
-    ["bearer", accessToken],
-    ["Bearer", accessToken],
-    ["token", accessToken],
-  ]
+  return [["token", accessToken]]
 }
 
 function waitForSocketOpen(socket: WebSocket) {
