@@ -30,9 +30,7 @@ import {
   ListChecksIcon,
   Mic2Icon,
   MoonIcon,
-  PauseIcon,
   PhoneCallIcon,
-  PlayIcon,
   PlusIcon,
   RadioIcon,
   SearchIcon,
@@ -48,7 +46,6 @@ import {
   Undo2Icon,
   UserRoundCheckIcon,
   UsersRoundIcon,
-  Volume2Icon,
 } from "lucide-react"
 
 import { AppSidebar } from "@/components/app-sidebar"
@@ -958,8 +955,6 @@ const LIVE_COACH_AI_RECHECK_SECONDS = 30
 const LIVE_COACH_AI_RECHECK_MS = LIVE_COACH_AI_RECHECK_SECONDS * 1000
 const LIVE_COACH_FAST_CHECK_MS = 10 * 1000
 const LIVE_COACH_FORCE_REFRESH_TURNS = 1
-const RECORDING_LINK_SILENT_REFRESH_LIMIT = 2
-const RECORDING_PLAYBACK_READY_TIMEOUT_MS = 1200
 
 function mapAiLiveGuidanceResponse(value: unknown): LiveGuidance | null {
   const root = asRecord(value)
@@ -1833,20 +1828,6 @@ function mapOpenAiKeyStatusToSavedState(status: OpenAiKeyStatus): SavedOpenAiKey
   }
 }
 
-type ReplayMarker = {
-  detail: string
-  label: string
-  position: number
-  seconds: number
-  time: string
-  tone: string
-}
-
-type ReplayFieldMarker = {
-  label: string
-  tone: string
-}
-
 function canReplayCall(call: CallSummary | null | undefined): call is CallSummary {
   return Boolean(call?.recordingStoragePath || call?.recordingUrl)
 }
@@ -1872,24 +1853,6 @@ function getCallStatusTextClassName(status: string) {
   return "text-muted-foreground"
 }
 
-function getCallDurationSeconds(call: CallSummary) {
-  if (call.durationSeconds > 0) return call.durationSeconds
-
-  return parseDurationText(call.duration) || 30 * 60
-}
-
-function parseDurationText(value: string) {
-  const clockMatch = value.match(/^(\d+):([0-5]\d)$/)
-  if (clockMatch) return Number(clockMatch[1]) * 60 + Number(clockMatch[2])
-
-  const minuteMatch = value.match(/(\d+)\s*m/)
-  const secondMatch = value.match(/(\d+)\s*s/)
-
-  if (!minuteMatch && !secondMatch) return 0
-
-  return Number(minuteMatch?.[1] ?? 0) * 60 + Number(secondMatch?.[1] ?? 0)
-}
-
 function parseTranscriptTime(value: string) {
   const parts = value.split(":").map((part) => Number(part))
   if (parts.some((part) => !Number.isFinite(part))) return null
@@ -1897,175 +1860,6 @@ function parseTranscriptTime(value: string) {
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
 
   return null
-}
-
-function getTranscriptLineSeconds({
-  durationSeconds,
-  index,
-  line,
-  total,
-}: {
-  durationSeconds: number
-  index: number
-  line: Opportunity["transcript"][number]
-  total: number
-}) {
-  const parsedSeconds = parseTranscriptTime(line.time)
-  if (parsedSeconds !== null) return Math.min(durationSeconds, Math.max(0, parsedSeconds))
-  if (total <= 1) return Math.round(durationSeconds * 0.15)
-
-  return Math.round((index / (total - 1)) * durationSeconds)
-}
-
-function buildReplayMarkers({
-  call,
-  notes,
-  transcript,
-}: {
-  call: CallSummary
-  notes: string[]
-  transcript: Opportunity["transcript"]
-}): ReplayMarker[] {
-  const durationSeconds = getCallDurationSeconds(call)
-  const transcriptMarkers = replayFieldRules.flatMap((rule) => {
-    const index = transcript.findIndex((line) => {
-      const text = line.text.toLowerCase()
-      return rule.keywords.some((keyword) => text.includes(keyword))
-    })
-
-    if (index < 0) return []
-
-    const line = transcript[index]
-    const seconds = getTranscriptLineSeconds({
-      durationSeconds,
-      index,
-      line,
-      total: transcript.length,
-    })
-
-    return [
-      {
-        detail: line.text,
-        label: rule.label,
-        position: Math.min(100, Math.max(0, (seconds / durationSeconds) * 100)),
-        seconds,
-        time: formatTime(seconds),
-        tone: rule.tone,
-      },
-    ]
-  })
-
-  if (transcriptMarkers.length > 0) {
-    return transcriptMarkers.sort((left, right) => left.seconds - right.seconds)
-  }
-
-  if (transcript.length > 0) {
-    const selectedLines = [transcript[0], transcript[Math.floor(transcript.length / 2)], transcript[transcript.length - 1]]
-      .filter((line, index, lines) => line && lines.findIndex((item) => item.time === line.time && item.text === line.text) === index)
-
-    return selectedLines.map((line, index) => {
-      const lineIndex = transcript.indexOf(line)
-      const seconds = getTranscriptLineSeconds({
-        durationSeconds,
-        index: lineIndex,
-        line,
-        total: transcript.length,
-      })
-
-      return {
-        detail: line.text,
-        label: index === 0 ? "Opening" : index === selectedLines.length - 1 ? "Close" : "Middle",
-        position: Math.min(100, Math.max(0, (seconds / durationSeconds) * 100)),
-        seconds,
-        time: formatTime(seconds),
-        tone: index === 0 ? "bg-sky-500" : index === selectedLines.length - 1 ? "bg-violet-500" : "bg-emerald-500",
-      }
-    })
-  }
-
-  return notes.slice(0, 3).map((note, index) => {
-    const seconds = Math.round(durationSeconds * ([0.25, 0.55, 0.82][index] ?? 0.5))
-    const marker = getReplayFieldMarker(note, index)
-
-    return {
-      detail: note,
-      label: marker.label,
-      position: Math.min(100, Math.max(0, (seconds / durationSeconds) * 100)),
-      seconds,
-      time: formatTime(seconds),
-      tone: marker.tone,
-    }
-  })
-}
-
-const replayFieldRules = [
-  {
-    label: "Pain",
-    tone: "bg-amber-500",
-    keywords: ["pain", "problem", "challenge", "manual", "risk", "slow", "issue", "friction"],
-  },
-  {
-    label: "Metrics",
-    tone: "bg-emerald-500",
-    keywords: ["metric", "measure", "kpi", "cost", "revenue", "hours", "days", "percent", "%", "roi"],
-  },
-  {
-    label: "Economic buyer",
-    tone: "bg-sky-500",
-    keywords: ["economic buyer", "budget owner", "executive sponsor", "cfo", "cio", "ceo"],
-  },
-  {
-    label: "Decision criteria",
-    tone: "bg-blue-500",
-    keywords: ["decision criteria", "criteria", "capability", "requirement", "evaluation"],
-  },
-  {
-    label: "Decision process",
-    tone: "bg-indigo-500",
-    keywords: ["decision", "approve", "approval", "procurement", "legal", "security", "stakeholder", "buyer"],
-  },
-  {
-    label: "Champion",
-    tone: "bg-violet-500",
-    keywords: ["champion", "coach", "advocate", "internal sponsor"],
-  },
-  {
-    label: "Budget",
-    tone: "bg-emerald-600",
-    keywords: ["budget", "funding", "commercial", "price", "investment"],
-  },
-  {
-    label: "Timeline",
-    tone: "bg-rose-500",
-    keywords: ["timeline", "deadline", "go live", "by q", "this quarter", "next quarter"],
-  },
-  {
-    label: "Next step",
-    tone: "bg-violet-500",
-    keywords: ["next step", "follow up", "send", "pilot", "demo", "meeting", "workshop"],
-  },
-] as const
-
-function getReplayFieldMarker(text: string, fallbackIndex = 0): ReplayFieldMarker {
-  const normalized = text.toLowerCase()
-  const matchedRule = replayFieldRules.find((rule) =>
-    rule.keywords.some((keyword) => normalized.includes(keyword))
-  )
-
-  if (matchedRule) {
-    return {
-      label: matchedRule.label,
-      tone: matchedRule.tone,
-    }
-  }
-
-  const fallbackMarkers: ReplayFieldMarker[] = [
-    { label: "Evidence", tone: "bg-slate-500" },
-    { label: "Field", tone: "bg-sky-500" },
-    { label: "Insight", tone: "bg-violet-500" },
-  ]
-
-  return fallbackMarkers[fallbackIndex % fallbackMarkers.length]
 }
 
 function sanitizeTranscriptDownloadFileName(value: string) {
@@ -13952,16 +13746,36 @@ function CaptureSignalStack({
 
 function CallReplayCard({
   call,
-  notes,
   onDeleteCall,
   transcript,
 }: {
   call: CallSummary
-  notes: string[]
   onDeleteCall: (callId: string) => void
   transcript: Opportunity["transcript"]
 }) {
   const hasTranscriptLines = transcript.some((line) => line.text.trim())
+  const hasAudioRecording = Boolean(call.recordingStoragePath || call.recordingUrl)
+  const [downloadStatus, setDownloadStatus] = React.useState<"idle" | "downloading" | "error">("idle")
+  const [downloadError, setDownloadError] = React.useState("")
+
+  const handleDownloadAudio = async () => {
+    if (!hasAudioRecording) {
+      setDownloadStatus("error")
+      setDownloadError("No audio recording is available for this call.")
+      return
+    }
+
+    setDownloadStatus("downloading")
+    setDownloadError("")
+
+    try {
+      await downloadCallAudioFile(call)
+      setDownloadStatus("idle")
+    } catch (caughtError: unknown) {
+      setDownloadStatus("error")
+      setDownloadError(getUserFacingErrorMessage(caughtError, "Recording needs another download attempt."))
+    }
+  }
 
   return (
     <Card>
@@ -13970,7 +13784,17 @@ function CallReplayCard({
           <CardDescription>Recording</CardDescription>
           <CardTitle>{call.title}</CardTitle>
         </div>
-        <CardAction className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
+        <CardAction className="col-start-1 row-span-1 row-start-auto mt-3 flex w-full flex-col items-stretch gap-2 justify-self-start sm:col-start-1 sm:row-span-1 sm:row-start-auto sm:mt-3 sm:w-full sm:flex-row sm:items-center sm:justify-self-start">
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full gap-2 sm:w-auto"
+            disabled={!hasAudioRecording || downloadStatus === "downloading"}
+            onClick={() => void handleDownloadAudio()}
+          >
+            <DownloadIcon />
+            {downloadStatus === "downloading" ? "Downloading..." : "Download audio"}
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -13992,668 +13816,42 @@ function CallReplayCard({
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent>
-        <CallReplayContent call={call} notes={notes} transcript={transcript} />
-      </CardContent>
+      {downloadError ? (
+        <CardContent>
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+            {downloadError}
+          </div>
+        </CardContent>
+      ) : null}
     </Card>
   )
 }
 
-function CallReplayContent({
-  call,
-  notes,
-  transcript,
-}: {
-  call: CallSummary
-  notes: string[]
-  transcript: Opportunity["transcript"]
-}) {
-  const audioRef = React.useRef<HTMLAudioElement | null>(null)
-  const replayDuration = getCallDurationSeconds(call)
-  const replayMarkers = React.useMemo(
-    () => buildReplayMarkers({ call, notes, transcript }),
-    [call, notes, transcript]
-  )
-  const replayNoteItems = React.useMemo(
-    () =>
-      notes.map((note, index) => ({
-        id: `${call.id}-note-${index}`,
-        marker: getReplayFieldMarker(note, index),
-        note,
-      })),
-    [call.id, notes]
-  )
-  const [recordingUrl, setRecordingUrl] = React.useState(call.recordingUrl ?? "")
-  const [recordingLinkStatus, setRecordingLinkStatus] =
-    React.useState<"idle" | "loading" | "ready" | "error">(
-      call.recordingUrl ? "ready" : call.recordingStoragePath ? "loading" : "idle"
-    )
-  const [recordingLinkError, setRecordingLinkError] = React.useState("")
-  const [downloadError, setDownloadError] = React.useState("")
-  const [replaySeconds, setReplaySeconds] = React.useState(0)
-  const [replayVolume, setReplayVolume] = React.useState(0.85)
-  const [isReplayPlaying, setIsReplayPlaying] = React.useState(false)
-  const [mediaReady, setMediaReady] = React.useState(false)
-  const [lastReplayAction, setLastReplayAction] = React.useState(
-    call.recordingStoragePath ? "Recording saved. Replay is getting ready." : "Replay ready"
-  )
-  const recordingLinkRequestRef = React.useRef(0)
-  const recordingAutoRefreshAttemptRef = React.useRef(0)
-  const replayPlayIntentRef = React.useRef(false)
-  const recordingStatus = normalizeRecordingLifecycleStatusForReplay(call)
-  const replayReadiness = getReplayReadiness({
-    hasRecordingSource: Boolean(call.recordingStoragePath || call.recordingUrl),
-    hasRecordingUrl: Boolean(recordingUrl),
-    linkStatus: recordingLinkStatus,
-    mediaReady,
-    recordingStatus,
-  })
-  const displayedReplayProgress = Math.min(100, Math.max(0, (replaySeconds / replayDuration) * 100))
-  const displayedReplayTime = formatTime(Math.round(replaySeconds))
-  const hasPlayableRecording = Boolean(call.recordingStoragePath || call.recordingUrl)
-  const hasReadyRecordingUrl = Boolean(recordingUrl) && recordingLinkStatus === "ready"
-  const isRecordingLinkLoading = recordingLinkStatus === "loading"
+async function downloadCallAudioFile(call: CallSummary) {
+  const recordingUrl = call.recordingStoragePath
+    ? await createCallRecordingSignedUrl(call.recordingStoragePath)
+    : call.recordingUrl ?? ""
+  if (!recordingUrl) throw new Error("No audio recording is available for this call.")
 
-  const loadRecordingUrl = React.useCallback(
-    async ({ announce = false, silentError = false }: { announce?: boolean; silentError?: boolean } = {}) => {
-      const requestId = recordingLinkRequestRef.current + 1
-      recordingLinkRequestRef.current = requestId
+  const response = await fetch(recordingUrl)
+  if (!response.ok) throw new Error("Recording download failed.")
 
-      if (!call.recordingStoragePath && !call.recordingUrl) {
-        setRecordingUrl("")
-        setRecordingLinkStatus("idle")
-        setRecordingLinkError("")
-        setLastReplayAction("No recording is available for this call.")
-        return ""
-      }
+  const blob = await response.blob()
+  if (blob.size <= 0) throw new Error("Recording download was empty.")
 
-      setRecordingLinkStatus("loading")
-      setRecordingLinkError("")
-      setLastReplayAction(
-        silentError
-          ? "Recording saved. Replay is getting ready."
-          : announce
-            ? "Refreshing recording link"
-            : "Preparing recording link"
-      )
-
-      try {
-        const nextUrl = call.recordingStoragePath
-          ? await createCallRecordingSignedUrl(call.recordingStoragePath)
-          : call.recordingUrl ?? ""
-
-        if (requestId !== recordingLinkRequestRef.current) return ""
-        if (!nextUrl) throw new Error("No recording is available for this call.")
-
-        setRecordingUrl(nextUrl)
-        setRecordingLinkStatus("ready")
-        setRecordingLinkError("")
-        setLastReplayAction(announce ? "Recording link refreshed. Preparing replay." : "Preparing replay")
-        return nextUrl
-      } catch (caughtError: unknown) {
-        if (requestId !== recordingLinkRequestRef.current) return ""
-
-        const message = getUserFacingErrorMessage(caughtError, "Recording link needs another refresh.")
-        setRecordingUrl("")
-        if (silentError) {
-          setRecordingLinkStatus("idle")
-          setRecordingLinkError("")
-          setLastReplayAction("Recording saved. Press Play when you are ready.")
-        } else {
-          setRecordingLinkStatus("error")
-          setRecordingLinkError(message)
-          setLastReplayAction(message)
-        }
-        return ""
-      }
-    },
-    [call.recordingStoragePath, call.recordingUrl]
-  )
-
-  React.useEffect(() => {
-    recordingLinkRequestRef.current += 1
-    setRecordingUrl("")
-    setRecordingLinkStatus(call.recordingStoragePath || call.recordingUrl ? "loading" : "idle")
-    setRecordingLinkError("")
-    setDownloadError("")
-    setReplaySeconds(0)
-    setIsReplayPlaying(false)
-    setMediaReady(false)
-    recordingAutoRefreshAttemptRef.current = 0
-    replayPlayIntentRef.current = false
-    setLastReplayAction(
-      call.recordingStoragePath
-        ? "Recording saved. Replay is getting ready."
-        : call.recordingUrl
-          ? "Preparing recording link"
-          : "No recording is available for this call."
-    )
-    if (call.recordingStoragePath || call.recordingUrl) {
-      void loadRecordingUrl({ silentError: Boolean(call.recordingStoragePath) })
-    }
-
-    return () => {
-      recordingLinkRequestRef.current += 1
-    }
-  }, [call.id, call.recordingStoragePath, call.recordingUrl, loadRecordingUrl])
-
-  React.useEffect(() => {
-    if (audioRef.current) {
-      if (recordingUrl && audioRef.current.src !== recordingUrl) {
-        setMediaReady(false)
-        audioRef.current.src = recordingUrl
-        audioRef.current.load()
-      }
-      audioRef.current.volume = replayVolume
-    }
-  }, [replayVolume, recordingUrl])
-
-  const setPlaybackPosition = (seconds: number, action: string) => {
-    const nextSeconds = Math.min(replayDuration, Math.max(0, seconds))
-    setReplaySeconds(nextSeconds)
-    setLastReplayAction(action)
-
-    if (audioRef.current) {
-      audioRef.current.currentTime = nextSeconds
-    }
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = objectUrl
+  link.download = getRecordingDownloadFileName(call)
+  link.rel = "noopener noreferrer"
+  link.style.display = "none"
+  document.body.appendChild(link)
+  try {
+    link.click()
+  } finally {
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
   }
-
-  const handlePlayPause = async () => {
-    if (isReplayPlaying) {
-      replayPlayIntentRef.current = false
-      audioRef.current?.pause()
-      setIsReplayPlaying(false)
-      setLastReplayAction("Replay paused")
-      return
-    }
-
-    if (!hasPlayableRecording) {
-      setLastReplayAction("No recording is available for this call.")
-      return
-    }
-
-    if (
-      recordingStatus === "uploading" ||
-      recordingStatus === "recording" ||
-      (recordingStatus === "processing" && !call.recordingStoragePath && !recordingUrl)
-    ) {
-      setLastReplayAction("Replay is getting ready.")
-      return
-    }
-
-    let playableUrl = recordingUrl
-    if (!hasReadyRecordingUrl) {
-      playableUrl = await loadRecordingUrl({ announce: true })
-      if (!playableUrl) return
-    }
-
-    if (audioRef.current) {
-      try {
-        recordingAutoRefreshAttemptRef.current = 0
-        replayPlayIntentRef.current = true
-        setLastReplayAction("Replay is getting ready.")
-        if (audioRef.current.src !== playableUrl) {
-          audioRef.current.src = playableUrl
-          setMediaReady(false)
-          audioRef.current.load()
-        }
-
-        audioRef.current.volume = replayVolume
-        const readyBeforePlay = await waitForRecordingPlaybackReadiness(audioRef.current)
-        if (readyBeforePlay) {
-          setMediaReady(true)
-          setRecordingLinkStatus("ready")
-          setRecordingLinkError("")
-        }
-        await audioRef.current.play()
-        setIsReplayPlaying(true)
-        setLastReplayAction("Replay playing")
-      } catch (caughtError: unknown) {
-        replayPlayIntentRef.current = false
-        setIsReplayPlaying(false)
-        setRecordingLinkStatus("error")
-        const message = getUserFacingErrorMessage(caughtError, "Replay needs another start attempt. Refresh the recording link and try again.")
-        setRecordingLinkError(getAudioPlaybackErrorMessage(audioRef.current, message))
-        setLastReplayAction(message)
-      }
-      return
-    }
-
-    setLastReplayAction("Audio player is still loading.")
-  }
-
-  const handleDownloadRecording = async () => {
-    if (!hasPlayableRecording) {
-      setDownloadError("No recording is available for this call.")
-      return
-    }
-
-    setDownloadError("")
-
-    try {
-      const nextUrl = recordingUrl || (await loadRecordingUrl({ announce: true }))
-      if (!nextUrl) throw new Error("No recording is available for this call.")
-
-      setLastReplayAction("Preparing audio download")
-      const response = await fetch(nextUrl)
-      if (!response.ok) throw new Error("Recording download failed.")
-      const blob = await response.blob()
-      if (blob.size <= 0) throw new Error("Recording download was empty.")
-
-      const objectUrl = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = objectUrl
-      link.download = getRecordingDownloadFileName(call)
-      link.rel = "noopener noreferrer"
-      link.style.display = "none"
-      document.body.appendChild(link)
-      try {
-        link.click()
-      } finally {
-        link.remove()
-        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
-      }
-      setLastReplayAction("Recording download started")
-    } catch (caughtError: unknown) {
-      setDownloadError(getUserFacingErrorMessage(caughtError, "Recording needs another download attempt."))
-    }
-  }
-
-  return (
-    <div className="grid gap-4">
-        <div className="grid gap-2 rounded-lg bg-muted/30 p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium">{replayReadiness.title}</p>
-              <p className="text-xs text-muted-foreground">{replayReadiness.description}</p>
-            </div>
-            {call.recordingSizeBytes ? (
-              <p className="shrink-0 text-xs text-muted-foreground">{formatBytes(call.recordingSizeBytes)}</p>
-            ) : null}
-          </div>
-          <Progress className="h-2" value={replayReadiness.progress} aria-label="Recording replay readiness" />
-        </div>
-        {hasPlayableRecording ? (
-          <audio
-            aria-hidden="true"
-            ref={audioRef}
-            src={recordingUrl || undefined}
-            preload="metadata"
-            onEnded={() => {
-              replayPlayIntentRef.current = false
-              setIsReplayPlaying(false)
-              setLastReplayAction("Replay ended")
-            }}
-            onLoadedMetadata={(event) => {
-              const duration = event.currentTarget.duration
-              setMediaReady(true)
-              setRecordingLinkStatus("ready")
-              setRecordingLinkError("")
-              setLastReplayAction("Replay ready")
-              if (Number.isFinite(duration) && duration > 0 && replaySeconds > duration) {
-                setReplaySeconds(duration)
-              }
-            }}
-            onCanPlay={() => {
-              setMediaReady(true)
-              setRecordingLinkStatus("ready")
-              setRecordingLinkError("")
-              setLastReplayAction("Replay ready")
-            }}
-            onPause={() => {
-              setIsReplayPlaying(false)
-            }}
-            onPlay={() => setIsReplayPlaying(true)}
-            onError={() => {
-              setIsReplayPlaying(false)
-              setMediaReady(false)
-              const shouldResumePlayback = replayPlayIntentRef.current
-              const shouldRefresh =
-                Boolean(call.recordingStoragePath) &&
-                recordingAutoRefreshAttemptRef.current < RECORDING_LINK_SILENT_REFRESH_LIMIT
-
-              if (shouldRefresh) {
-                recordingAutoRefreshAttemptRef.current += 1
-                setRecordingLinkStatus("loading")
-                setRecordingLinkError("")
-                setRecordingUrl("")
-                setLastReplayAction(
-                  shouldResumePlayback ? "Refreshing recording link" : "Recording saved. Replay is getting ready."
-                )
-                void loadRecordingUrl({
-                  announce: shouldResumePlayback,
-                  silentError: !shouldResumePlayback,
-                }).then(async (nextUrl) => {
-                  if (!nextUrl || !audioRef.current) return
-
-                  setLastReplayAction(shouldResumePlayback ? "Recording link refreshed. Resuming replay" : "Recording link refreshed")
-                  if (!shouldResumePlayback) return
-
-                  try {
-                    audioRef.current.src = nextUrl
-                    setMediaReady(false)
-                    audioRef.current.load()
-                    audioRef.current.volume = replayVolume
-                    await audioRef.current.play()
-                    setIsReplayPlaying(true)
-                    setLastReplayAction("Replay playing")
-                  } catch (caughtError: unknown) {
-                    replayPlayIntentRef.current = false
-                    setIsReplayPlaying(false)
-                    setRecordingLinkStatus("error")
-                    const message = getUserFacingErrorMessage(caughtError, "Replay needs another start attempt. Press Play to try again.")
-                    setRecordingLinkError(getAudioPlaybackErrorMessage(audioRef.current, message))
-                    setLastReplayAction(message)
-                  }
-                })
-                return
-              }
-
-              replayPlayIntentRef.current = false
-              setRecordingUrl("")
-              if (!shouldResumePlayback) {
-                setRecordingLinkStatus("idle")
-                setRecordingLinkError("")
-                setLastReplayAction("Recording saved. Press Play when you are ready.")
-                return
-              }
-
-              setRecordingLinkStatus("error")
-              const message = getAudioPlaybackErrorMessage(
-                audioRef.current,
-                "Recording link needs a refresh. Press Retry playback, or download the audio."
-              )
-              setRecordingLinkError(message)
-              setLastReplayAction(message)
-            }}
-            onTimeUpdate={(event) => setReplaySeconds(event.currentTarget.currentTime)}
-          />
-        ) : null}
-        <div className="grid gap-3 rounded-lg bg-muted/30 p-3">
-          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-            <span>{displayedReplayTime}</span>
-            <span>{formatTime(replayDuration)}</span>
-          </div>
-          <div className="relative h-9" data-testid="recording-replay-timeline">
-            <div className="absolute top-1/2 right-0 left-0 h-2 -translate-y-1/2 rounded-full bg-background shadow-inner" />
-            <div
-              className="absolute top-1/2 left-0 h-2 -translate-y-1/2 rounded-full bg-primary"
-              style={{ width: `${displayedReplayProgress}%` }}
-            />
-            {replayMarkers.map((marker) => (
-              <button
-                key={`${call.id}-${marker.label}-${marker.time}`}
-                type="button"
-                className={cn(
-                  "absolute top-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-background text-[9px] font-medium text-white shadow-sm hover:ring-2 hover:ring-ring/30",
-                  marker.tone
-                )}
-                style={{ left: `${marker.position}%` }}
-                aria-label={`Jump to ${marker.label} at ${marker.time}`}
-                title={`${marker.label} · ${marker.time} · ${marker.detail}`}
-                onClick={() => setPlaybackPosition(marker.seconds, `Jumped to ${marker.label} at ${marker.time}`)}
-              >
-                {marker.label.slice(0, 1)}
-              </button>
-            ))}
-            <input
-              aria-label="Recording position"
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-              max={replayDuration}
-              min={0}
-              step={1}
-              type="range"
-              value={Math.round(replaySeconds)}
-              onChange={(event) => setPlaybackPosition(Number(event.currentTarget.value), "Replay position changed")}
-            />
-          </div>
-          {replayMarkers.length ? (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {replayMarkers.map((marker) => (
-                <button
-                  key={`${call.id}-${marker.label}-label-${marker.time}`}
-                  type="button"
-                  className="rounded-md bg-background/70 px-2 py-1 text-left transition-[background-color,border-color,color,box-shadow,opacity] duration-150 hover:bg-background"
-                  onClick={() => setPlaybackPosition(marker.seconds, `Jumped to ${marker.label} at ${marker.time}`)}
-                >
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="truncate text-xs font-medium">{marker.label}</span>
-                    <span className="text-xs text-muted-foreground">{marker.time}</span>
-                  </span>
-                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">{marker.detail}</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-md bg-background/70 px-2 py-2 text-xs text-muted-foreground">
-              Timeline events appear after transcript or notes are saved for this call.
-            </div>
-          )}
-        </div>
-        <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-between">
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full gap-2 sm:w-auto"
-            aria-label={isReplayPlaying ? "Pause recording" : "Play recording"}
-            disabled={!hasPlayableRecording || isRecordingLinkLoading || replayReadiness.controlsDisabled}
-            onClick={handlePlayPause}
-          >
-            {isReplayPlaying ? <PauseIcon /> : <PlayIcon />}
-            {isReplayPlaying
-              ? "Pause"
-              : isRecordingLinkLoading
-                ? "Preparing..."
-                : recordingLinkStatus === "error"
-                  ? "Retry"
-                  : "Play"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full gap-2 sm:w-auto"
-            disabled={!hasPlayableRecording || isRecordingLinkLoading}
-            onClick={() => void handleDownloadRecording()}
-          >
-            <DownloadIcon />
-            Download audio
-          </Button>
-          <div className="flex w-full items-center gap-2 rounded-lg bg-muted/30 px-3 py-2 sm:min-w-36 sm:flex-1 sm:justify-end sm:bg-transparent sm:px-0 sm:py-0">
-            <Volume2Icon className="size-4 shrink-0 text-muted-foreground" />
-            <input
-              aria-label="Recording volume"
-              className="h-2 w-full accent-primary sm:max-w-32"
-              max={1}
-              min={0}
-              step={0.05}
-              type="range"
-              value={replayVolume}
-              onChange={(event) => setReplayVolume(Number(event.currentTarget.value))}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground sm:ml-auto">90 day retention</p>
-        </div>
-        <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-          {lastReplayAction} / {displayedReplayTime}
-        </div>
-        {recordingLinkError ? (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
-            {recordingLinkError}
-          </div>
-        ) : null}
-        {downloadError ? (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
-            {downloadError}
-          </div>
-        ) : null}
-        <div className="grid gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-medium">Call notes</p>
-            <p className="text-xs text-muted-foreground">{replayNoteItems.length}</p>
-          </div>
-          {replayNoteItems.length ? (
-            <div className="max-h-72 overflow-auto rounded-lg border bg-background">
-              {replayNoteItems.map((item) => (
-                <div key={item.id} className="grid grid-cols-[28px_1fr] gap-3 border-b p-3 last:border-b-0">
-                  <span
-                    className={cn(
-                      "flex size-7 items-center justify-center rounded-full text-xs font-semibold text-white",
-                      item.marker.tone
-                    )}
-                    title={item.marker.label}
-                  >
-                    {item.marker.label.slice(0, 1)}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-muted-foreground">{item.marker.label}</p>
-                    <p className="mt-1 text-sm leading-relaxed">{item.note}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-              Notes will appear here as SalesFrame captures useful moments from the conversation.
-            </div>
-          )}
-        </div>
-    </div>
-  )
-}
-
-function normalizeRecordingLifecycleStatusForReplay(call: CallSummary): RecordingLifecycleStatus {
-  if (
-    call.recordingStatus === "none" ||
-    call.recordingStatus === "recording" ||
-    call.recordingStatus === "uploading" ||
-    call.recordingStatus === "processing" ||
-    call.recordingStatus === "ready" ||
-    call.recordingStatus === "failed"
-  ) {
-    return call.recordingStatus
-  }
-
-  return call.recordingStoragePath || call.recordingUrl ? "ready" : "none"
-}
-
-function getReplayReadiness({
-  hasRecordingSource,
-  hasRecordingUrl,
-  linkStatus,
-  mediaReady,
-  recordingStatus,
-}: {
-  hasRecordingSource: boolean
-  hasRecordingUrl: boolean
-  linkStatus: "idle" | "loading" | "ready" | "error"
-  mediaReady: boolean
-  recordingStatus: RecordingLifecycleStatus
-}) {
-  if (recordingStatus === "failed" || linkStatus === "error") {
-    return {
-      controlsDisabled: false,
-      description: "Replay needs attention. Retry playback or download the audio.",
-      progress: 100,
-      title: "Recording needs attention",
-    }
-  }
-
-  if (recordingStatus === "recording") {
-    return {
-      controlsDisabled: true,
-      description: "SalesFrame is still capturing the call.",
-      progress: 35,
-      title: "Recording in progress",
-    }
-  }
-
-  if (recordingStatus === "uploading") {
-    return {
-      controlsDisabled: true,
-      description: "The recording is being saved to SalesFrame.",
-      progress: 60,
-      title: "Saving recording",
-    }
-  }
-
-  if (recordingStatus === "processing" || linkStatus === "loading" || (hasRecordingUrl && !mediaReady)) {
-    return {
-      controlsDisabled: !hasRecordingSource || linkStatus === "loading",
-      description: hasRecordingSource
-        ? "SalesFrame is preparing the replay link and checking the audio file. You can press Play if it feels stuck."
-        : "SalesFrame is preparing the replay link and checking the audio file.",
-      progress: 82,
-      title: "Preparing replay",
-    }
-  }
-
-  if (hasRecordingUrl && mediaReady) {
-    return {
-      controlsDisabled: false,
-      description: "The recording is ready to play.",
-      progress: 100,
-      title: "Replay ready",
-    }
-  }
-
-  if (hasRecordingSource && !hasRecordingUrl) {
-    return {
-      controlsDisabled: false,
-      description: "The recording is saved. Press Play when you are ready and SalesFrame will refresh the replay link.",
-      progress: 90,
-      title: "Recording saved",
-    }
-  }
-
-  return {
-    controlsDisabled: true,
-    description: "There is no saved recording for this call yet.",
-    progress: 0,
-    title: "No recording available",
-  }
-}
-
-function getAudioPlaybackErrorMessage(audio: HTMLAudioElement | null, fallback: string) {
-  const mediaError = audio?.error
-  if (!mediaError) return fallback
-
-  if (mediaError.code === 4) {
-    return "The recording was saved, but this browser cannot play the audio format. Download the audio while SalesFrame prepares a better replay path."
-  }
-
-  if (mediaError.code === 2) {
-    return "SalesFrame needs another moment to load the recording link. Retry playback, then download the audio if it still does not play."
-  }
-
-  if (mediaError.code === 3) {
-    return "This browser needs another format for the recording. Download the recording, or try again after SalesFrame refreshes the replay."
-  }
-
-  return fallback
-}
-
-function waitForRecordingPlaybackReadiness(audio: HTMLAudioElement) {
-  if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve(true)
-
-  return new Promise<boolean>((resolve) => {
-    let settled = false
-    const finish = (ready: boolean) => {
-      if (settled) return
-      settled = true
-      window.clearTimeout(timeoutId)
-      audio.removeEventListener("loadedmetadata", handleReady)
-      audio.removeEventListener("canplay", handleReady)
-      audio.removeEventListener("error", handleError)
-      resolve(ready)
-    }
-    const handleReady = () => finish(true)
-    const handleError = () => finish(false)
-    const timeoutId = window.setTimeout(() => finish(false), RECORDING_PLAYBACK_READY_TIMEOUT_MS)
-
-    audio.addEventListener("loadedmetadata", handleReady, { once: true })
-    audio.addEventListener("canplay", handleReady, { once: true })
-    audio.addEventListener("error", handleError, { once: true })
-  })
 }
 
 function getRecordingDownloadFileName(call: CallSummary) {
@@ -14677,15 +13875,6 @@ function getRecordingExtensionFromMimeType(mimeType: string | null) {
   if (mimeType.includes("flac")) return "flac"
 
   return "webm"
-}
-
-function formatBytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "0 B"
-  const units = ["B", "KB", "MB", "GB"]
-  const unitIndex = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)))
-  const amount = value / 1024 ** unitIndex
-
-  return `${amount >= 10 || unitIndex === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unitIndex]}`
 }
 
 function getAudioHealthIndicators({
@@ -15213,11 +14402,10 @@ function PostCallPanel({
   const hasTranscriptLines = transcript.some((line) => line.text.trim())
 
   return (
-    <div className={cn("grid gap-4", replayCall && "xl:grid-cols-[minmax(0,1fr)_420px]")}>
+    <div className="grid gap-4">
       {replayCall ? (
         <CallReplayCard
           call={replayCall}
-          notes={opportunity.notes}
           onDeleteCall={onDeleteCall}
           transcript={transcript}
         />
@@ -15255,15 +14443,24 @@ function PostCallPanel({
               <CardDescription>Transcript</CardDescription>
               <CardTitle>{transcriptCall.title}</CardTitle>
             </div>
-            <CardAction>
+            <CardAction className="col-start-1 row-span-1 row-start-auto mt-3 flex w-full flex-col items-stretch gap-2 justify-self-start sm:col-start-1 sm:row-span-1 sm:row-start-auto sm:mt-3 sm:w-full sm:flex-row sm:items-center sm:justify-self-start">
               <Button
                 size="sm"
                 variant="outline"
-                className="gap-2"
+                className="w-full gap-2 sm:w-auto"
                 onClick={() => downloadTranscriptFile(transcriptCall, transcript)}
               >
                 <DownloadIcon />
                 Download transcript
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="w-full gap-2 sm:w-auto"
+                onClick={() => onDeleteCall(transcriptCall.id)}
+              >
+                <Trash2Icon />
+                Delete call
               </Button>
             </CardAction>
           </CardHeader>
