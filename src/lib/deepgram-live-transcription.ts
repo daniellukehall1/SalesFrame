@@ -406,30 +406,42 @@ async function createPcmAudioPipeline({
     outputSampleRate: sampleRate,
   })
   let cleanup = () => undefined
+  let pipelineReady = false
 
   if (audioContext.audioWorklet) {
-    const workletUrl = createPcmWorkletUrl()
-    await audioContext.audioWorklet.addModule(workletUrl)
-    URL.revokeObjectURL(workletUrl)
-    const workletNode = new AudioWorkletNode(audioContext, pcmWorkletName)
-    const silentSink = audioContext.createGain()
-    silentSink.gain.value = 0
-    workletNode.port.onmessage = (event) => {
-      const samples = event.data instanceof Float32Array
-        ? event.data
-        : new Float32Array(event.data as ArrayBuffer)
-      chunker.push(samples)
+    let workletUrl = ""
+    try {
+      workletUrl = createPcmWorkletUrl()
+      await audioContext.audioWorklet.addModule(workletUrl)
+      URL.revokeObjectURL(workletUrl)
+      workletUrl = ""
+
+      const workletNode = new AudioWorkletNode(audioContext, pcmWorkletName)
+      const silentSink = audioContext.createGain()
+      silentSink.gain.value = 0
+      workletNode.port.onmessage = (event) => {
+        const samples = event.data instanceof Float32Array
+          ? event.data
+          : new Float32Array(event.data as ArrayBuffer)
+        chunker.push(samples)
+      }
+      sourceNode.connect(workletNode)
+      workletNode.connect(silentSink)
+      silentSink.connect(audioContext.destination)
+      cleanup = () => {
+        workletNode.port.onmessage = null
+        sourceNode.disconnect()
+        workletNode.disconnect()
+        silentSink.disconnect()
+      }
+      pipelineReady = true
+    } catch {
+      if (workletUrl) URL.revokeObjectURL(workletUrl)
+      cleanup = () => undefined
     }
-    sourceNode.connect(workletNode)
-    workletNode.connect(silentSink)
-    silentSink.connect(audioContext.destination)
-    cleanup = () => {
-      workletNode.port.onmessage = null
-      sourceNode.disconnect()
-      workletNode.disconnect()
-      silentSink.disconnect()
-    }
-  } else {
+  }
+
+  if (!pipelineReady) {
     const processor = audioContext.createScriptProcessor(4096, 1, 1)
     const silentSink = audioContext.createGain()
     silentSink.gain.value = 0

@@ -7546,7 +7546,7 @@ function StartRecordingDialog({
       )
     }
 
-    if (/browser or network blocked|live transcript connection was blocked|deepgram socket/i.test(message)) {
+    if (/browser or network blocked|live transcript connection was blocked|deepgram socket|not allowed by csp|content security policy/i.test(message)) {
       return appendErrorReference(
         "This browser or network blocked the live transcript connection. Check browser/network permissions, then try again.",
         error
