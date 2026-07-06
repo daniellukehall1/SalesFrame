@@ -56,7 +56,6 @@ export const config: Config = {
 
 function getFluxConfig() {
   return {
-    diarizeModel: "latest",
     eagerEotThreshold: getNumberEnv("DEEPGRAM_FLUX_EAGER_EOT_THRESHOLD", 0.4, 0.3, 0.9),
     encoding: "linear16",
     eotThreshold: getNumberEnv("DEEPGRAM_FLUX_EOT_THRESHOLD", 0.75, 0.5, 0.9),
@@ -75,7 +74,6 @@ function createDeepgramListenUrl(config: ReturnType<typeof getFluxConfig>) {
   url.searchParams.set("eager_eot_threshold", String(config.eagerEotThreshold))
   url.searchParams.set("eot_threshold", String(config.eotThreshold))
   url.searchParams.set("eot_timeout_ms", String(config.eotTimeoutMs))
-  url.searchParams.set("diarize_model", config.diarizeModel)
 
   return url.toString()
 }

@@ -7014,65 +7014,53 @@ function StartCallPreparingView({
   const currentDescription = detail || activeStep?.description || "Preparing the call workspace."
 
   return (
-    <div className="grid h-full min-h-[300px] place-items-center overflow-hidden">
-      <div className="grid w-full max-w-lg gap-4">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <SparklesIcon className="size-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-muted-foreground">Getting the live coach ready</p>
-            <h3 className="mt-1 text-lg font-semibold tracking-tight">Almost there. We’re lining up the first move.</h3>
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-              Keep this open; the cockpit will launch when the essentials are ready.
-            </p>
-          </div>
+    <div className="grid min-h-[260px] min-w-0 content-start gap-4 overflow-hidden py-1">
+      <div className="grid min-w-0 gap-1">
+        <p className="text-base font-semibold tracking-tight">Starting call</p>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          SalesFrame is checking the transcript connection, preparing the first question, and then the cockpit will open.
+        </p>
+      </div>
+
+      <div className="grid min-w-0 gap-2" aria-live="polite">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <p className="truncate text-sm font-medium">{activeStep?.label ?? "Preparing call"}</p>
+          <p className="shrink-0 text-sm tabular-nums text-muted-foreground">{Math.round(progress)}%</p>
         </div>
+        <Progress className="h-2" value={progress} />
+        <p className="text-sm leading-relaxed text-muted-foreground">{currentDescription}</p>
+      </div>
 
-        <div className="grid gap-2" aria-live="polite">
-          <div className="flex items-center justify-between gap-3">
-            <p className="truncate text-sm font-medium">{activeStep?.label ?? "Preparing call"}</p>
-            <p className="text-sm tabular-nums text-muted-foreground">
-              Step {Math.min(activeIndex + 1, steps.length)} of {steps.length}
-            </p>
-          </div>
-          <Progress className="h-2" value={progress} />
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            {currentDescription}
-          </p>
-        </div>
+      <div className="grid min-w-0 gap-1.5">
+        {steps.map((item, index) => {
+          const Icon = item.icon
+          const isComplete = progress >= item.progress || progress === 100
+          const isActive = index === activeIndex && progress < 100
 
-        <div className="hidden grid-cols-2 gap-2 sm:grid sm:grid-cols-3">
-          {steps.map((item, index) => {
-            const Icon = item.icon
-            const isComplete = progress >= item.progress || progress === 100
-            const isActive = index === activeIndex && progress < 100
-
-            return (
-              <div
-                key={item.id}
+          return (
+            <div
+              key={item.id}
+              className={cn(
+                "flex min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground",
+                isActive && "bg-muted/45 text-foreground",
+                isComplete && "text-foreground"
+              )}
+            >
+              <span
                 className={cn(
-                  "flex min-w-0 items-center gap-2 rounded-lg bg-muted/30 px-2.5 py-2 text-sm",
-                  isActive && "bg-primary/10 text-primary"
+                  "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+                  isActive && "text-primary",
+                  isComplete && "text-emerald-600"
                 )}
               >
-                <span
-                  className={cn(
-                    "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground",
-                    isActive && "border-primary text-primary",
-                    isComplete && "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
-                  )}
-                >
-                  {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{item.label}</p>
-                </div>
+                {isComplete ? <CheckIcon className="size-4" /> : <Icon className="size-4" />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium">{item.label}</p>
               </div>
-            )
-          })}
-        </div>
-
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -8066,7 +8054,8 @@ function StartRecordingDialog({
                           id="product-context"
                           value={productContext}
                           disabled={!customerResearchEnabled || researchProfileStatus === "loading"}
-                          className="min-h-20 min-w-0 resize-none"
+                          className="field-sizing-fixed min-h-20 min-w-0 max-w-full resize-none overflow-x-hidden whitespace-pre-wrap break-words"
+                          wrap="soft"
                           placeholder={
                             researchProfileStatus === "loading"
                               ? "Looking up your company..."

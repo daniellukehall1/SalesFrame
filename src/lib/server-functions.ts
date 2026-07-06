@@ -33,7 +33,6 @@ export type LiveQuestionFunctionResponse = {
 export type DeepgramTranscriptionTokenResponse = {
   accessToken: string
   config: {
-    diarizeModel: string
     eagerEotThreshold: number
     encoding: string
     eotThreshold: number
