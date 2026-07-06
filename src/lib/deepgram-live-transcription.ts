@@ -314,8 +314,9 @@ async function createOpenedDeepgramSocket(websocketUrls: string[], accessToken: 
 
 function getDeepgramAuthProtocolAttempts(accessToken: string) {
   // Browser WebSockets cannot set an Authorization header. Deepgram's browser
-  // WebSocket docs use the Sec-WebSocket-Protocol form: token, credential.
-  return [["token", accessToken]]
+  // reference supports Bearer temporary tokens; in the browser this is sent as
+  // Sec-WebSocket-Protocol: bearer, <temporary credential>.
+  return [["bearer", accessToken]]
 }
 
 function getDeepgramSocketHost(websocketUrl: string) {

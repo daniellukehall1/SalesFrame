@@ -96,7 +96,7 @@ export function createDeepgramListenUrls(config: DeepgramFluxConfig) {
     url.searchParams.set("eager_eot_threshold", String(config.eagerEotThreshold))
     url.searchParams.set("eot_threshold", String(config.eotThreshold))
     url.searchParams.set("eot_timeout_ms", String(config.eotTimeoutMs))
-    if (config.diarizeModel) {
+    if (config.diarizeModel && !config.model.startsWith("flux-")) {
       url.searchParams.set("diarize_model", config.diarizeModel)
     }
 
@@ -149,7 +149,7 @@ export async function verifyDeepgramListenSocket(
 }
 
 function getDeepgramAuthProtocolAttempts(accessToken: string) {
-  return [["token", accessToken]]
+  return [["bearer", accessToken]]
 }
 
 function waitForSocketOpen(socket: WebSocket) {
