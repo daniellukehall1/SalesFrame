@@ -87,7 +87,10 @@ export async function callOpenAiJson<T>({
   const data = await readOpenAiPayload(response)
 
   if (!response.ok) {
-    throw upstreamFailure(getOpenAiErrorMessage(data, "OpenAI request failed."), "openai_request_failed")
+    throw upstreamFailure(
+      getOpenAiErrorMessage(data, "OpenAI request failed."),
+      getOpenAiFailureCode(data, "openai_request_failed")
+    )
   }
 
   const text = extractResponseText(data)
@@ -174,7 +177,10 @@ export async function callOpenAiWebSearchJson<T>({
   const data = await readOpenAiPayload(response)
 
   if (!response.ok) {
-    throw upstreamFailure(getOpenAiErrorMessage(data, "OpenAI web research request failed."), "openai_web_search_failed")
+    throw upstreamFailure(
+      getOpenAiErrorMessage(data, "OpenAI web research request failed."),
+      getOpenAiFailureCode(data, "openai_web_search_failed")
+    )
   }
 
   const text = extractResponseText(data)
@@ -213,6 +219,34 @@ function getOpenAiErrorMessage(data: unknown, fallback: string) {
 
   const message = (error as Record<string, unknown>).message
   return typeof message === "string" && message.trim() ? message : fallback
+}
+
+function getOpenAiFailureCode(data: unknown, fallback: string) {
+  const message = getOpenAiErrorMessage(data, "")
+  const providerCode = getOpenAiString(
+    data && typeof data === "object" && "error" in data && data.error && typeof data.error === "object"
+      ? (data.error as Record<string, unknown>).code ?? (data.error as Record<string, unknown>).type
+      : ""
+  )
+  const combined = `${providerCode} ${message}`
+
+  if (/incorrect api key|invalid api key|authentication.*openai|invalid_api_key/i.test(combined)) {
+    return "openai_auth_failed"
+  }
+
+  if (/insufficient_quota|quota|billing|hard limit|usage limit|credits/i.test(combined)) {
+    return "openai_quota_exceeded"
+  }
+
+  if (/rate.?limit|too many requests|\b429\b/i.test(combined)) {
+    return "openai_rate_limit"
+  }
+
+  if (/model_not_found|model .* does not exist|unsupported model|model .* unavailable/i.test(combined)) {
+    return "openai_model_error"
+  }
+
+  return fallback
 }
 
 function getOpenAiString(value: unknown) {

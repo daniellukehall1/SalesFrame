@@ -13,6 +13,7 @@ const localFunctionRoutes: Record<string, string> = {
   "/api/openai/account-enrichment": "account-enrichment",
   "/api/openai/call-diarization": "call-diarization",
   "/api/openai/customer-research": "customer-research",
+  "/api/openai/health": "openai-health",
   "/api/openai/key": "openai-key",
   "/api/openai/live-guidance": "live-guidance",
   "/api/openai/live-state": "live-state",

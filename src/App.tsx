@@ -161,6 +161,7 @@ import type { Database } from "@/lib/supabase/database.types"
 import {
   appendErrorReference,
   checkDeepgramTranscriptionHealth,
+  checkOpenAiWorkspaceHealth,
   deleteOpenAiKey,
   getBulkImportStatus,
   getOpenAiKeyStatus,
@@ -3708,6 +3709,9 @@ function App() {
       } else if (!savedOpenAiKeyState) {
         throw new Error("OpenAI API key is required before starting a call.")
       }
+
+      await checkOpenAiWorkspaceHealth(activeWorkspaceId)
+      throwIfStartCancelled()
 
       updatePreparationStep("transcription", "Checking live transcript is ready.")
       await checkDeepgramTranscriptionHealth()
@@ -7507,9 +7511,23 @@ function StartRecordingDialog({
         ? error
         : getUserFacingErrorMessage(error, "Call start needs another try.")
 
-    if (/OpenAI key did not work|key needs billing|quota attention|Check the key in Settings/i.test(message)) {
+    if (/OpenAI key did not work/i.test(message)) {
       return appendErrorReference(
-        "This workspace key needs attention. Check the key in Settings, then try again.",
+        "OpenAI rejected this workspace key. Paste a valid key in Settings, then try again.",
+        error
+      )
+    }
+
+    if (/key needs billing|quota attention/i.test(message)) {
+      return appendErrorReference(
+        "This workspace OpenAI key needs billing or quota attention. Check it in Settings, then try again.",
+        error
+      )
+    }
+
+    if (/live AI model is not available|model is not available|unsupported model|model .* unavailable/i.test(message)) {
+      return appendErrorReference(
+        "SalesFrame cannot use the selected OpenAI live-question model with this key. Contact support if this keeps happening.",
         error
       )
     }

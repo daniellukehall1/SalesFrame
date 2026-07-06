@@ -16,6 +16,12 @@ export type OpenAiKeyStatus = {
   savedAt: string | null
 }
 
+export type OpenAiHealthResponse = {
+  model: string
+  provider: "openai"
+  ready: boolean
+}
+
 export type LiveGuidanceFunctionResponse = {
   guidance: unknown
 }
@@ -344,6 +350,12 @@ export function createDeepgramTranscriptionToken(
 export function checkDeepgramTranscriptionHealth() {
   return callFunction<DeepgramHealthResponse>("/api/deepgram/health", {
     timeoutMs: 8000,
+  })
+}
+
+export function checkOpenAiWorkspaceHealth(workspaceId: string) {
+  return callFunction<OpenAiHealthResponse>(`/api/openai/health?workspaceId=${encodeURIComponent(workspaceId)}`, {
+    timeoutMs: 10000,
   })
 }
 
