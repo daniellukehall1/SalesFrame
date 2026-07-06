@@ -282,6 +282,7 @@ async function openDeepgramSocket({
 
 async function createOpenedDeepgramSocket(websocketUrl: string, accessToken: string) {
   let lastError: unknown
+  const failures: string[] = []
 
   for (const protocols of getDeepgramAuthProtocolAttempts(accessToken)) {
     const socket = new WebSocket(websocketUrl, protocols)
@@ -292,6 +293,7 @@ async function createOpenedDeepgramSocket(websocketUrl: string, accessToken: str
       return socket
     } catch (error) {
       lastError = error
+      failures.push(`${protocols[0]}: ${getDeepgramErrorMessage(error)}`)
       try {
         socket.close()
       } catch {
@@ -300,9 +302,9 @@ async function createOpenedDeepgramSocket(websocketUrl: string, accessToken: str
     }
   }
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("This browser or network blocked the live transcript connection.")
+  const failureSummary = failures.length > 0 ? ` Attempts: ${failures.join(" | ")}` : ""
+  const message = getDeepgramErrorMessage(lastError)
+  throw new Error(`${message || "This browser or network blocked the live transcript connection."}${failureSummary}`)
 }
 
 function getDeepgramAuthProtocolAttempts(accessToken: string) {
@@ -372,6 +374,13 @@ function createDeepgramSocketCloseError(event: CloseEvent) {
       ? `Deepgram needs another moment. Try again shortly. (${closeDetail})`
       : "Deepgram needs another moment. Try again shortly."
   )
+}
+
+function getDeepgramErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error.trim()) return error
+
+  return "This browser or network blocked the live transcript connection."
 }
 
 function shouldRetryDeepgramStartup(error: unknown) {

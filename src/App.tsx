@@ -7034,18 +7034,12 @@ type StartCallPreparationStep = {
 
 function StartCallPreparingView({
   activeIndex,
-  accountSummary,
-  audioSourceLabel,
   detail,
-  opportunitySummary,
   progress,
   steps,
 }: {
   activeIndex: number
-  accountSummary: string
-  audioSourceLabel: string
   detail?: string
-  opportunitySummary: string
   progress: number
   steps: StartCallPreparationStep[]
 }) {
@@ -7054,36 +7048,19 @@ function StartCallPreparingView({
   const ActiveIcon = activeStep?.icon ?? SparklesIcon
 
   return (
-    <div className="grid min-w-0 gap-3 py-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,260px)] sm:gap-4">
-      <div className="grid min-w-0 gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <SparklesIcon className="size-4 text-muted-foreground" />
-          <div className="min-w-0">
-            <p className="text-sm font-medium">Preparing live coach</p>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              SalesFrame is getting the transcript and first question ready before opening the cockpit.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid min-w-0 gap-2 rounded-lg bg-muted/40 p-2.5 sm:p-3">
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">Account</p>
-            <p className="mt-1 truncate text-sm font-medium">{accountSummary}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">Opportunity</p>
-            <p className="mt-1 truncate text-sm font-medium">{opportunitySummary}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">Audio</p>
-            <p className="mt-1 truncate text-sm font-medium">{audioSourceLabel}</p>
-          </div>
+    <div className="grid min-w-0 gap-4 py-1">
+      <div className="flex min-w-0 items-center gap-2">
+        <SparklesIcon className="size-4 text-muted-foreground" />
+        <div className="min-w-0">
+          <p className="text-sm font-medium">Preparing</p>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            SalesFrame is getting the transcript and first question ready before the cockpit opens.
+          </p>
         </div>
       </div>
 
-      <div className="grid min-w-0 content-start gap-3">
-        <div className="grid min-w-0 gap-2" aria-live="polite">
+      <div className="grid min-w-0 gap-3">
+        <div className="grid min-w-0 gap-2 rounded-lg bg-muted/40 p-3" aria-live="polite">
           <div className="flex min-w-0 items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
               <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-primary">
@@ -7094,38 +7071,12 @@ function StartCallPreparingView({
             <p className="shrink-0 text-sm tabular-nums text-muted-foreground">{Math.round(progress)}%</p>
           </div>
           <Progress className="h-2" value={progress} />
-          <p className="text-xs leading-relaxed text-muted-foreground">{currentDescription}</p>
+          <p className="text-sm leading-relaxed text-muted-foreground">{currentDescription}</p>
         </div>
 
-        <div className="grid min-w-0 gap-1">
-          {steps.map((item, index) => {
-            const Icon = item.icon
-            const isComplete = progress >= item.progress || progress === 100
-            const isActive = index === activeIndex && progress < 100
-
-            return (
-              <div
-                key={item.id}
-                className={cn(
-                  "flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground",
-                  isActive && "bg-muted/55 text-foreground",
-                  isComplete && "text-foreground"
-                )}
-              >
-                <span
-                  className={cn(
-                    "flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground",
-                    isActive && "text-primary",
-                    isComplete && "text-emerald-600"
-                  )}
-                >
-                  {isComplete ? <CheckIcon className="size-3.5" /> : <Icon className="size-3.5" />}
-                </span>
-                <p className="truncate font-medium">{item.label}</p>
-              </div>
-            )
-          })}
-        </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Nothing is recording yet. If this step needs another try, the draft call is cleaned up and you can start again.
+        </p>
       </div>
     </div>
   )
@@ -7729,7 +7680,6 @@ function StartRecordingDialog({
   const startCallDescription = startSubmitting
     ? "SalesFrame is preparing the live coach before opening the cockpit."
     : "Attach the call to the right context before live guidance begins."
-  const audioSourceSummary = selectedAudioSourceChoice === "two_channels" ? "Two channels" : "One channel"
   const renderStartCallSteps = (isPreparing = false) => {
     const visibleSteps = isPreparing ? [...recordingSteps, preparationStepItem] : recordingSteps
     const activeStep = isPreparing ? visibleSteps.length : step
@@ -7801,10 +7751,7 @@ function StartRecordingDialog({
             <div className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 max-sm:pr-0">
               <StartCallPreparingView
                 activeIndex={startPhaseIndex}
-                accountSummary={accountSummary}
-                audioSourceLabel={audioSourceSummary}
                 detail={startPreparationDetail}
-                opportunitySummary={opportunitySummary}
                 progress={startProgress}
                 steps={startPreparationSteps}
               />
