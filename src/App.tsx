@@ -7667,7 +7667,7 @@ function StartRecordingDialog({
     <>
         {startSubmitting ? (
           <>
-            <div className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 max-sm:pr-0">
+            <div className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 max-sm:pr-0 sm:row-span-2">
               <StartCallPreparingView
                 activeIndex={startPhaseIndex}
                 detail={startPreparationDetail}

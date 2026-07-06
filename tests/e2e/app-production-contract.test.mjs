@@ -3354,6 +3354,7 @@ test("workspace, account, and call setup require an OpenAI key", async () => {
   assert.match(app, /whitespace-normal break-words rounded-lg bg-destructive\/10/)
   assert.match(app, /Starting call/)
   assert.match(app, /grid min-h-\[260px\] min-w-0 content-start gap-4 overflow-hidden py-1/)
+  assert.match(app, /min-h-0 overflow-y-auto overflow-x-hidden pr-1 max-sm:pr-0 sm:row-span-2/)
   assert.doesNotMatch(app, /Almost there\. We’re lining up the first move\./)
   assert.doesNotMatch(app, /grid h-full min-h-\[300px\] place-items-center overflow-hidden/)
   assert.doesNotMatch(app, /showCloseButton=/)
