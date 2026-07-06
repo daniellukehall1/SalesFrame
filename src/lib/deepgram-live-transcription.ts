@@ -88,6 +88,7 @@ type DeepgramWord = {
 const deepgramChunkMs = 80
 const deepgramKeepAliveMs = 5000
 const deepgramSocketOpenTimeoutMs = 15000
+const audioWorkletSetupTimeoutMs = 2500
 const deepgramStartupAttempts = 3
 const deepgramReconnectAttempts = 2
 const maxBufferedAudioChunks = Math.ceil(4000 / deepgramChunkMs)
@@ -305,11 +306,13 @@ async function createOpenedDeepgramSocket(websocketUrl: string, accessToken: str
 }
 
 function getDeepgramAuthProtocolAttempts(accessToken: string) {
-  // Deepgram temporary tokens authenticate with Bearer. The "token" subprotocol
-  // is for raw API keys only, which must never be exposed to the browser.
+  // Temporary tokens authenticate as Bearer on normal requests. Deepgram's
+  // browser WebSocket docs also support the "token" subprotocol pattern, so
+  // keep it as a fallback for browsers/proxies that reject bearer casing.
   return [
     ["bearer", accessToken],
     ["Bearer", accessToken],
+    ["token", accessToken],
   ]
 }
 
@@ -339,15 +342,36 @@ function waitForDeepgramSocketOpen(socket: WebSocket) {
       cleanup()
       reject(new Error("This browser or network blocked the live transcript connection."))
     }
-    const handleClose = () => {
+    const handleClose = (event: CloseEvent) => {
       cleanup()
-      reject(new Error("Deepgram needs another moment. Try again shortly."))
+      reject(createDeepgramSocketCloseError(event))
     }
 
     socket.addEventListener("open", handleOpen)
     socket.addEventListener("error", handleError)
     socket.addEventListener("close", handleClose)
   })
+}
+
+function createDeepgramSocketCloseError(event: CloseEvent) {
+  const closeDetail = [event.code, event.reason].filter(Boolean).join(" ")
+  if (event.code === 1008) {
+    return new Error(
+      closeDetail
+        ? `Deepgram rejected the live transcript connection (${closeDetail}).`
+        : "Deepgram rejected the live transcript connection."
+    )
+  }
+
+  if (event.code === 1006) {
+    return new Error("This browser or network blocked the live transcript connection.")
+  }
+
+  return new Error(
+    closeDetail
+      ? `Deepgram needs another moment. Try again shortly. (${closeDetail})`
+      : "Deepgram needs another moment. Try again shortly."
+  )
 }
 
 function shouldRetryDeepgramStartup(error: unknown) {
@@ -441,7 +465,7 @@ async function createPcmAudioPipeline({
     let workletUrl = ""
     try {
       workletUrl = createPcmWorkletUrl()
-      await audioContext.audioWorklet.addModule(workletUrl)
+      await waitForAudioWorkletSetup(audioContext.audioWorklet.addModule(workletUrl))
       URL.revokeObjectURL(workletUrl)
       workletUrl = ""
 
@@ -504,6 +528,25 @@ async function createPcmAudioPipeline({
       }
     },
   }
+}
+
+function waitForAudioWorkletSetup<T>(setupPromise: Promise<T>) {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(new Error("Audio worklet setup timed out."))
+    }, audioWorkletSetupTimeoutMs)
+
+    setupPromise.then(
+      (value) => {
+        window.clearTimeout(timeoutId)
+        resolve(value)
+      },
+      (error) => {
+        window.clearTimeout(timeoutId)
+        reject(error)
+      }
+    )
+  })
 }
 
 function createPcmChunker({

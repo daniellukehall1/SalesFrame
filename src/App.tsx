@@ -2145,6 +2145,7 @@ function createOptionalSupabaseClient(): SupabaseClient<Database> | null {
 
 const authConnectionUnavailableMessage =
   "SalesFrame cannot reach sign-in right now. Try again in a moment."
+const callCaptureStartupTimeoutMs = 30000
 
 function App() {
   const supabase = React.useMemo(() => createOptionalSupabaseClient(), [])
@@ -3861,8 +3862,15 @@ function App() {
       throwIfStartCancelled()
 
       updatePreparationStep("audio", "Ready for the selected channel setup.")
-      await callCapture.startCall({
-        abortSignal: payload.abortSignal,
+      const captureAbortController = new AbortController()
+      const handleParentStartAbort = () => captureAbortController.abort()
+      let captureStartupTimeoutId: number | null = null
+      let captureStartupTimedOut = false
+
+      payload.abortSignal?.addEventListener("abort", handleParentStartAbort, { once: true })
+
+      const captureStartPromise = callCapture.startCall({
+        abortSignal: captureAbortController.signal,
         audioCaptureMode: payload.audioCaptureMode,
         callId: call.id,
         startedAt,
@@ -3886,6 +3894,31 @@ function App() {
             return nextItems
           }),
       })
+
+      try {
+        await Promise.race([
+          captureStartPromise,
+          new Promise<never>((_resolve, reject) => {
+            captureStartupTimeoutId = window.setTimeout(() => {
+              captureStartupTimedOut = true
+              captureAbortController.abort()
+              reject(new Error("SalesFrame needs another attempt to finish microphone setup. Check browser microphone permissions, then try again."))
+            }, callCaptureStartupTimeoutMs)
+          }),
+        ])
+      } catch (caughtError: unknown) {
+        if (captureStartupTimedOut) {
+          void captureStartPromise.catch(() => undefined)
+          await callCapture.cancelCallStart(call.id).catch(() => undefined)
+        }
+
+        throw caughtError
+      } finally {
+        if (captureStartupTimeoutId !== null) {
+          window.clearTimeout(captureStartupTimeoutId)
+        }
+        payload.abortSignal?.removeEventListener("abort", handleParentStartAbort)
+      }
       throwIfStartCancelled()
       captureStarted = true
 
