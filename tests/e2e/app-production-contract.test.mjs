@@ -4190,7 +4190,7 @@ test("public homepage exposes SEO metadata, schema, and crawl controls", async (
   assert.match(netlifyConfig, /Content-Security-Policy = "[^"]*default-src 'self'[^"]*"/)
   assert.match(netlifyConfig, /Content-Security-Policy = "[^"]*frame-ancestors 'none'[^"]*"/)
   assert.match(netlifyConfig, /Content-Security-Policy = "[^"]*object-src 'none'[^"]*"/)
-  assert.match(netlifyConfig, /Content-Security-Policy = "[^"]*connect-src 'self' https:\/\/\*\.supabase\.co wss:\/\/\*\.supabase\.co https:\/\/api\.openai\.com wss:\/\/api\.openai\.com[^"]*"/)
+  assert.match(netlifyConfig, /Content-Security-Policy = "[^"]*connect-src 'self' https:\/\/\*\.supabase\.co wss:\/\/\*\.supabase\.co https:\/\/api\.openai\.com wss:\/\/api\.openai\.com https:\/\/api\.deepgram\.com wss:\/\/api\.deepgram\.com[^"]*"/)
   assert.match(netlifyConfig, /Content-Security-Policy = "[^"]*img-src 'self' data: blob: https:\/\/img\.logo\.dev https:\/\/salesframe\.ai[^"]*"/)
   assert.match(netlifyConfig, /Content-Security-Policy = "[^"]*style-src 'self' 'unsafe-inline'[^"]*"/)
   assert.match(netlifyConfig, /Content-Security-Policy = "[^"]*font-src 'self' data:[^"]*"/)
