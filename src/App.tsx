@@ -5,6 +5,7 @@ import {
   ArrowDownIcon,
   ArrowRightIcon,
   ArrowUpIcon,
+  ArchiveIcon,
   AudioLinesIcon,
   BookOpenCheckIcon,
   BotIcon,
@@ -44,6 +45,7 @@ import {
   Table2Icon,
   TargetIcon,
   Trash2Icon,
+  Undo2Icon,
   UserRoundCheckIcon,
   UsersRoundIcon,
   Volume2Icon,
@@ -188,6 +190,8 @@ import {
   mapWorkspaceRowToNavItem,
 } from "@/lib/supabase/salesframe-adapters"
 import {
+  archiveAccount as archiveSupabaseAccount,
+  archiveOpportunity as archiveSupabaseOpportunity,
   createAccount as createSupabaseAccount,
   createCall as createSupabaseCall,
   createCallRecordingSignedUrl,
@@ -201,6 +205,8 @@ import {
   getSellerResearchProfile,
   insertLiveGuidanceFeedback,
   listAccountEnrichmentProfiles,
+  listArchivedAccounts,
+  listArchivedOpportunities,
   listCallNotes,
   listCallSpeakers,
   listCustomerResearchRunsForAccounts,
@@ -225,12 +231,16 @@ import {
   updateOpportunity as updateSupabaseOpportunity,
   updateTranscriptSegment,
   updateWorkspace as updateSupabaseWorkspace,
+  unarchiveAccount as unarchiveSupabaseAccount,
+  unarchiveOpportunity as unarchiveSupabaseOpportunity,
   upsertAccountEnrichmentProfile,
   upsertWorkspaceCustomPlaybook,
   upsertCallSpeaker,
   upsertSellerResearchProfile,
   type AccountEnrichmentProfileRow,
+  type AccountRow,
   type CallSpeakerRow,
+  type OpportunityRow,
   type PlaybookFieldRow,
   type PlaybookRow,
   type PostCallOutputRow,
@@ -311,6 +321,7 @@ import {
   type OpportunityCoverageFilter,
   type OpportunityDraft,
   type OpportunitySort,
+  type PendingArchiveRecord,
   type PendingDeleteRecord,
   type RecordingLifecycleStatus,
   type SavedOpenAiKeyState,
@@ -444,10 +455,23 @@ const breadcrumbPlaybookDetailViews = [
   "custom",
 ]
 const breadcrumbSettingsDetailViews = ["capture", "retention", "ai"]
-const mobileStartCallViews = [
+const mobileStartCallInlineActionViews = [
   "home",
-  "opportunities",
   "calls",
+  "account-detail",
+  "workspace",
+  "post-call",
+  "methodology",
+  "opportunity-record",
+  "opportunity-intelligence",
+]
+const mobileStartCallViews = [
+  ...mobileStartCallInlineActionViews,
+  "opportunities",
+  ...profileRouteIds,
+  ...settingsRouteIds,
+  "playbooks",
+  ...breadcrumbPlaybookDetailViews,
 ]
 const minimumWorkspaceLoadMs = 3000
 const minimumPageLoadMs = 700
@@ -762,6 +786,10 @@ function createAvatarDataUrl(file: File) {
 
 function createRetentionExpiry(days = 90) {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
+}
+
+function normalizeEmployeeCountInput(value: string) {
+  return value.replace(/\D/g, "")
 }
 
 function createAccountDraftFromRecord(account: AccountNavItem): AccountDraft {
@@ -2129,6 +2157,8 @@ function App() {
   const [transcriptsByCallId, setTranscriptsByCallId] = React.useState<Record<string, Opportunity["transcript"]>>({})
   const [workspaceAccounts, setWorkspaceAccounts] = React.useState<AccountNavItem[]>([])
   const [workspaceOpportunities, setWorkspaceOpportunities] = React.useState<Opportunity[]>([])
+  const [archivedAccountRows, setArchivedAccountRows] = React.useState<AccountRow[]>([])
+  const [archivedOpportunityRows, setArchivedOpportunityRows] = React.useState<OpportunityRow[]>([])
   const [activeAccountId, setActiveAccountId] = React.useState("")
   const [activeOpportunityId, setActiveOpportunityId] = React.useState("")
   const [activeCallId, setActiveCallId] = React.useState("")
@@ -2139,6 +2169,7 @@ function App() {
   const [createOpportunityAccountId, setCreateOpportunityAccountId] = React.useState(activeAccountId)
   const [editAccountId, setEditAccountId] = React.useState<string | null>(null)
   const [editOpportunityId, setEditOpportunityId] = React.useState<string | null>(null)
+  const [pendingArchiveRecord, setPendingArchiveRecord] = React.useState<PendingArchiveRecord | null>(null)
   const [pendingDeleteRecord, setPendingDeleteRecord] = React.useState<PendingDeleteRecord | null>(null)
   const [callType, setCallType] = React.useState("Discovery")
   const [isRecording, setIsRecording] = React.useState(false)
@@ -2707,21 +2738,31 @@ function App() {
         callRows,
         playbookRows,
         sellerResearchProfileRow,
+        archivedAccounts,
+        archivedOpportunities,
       ] = await Promise.all([
         listWorkspaceAccounts(activeWorkspaceId),
         listWorkspaceOpportunities(activeWorkspaceId),
         listWorkspaceCalls(activeWorkspaceId),
         listWorkspacePlaybooks(activeWorkspaceId),
         getSellerResearchProfile(activeWorkspaceId),
+        listArchivedAccounts(activeWorkspaceId),
+        listArchivedOpportunities(activeWorkspaceId),
       ])
+      const activeAccountIds = new Set(accountRows.map((account) => account.id))
+      const activeOpportunityRows = opportunityRows.filter((opportunity) => activeAccountIds.has(opportunity.account_id))
+      const activeOpportunityIds = new Set(activeOpportunityRows.map((opportunity) => opportunity.id))
+      const activeCallRows = callRows.filter(
+        (call) => !call.opportunity_id || activeOpportunityIds.has(call.opportunity_id)
+      )
       const [playbookAssignments, customerResearchRuns, playbookFieldRows, enrichmentProfiles] = await Promise.all([
-        listOpportunityPlaybookAssignments(opportunityRows.map((opportunity) => opportunity.id)),
+        listOpportunityPlaybookAssignments(activeOpportunityRows.map((opportunity) => opportunity.id)),
         listCustomerResearchRunsForAccounts(accountRows.map((account) => account.id)),
         listPlaybookFields(playbookRows.map((playbook) => playbook.id)),
         listAccountEnrichmentProfiles(accountRows.map((account) => account.id)),
       ])
-      const callIds = callRows.map((call) => call.id)
-      const opportunityIds = opportunityRows.map((opportunity) => opportunity.id)
+      const callIds = activeCallRows.map((call) => call.id)
+      const opportunityIds = activeOpportunityRows.map((opportunity) => opportunity.id)
       const [
         callNotes,
         callSpeakers,
@@ -2739,32 +2780,34 @@ function App() {
       ])
 
       const nextOpportunities = mapOpportunityRowsToUi({
-        calls: callRows,
+        calls: activeCallRows,
         callNotes,
         callSpeakers,
         nextCallBriefs,
         opportunityFieldEvidence,
-        opportunities: opportunityRows,
+        opportunities: activeOpportunityRows,
         playbookFields: playbookFieldRows,
         playbooks: playbookRows,
         playbookAssignments,
         transcriptSegments,
       })
-      const nextAccounts = mapAccountRowsToNavItems(accountRows, opportunityRows)
+      const nextAccounts = mapAccountRowsToNavItems(accountRows, activeOpportunityRows)
       const currentActiveAccountId = activeAccountIdRef.current
       const currentActiveOpportunityId = activeOpportunityIdRef.current
 
       setWorkspacePlaybooks(playbookRows)
       setWorkspacePlaybookFields(playbookFieldRows)
-      setWorkspaceCalls(mapCallRowsToSummaries(callRows))
+      setWorkspaceCalls(mapCallRowsToSummaries(activeCallRows))
       setPostCallOutputsByCallId(mapPostCallOutputsByCallId(postCallOutputs))
       setTranscriptsByCallId(mapTranscriptSegmentsByCallId({ callSpeakers, transcriptSegments }))
       setWorkspaceAccounts(nextAccounts)
       setWorkspaceOpportunities(nextOpportunities)
+      setArchivedAccountRows(archivedAccounts)
+      setArchivedOpportunityRows(archivedOpportunities)
       const nextAccountDrafts = mapAccountRowsToDrafts(accountRows)
       const nextOpportunityDrafts = mapOpportunityRowsToDrafts({
         accounts: accountRows,
-        opportunities: opportunityRows,
+        opportunities: activeOpportunityRows,
         playbooks: playbookRows,
         playbookAssignments,
       })
@@ -2791,7 +2834,7 @@ function App() {
         setActiveAccountId(nextActiveAccount?.id ?? nextActiveOpportunity?.accountId ?? "")
       }
       const nextDataState =
-        nextAccounts.length === 0 && nextOpportunities.length === 0 && callRows.length === 0 ? "empty" : "ready"
+        nextAccounts.length === 0 && nextOpportunities.length === 0 && activeCallRows.length === 0 ? "empty" : "ready"
 
       loadedWorkspaceIdRef.current = activeWorkspaceId
       workspaceDataStateRef.current = nextDataState
@@ -3090,6 +3133,60 @@ function App() {
     })
   }
 
+  const isActiveCallRecordingOpportunity = (opportunityId: string) => {
+    if (!activeCallIdRef.current || callCapture.status === "idle") return false
+
+    return workspaceCalls.some(
+      (call) => call.id === activeCallIdRef.current && call.opportunityId === opportunityId
+    )
+  }
+
+  const isActiveCallRecordingAccount = (accountId: string) => {
+    if (!activeCallIdRef.current || callCapture.status === "idle") return false
+
+    const opportunityIds = new Set(
+      workspaceOpportunities
+        .filter((opportunity) => opportunity.accountId === accountId)
+        .map((opportunity) => opportunity.id)
+    )
+
+    return workspaceCalls.some(
+      (call) => call.id === activeCallIdRef.current && opportunityIds.has(call.opportunityId)
+    )
+  }
+
+  const handleRequestArchiveAccount = (accountId: string) => {
+    const account = workspaceAccounts.find((item) => item.id === accountId)
+    if (!account) return
+
+    const relatedOpportunities = workspaceOpportunities.filter(
+      (opportunity) => opportunity.accountId === accountId
+    )
+
+    setPendingArchiveRecord({
+      type: "account",
+      id: account.id,
+      name: account.name,
+      detail: relatedOpportunities.length
+        ? `This hides the account and ${relatedOpportunities.length} linked ${
+            relatedOpportunities.length === 1 ? "opportunity" : "opportunities"
+          } from active workspace views. You can restore it from your Account page.`
+        : "This hides the account from active workspace views. You can restore it from your Account page.",
+    })
+  }
+
+  const handleRequestArchiveOpportunity = (opportunityId: string) => {
+    const opportunity = workspaceOpportunities.find((item) => item.id === opportunityId)
+    if (!opportunity) return
+
+    setPendingArchiveRecord({
+      type: "opportunity",
+      id: opportunity.id,
+      name: opportunity.name,
+      detail: "This hides the opportunity from active workspace views. Calls, recordings, evidence, and notes stay attached if you restore it later.",
+    })
+  }
+
   const handleRequestDeleteCall = (callId: string) => {
     const call = workspaceCalls.find((item) => item.id === callId)
     if (!call) return
@@ -3113,6 +3210,121 @@ function App() {
         .filter(Boolean)
         .join(" "),
     })
+  }
+
+  const handleConfirmArchiveRecord = async (): Promise<RecordMutationResult> => {
+    if (!pendingArchiveRecord) {
+      return {
+        message: "Choose a record before archiving.",
+        ok: false,
+      }
+    }
+
+    const archiveRecord = pendingArchiveRecord
+
+    if (archiveRecord.type === "account" && isActiveCallRecordingAccount(archiveRecord.id)) {
+      return {
+        message: "Stop the active call before archiving this account.",
+        ok: false,
+      }
+    }
+
+    if (archiveRecord.type === "opportunity" && isActiveCallRecordingOpportunity(archiveRecord.id)) {
+      return {
+        message: "Stop the active call before archiving this opportunity.",
+        ok: false,
+      }
+    }
+
+    try {
+      if (archiveRecord.type === "account") {
+        await archiveSupabaseAccount(archiveRecord.id)
+      } else {
+        await archiveSupabaseOpportunity(archiveRecord.id)
+      }
+
+      setPendingArchiveRecord(null)
+
+      if (archiveRecord.type === "account") {
+        const archivedOpportunityIds = new Set(
+          workspaceOpportunities
+            .filter((opportunity) => opportunity.accountId === archiveRecord.id)
+            .map((opportunity) => opportunity.id)
+        )
+
+        setWorkspaceAccounts((items) => items.filter((account) => account.id !== archiveRecord.id))
+        setWorkspaceOpportunities((items) => items.filter((opportunity) => opportunity.accountId !== archiveRecord.id))
+        setWorkspaceCalls((items) => items.filter((call) => !archivedOpportunityIds.has(call.opportunityId)))
+        if (
+          activeAccountIdRef.current === archiveRecord.id ||
+          archivedOpportunityIds.has(activeOpportunityIdRef.current)
+        ) {
+          setActiveAccountId("")
+          setActiveOpportunityId("")
+          setPostCallFocusCallId("")
+          handleNavigate("home")
+        }
+      } else {
+        setWorkspaceOpportunities((items) => items.filter((opportunity) => opportunity.id !== archiveRecord.id))
+        setWorkspaceCalls((items) => items.filter((call) => call.opportunityId !== archiveRecord.id))
+        if (activeOpportunityIdRef.current === archiveRecord.id) {
+          setActiveOpportunityId("")
+          setPostCallFocusCallId("")
+          handleNavigate("home")
+        }
+      }
+
+      setWorkspaceRefreshToken((value) => value + 1)
+
+      return {
+        ok: true,
+      }
+    } catch (caughtError: unknown) {
+      return {
+        message: getUserFacingErrorMessage(caughtError, "Record needs another archive attempt."),
+        ok: false,
+      }
+    }
+  }
+
+  const handleRestoreArchivedAccount = async (accountId: string): Promise<RecordMutationResult> => {
+    try {
+      await unarchiveSupabaseAccount(accountId)
+      setWorkspaceRefreshToken((value) => value + 1)
+
+      return { ok: true }
+    } catch (caughtError: unknown) {
+      return {
+        message: getUserFacingErrorMessage(caughtError, "Account needs another restore attempt."),
+        ok: false,
+      }
+    }
+  }
+
+  const handleRestoreArchivedOpportunity = async (opportunityId: string): Promise<RecordMutationResult> => {
+    const archivedOpportunity = archivedOpportunityRows.find((opportunity) => opportunity.id === opportunityId)
+    const parentAccountArchived = archivedOpportunity
+      ? archivedAccountRows.some((account) => account.id === archivedOpportunity.account_id)
+      : false
+
+    if (parentAccountArchived) {
+      return {
+        message: "Restore the account before restoring this opportunity.",
+        ok: false,
+      }
+    }
+
+    try {
+      await unarchiveSupabaseOpportunity(opportunityId)
+      setWorkspaceRefreshToken((value) => value + 1)
+
+      return { ok: true }
+    } catch (caughtError: unknown) {
+      return {
+        message: getUserFacingErrorMessage(caughtError, "Opportunity needs another restore attempt."),
+        ok: false,
+      }
+    }
   }
 
   const handleConfirmDeleteRecord = async (): Promise<RecordMutationResult> => {
@@ -3585,26 +3797,22 @@ function App() {
           })
       updatePreparationStep(
         "coach",
-        "This is usually the longest part. SalesFrame is reading the context and shaping the first question."
+        "SalesFrame is writing the first live-coach question from your account, opportunity, and playbooks."
       )
-      const initialGuidanceResponse = await requestLiveGuidance({
-        account: {
-          id: accountId,
-          name: accountName,
-          industry: accountIndustry,
-          website: selectedAccountRecord?.website ?? createdAccountRow?.website ?? "",
-        },
+      const initialGuidanceResponse = await requestLiveQuestion({
         accountProfile: initialAccountProfile,
         accountId,
         callId: call.id,
         callType: payload.callType,
         customerResearch: payload.customerResearch,
-        opportunity: {
-          id: opportunityId,
-          name: opportunityName,
-          stage: createdOpportunityRow?.stage ?? selectedOpportunityRecord?.stage ?? "Discovery",
-          amount: createdOpportunityRow?.amount ?? selectedOpportunityRecord?.amount ?? "Unqualified",
-          closeDate: selectedOpportunityRecord?.closeDate ?? "Not set",
+        currentGuidance: null,
+        refreshContext: {
+          reason: "pre_call_first_question",
+          accountName,
+          opportunityName,
+          opportunityStage: createdOpportunityRow?.stage ?? selectedOpportunityRecord?.stage ?? "Discovery",
+          opportunityAmount: createdOpportunityRow?.amount ?? selectedOpportunityRecord?.amount ?? "Unqualified",
+          opportunityCloseDate: selectedOpportunityRecord?.closeDate ?? "Not set",
         },
         opportunityId,
         playbooks: selectedPlaybooks,
@@ -3612,7 +3820,7 @@ function App() {
         transcript: [],
       }, {
         signal: payload.abortSignal,
-        timeoutMs: 22000,
+        timeoutMs: 14000,
       })
       throwIfStartCancelled()
       const initialGuidance = mapAiLiveGuidanceResponse(initialGuidanceResponse)
@@ -3982,7 +4190,7 @@ function App() {
         name: accountName,
         website: normalizedWebsite,
         industry: accountIndustry || null,
-        employee_count: payload.employeeCount.trim(),
+        employee_count: normalizeEmployeeCountInput(payload.employeeCount),
         region: payload.region.trim() || "Australia",
         currency: normalizeCurrencyCode(payload.currency),
         current_tools: payload.currentTools.trim(),
@@ -4181,7 +4389,7 @@ function App() {
         name: accountName,
         website: normalizedWebsite,
         industry: industry || null,
-        employee_count: payload.employeeCount.trim(),
+        employee_count: normalizeEmployeeCountInput(payload.employeeCount),
         region: payload.region.trim() || "Australia",
         currency: normalizeCurrencyCode(payload.currency),
         current_tools: payload.currentTools.trim(),
@@ -4263,6 +4471,7 @@ function App() {
   const updateAccountDraft = <K extends keyof AccountDraft>(accountId: string, field: K, value: AccountDraft[K]) => {
     setAccountRecordSaveStatus("idle")
     setAccountRecordSaveMessage("")
+    const nextValue = field === "employeeCount" ? normalizeEmployeeCountInput(String(value)) : value
     setAccountDrafts((drafts) => ({
       ...drafts,
       [accountId]: (() => {
@@ -4270,7 +4479,7 @@ function App() {
         const baseDraft = drafts[accountId] ?? createAccountDraftFromRecord(account)
         return {
           ...baseDraft,
-          [field]: value,
+          [field]: nextValue,
         }
       })(),
     }))
@@ -4311,7 +4520,7 @@ function App() {
         name: draft.accountName.trim(),
         website: normalizedWebsite,
         industry: draft.industry.trim() || null,
-        employee_count: draft.employeeCount.trim(),
+        employee_count: normalizeEmployeeCountInput(draft.employeeCount),
         region: draft.region.trim() || "Australia",
         currency: normalizeCurrencyCode(draft.currency),
         current_tools: draft.currentTools.trim(),
@@ -5157,7 +5366,7 @@ function App() {
     !shouldShowPageTransition &&
     !isCallLive &&
     mobileStartCallViews.includes(activeView)
-  const mobileStartCallHasVisiblePrimaryAction = activeView === "home" || activeView === "calls"
+  const mobileStartCallHasVisiblePrimaryAction = mobileStartCallInlineActionViews.includes(activeView)
   const shouldRenderMobileStartCall =
     shouldShowMobileStartCall &&
     (!mobileStartCallHasVisiblePrimaryAction || mobileStartCallScrolledPastPrimaryAction)
@@ -5269,6 +5478,8 @@ function App() {
           accounts={workspaceAccounts}
           workspaces={workspaceNavItems}
           onAccountSelect={handleAccountSelect}
+          onArchiveAccount={handleRequestArchiveAccount}
+          onArchiveOpportunity={handleRequestArchiveOpportunity}
           onCreateAccount={() => setCreateAccountOpen(true)}
           onCreateOpportunity={handleOpenCreateOpportunity}
           onCreateWorkspace={handleOpenCreateWorkspaceSetup}
@@ -5433,6 +5644,7 @@ function App() {
                 onOpportunityDraftChange={(field, value) =>
                   updateOpportunityDraft(activeOpportunity.id, field, value)
                 }
+                onArchiveOpportunity={handleRequestArchiveOpportunity}
                 onDeleteOpportunity={handleRequestDeleteOpportunity}
                 onSaveOpportunityDraft={handleSaveActiveOpportunityDraft}
                 onScrollToTop={requestNavigationScrollReset}
@@ -5464,6 +5676,8 @@ function App() {
                 sellerResearchProfile={sellerResearchProfile}
                 workspaceId={activeWorkspaceId}
                 onAccountDraftChange={(field, value) => updateAccountDraft(activeAccount.id, field, value)}
+                onArchiveAccount={handleRequestArchiveAccount}
+                onArchiveOpportunity={handleRequestArchiveOpportunity}
                 onCreateOpportunity={() => handleOpenCreateOpportunity(activeAccount.id)}
                 onDeleteOpportunity={handleRequestDeleteOpportunity}
                 onOpportunitySelect={handleOpportunitySelect}
@@ -5478,6 +5692,9 @@ function App() {
               />
             ) : profileViews.includes(activeView) ? (
               <PersonalAccountView
+                accounts={workspaceAccounts}
+                archivedAccounts={archivedAccountRows}
+                archivedOpportunities={archivedOpportunityRows}
                 bulkImportStatus={bulkImportStatus}
                 bulkImportStatusLoading={bulkImportStatusLoading}
                 bulkImportStatusMessage={bulkImportStatusMessage}
@@ -5487,6 +5704,8 @@ function App() {
                 workspaceId={activeWorkspaceId}
                 onOpenCsvImport={handleOpenCsvImport}
                 onRefreshBulkImportStatus={refreshBulkImportStatus}
+                onRestoreArchivedAccount={handleRestoreArchivedAccount}
+                onRestoreArchivedOpportunity={handleRestoreArchivedOpportunity}
                 onRetryFailedBulkEnrichment={handleRetryFailedBulkEnrichment}
                 onProfileChange={setPersonalAccountProfile}
                 onSellerResearchProfileChange={setSellerResearchProfile}
@@ -5499,6 +5718,7 @@ function App() {
                 opportunityDrafts={opportunityDrafts}
                 playbookFields={workspacePlaybookFields}
                 playbookRows={workspacePlaybooks}
+                onArchiveOpportunity={handleRequestArchiveOpportunity}
                 onCreateOpportunity={() => handleOpenCreateOpportunity(activeAccount.id)}
                 onDeleteOpportunity={handleRequestDeleteOpportunity}
                 onOpportunitySelect={handleOpportunitySelect}
@@ -5620,6 +5840,11 @@ function App() {
           record={pendingDeleteRecord}
           onCancel={() => setPendingDeleteRecord(null)}
           onConfirm={handleConfirmDeleteRecord}
+        />
+        <ArchiveRecordDialog
+          record={pendingArchiveRecord}
+          onCancel={() => setPendingArchiveRecord(null)}
+          onConfirm={handleConfirmArchiveRecord}
         />
         {activeWorkspace && csvImportOpen ? (
           <React.Suspense
@@ -8410,8 +8635,10 @@ function CreateAccountDialog({
                 <Input
                   id="create-account-employees"
                   value={employeeCount}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   placeholder="Optional"
-                  onChange={(event) => setEmployeeCount(event.currentTarget.value)}
+                  onChange={(event) => setEmployeeCount(normalizeEmployeeCountInput(event.currentTarget.value))}
                 />
               </div>
               <div className="grid gap-2">
@@ -8936,8 +9163,10 @@ function EditAccountDialog({
               <Input
                 id="edit-account-employees"
                 value={employeeCount}
+                inputMode="numeric"
+                pattern="[0-9]*"
                 placeholder="Employee size"
-                onChange={(event) => setEmployeeCount(event.currentTarget.value)}
+                onChange={(event) => setEmployeeCount(normalizeEmployeeCountInput(event.currentTarget.value))}
               />
             </div>
             <div className="grid gap-2">
@@ -9684,6 +9913,82 @@ function DeleteRecordDialog({
   )
 }
 
+function ArchiveRecordDialog({
+  record,
+  onCancel,
+  onConfirm,
+}: {
+  record: PendingArchiveRecord | null
+  onCancel: () => void
+  onConfirm: () => Promise<RecordMutationResult> | RecordMutationResult
+}) {
+  const [archiveError, setArchiveError] = React.useState("")
+  const [archiveSubmitting, setArchiveSubmitting] = React.useState(false)
+
+  React.useEffect(() => {
+    setArchiveError("")
+    setArchiveSubmitting(false)
+  }, [record?.id])
+
+  if (!record) return null
+
+  const recordLabel = record.type === "account" ? "account" : "opportunity"
+  const handleArchive = async () => {
+    setArchiveError("")
+    setArchiveSubmitting(true)
+    const result = await onConfirm()
+
+    if (!result.ok) {
+      setArchiveError(result.message)
+      setArchiveSubmitting(false)
+      return
+    }
+
+    setArchiveSubmitting(false)
+    onCancel()
+  }
+
+  return (
+    <Dialog open onOpenChange={(nextOpen) => (!nextOpen && !archiveSubmitting ? onCancel() : undefined)}>
+      <DialogContent
+        className="max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 sm:max-w-md"
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
+        <DialogHeader>
+          <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+            <ArchiveIcon className="size-5" />
+          </div>
+          <DialogTitle>Archive {recordLabel}</DialogTitle>
+          <DialogDescription>
+            This hides the record from active workspace views. You can restore it from your Account page.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="rounded-lg bg-muted/30 p-3">
+          <p className="text-sm font-medium">{record.name}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{record.detail}</p>
+        </div>
+        {archiveError ? (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+            {archiveError}
+          </div>
+        ) : null}
+        <DialogActions
+          cancelDisabled={archiveSubmitting}
+          onCancel={onCancel}
+          primaryAction={
+            <Button className="gap-2" disabled={archiveSubmitting} onClick={handleArchive}>
+              <ArchiveIcon />
+              {archiveSubmitting ? "Archiving..." : `Archive ${recordLabel}`}
+            </Button>
+          }
+        />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function PlaybookMultiSelect({
   id,
   value,
@@ -9752,8 +10057,10 @@ function PlaybookMultiSelect({
         side="top"
         sideOffset={6}
         collisionPadding={12}
+        avoidCollisions
         role="listbox"
         aria-multiselectable="true"
+        data-vaul-no-drag=""
         className="z-[80] w-(--radix-popover-trigger-width) min-w-64 overflow-hidden rounded-lg p-0 shadow-lg"
         onEscapeKeyDown={(event) => {
           event.preventDefault()
@@ -9762,8 +10069,10 @@ function PlaybookMultiSelect({
         }}
       >
         <div
-          className="grid max-h-[min(18rem,var(--radix-popover-content-available-height))] gap-1 overflow-y-auto overscroll-contain p-1"
+          data-vaul-no-drag=""
+          className="grid max-h-[min(18rem,calc(100svh-8rem))] gap-1 overflow-y-auto overscroll-contain p-1"
           onWheelCapture={handleOptionsWheel}
+          onTouchMoveCapture={(event) => event.stopPropagation()}
         >
           {callPlaybookOptions.map((playbook) => {
             const isSelected = selectedPlaybooks.includes(playbook)
@@ -10283,6 +10592,8 @@ function AccountView({
   sellerResearchProfile,
   workspaceId,
   onAccountDraftChange,
+  onArchiveAccount,
+  onArchiveOpportunity,
   onCreateOpportunity,
   onDeleteOpportunity,
   onOpportunitySelect,
@@ -10312,6 +10623,8 @@ function AccountView({
   sellerResearchProfile: SellerResearchProfile
   workspaceId: string
   onAccountDraftChange: <K extends keyof AccountDraft>(field: K, value: AccountDraft[K]) => void
+  onArchiveAccount: (id: string) => void
+  onArchiveOpportunity: (id: string) => void
   onCreateOpportunity: () => void
   onDeleteOpportunity: (id: string) => void
   onOpportunitySelect: (id: string) => void
@@ -10581,6 +10894,10 @@ function AccountView({
                               <ExternalLinkIcon />
                               Open
                             </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => onArchiveOpportunity(opportunity.id)}>
+                              <ArchiveIcon />
+                              Archive
+                            </DropdownMenuItem>
                             <DropdownMenuItem variant="destructive" onSelect={() => onDeleteOpportunity(opportunity.id)}>
                               <Trash2Icon />
                               Delete
@@ -10705,6 +11022,10 @@ function AccountView({
                                   <ExternalLinkIcon />
                                   Open
                                 </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => onArchiveOpportunity(opportunity.id)}>
+                                  <ArchiveIcon />
+                                  Archive
+                                </DropdownMenuItem>
                                 <DropdownMenuItem variant="destructive" onSelect={() => onDeleteOpportunity(opportunity.id)}>
                                   <Trash2Icon />
                                   Delete
@@ -10774,6 +11095,20 @@ function AccountView({
           </Card>
         </TabsContent>
       </Tabs>
+      {account.id ? (
+        <div className="flex justify-start pt-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="gap-2"
+            onClick={() => onArchiveAccount(account.id)}
+          >
+            <ArchiveIcon />
+            Archive account
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -11149,6 +11484,7 @@ function WorkspaceView({
   onNavigate,
   onOpenSettings,
   onOpportunityDraftChange,
+  onArchiveOpportunity,
   onDeleteOpportunity,
   onSaveOpportunityDraft,
   onScrollToTop,
@@ -11202,6 +11538,7 @@ function WorkspaceView({
   onNavigate: (view: string) => void
   onOpenSettings: () => void
   onOpportunityDraftChange: (field: keyof OpportunityDraft, value: string) => void
+  onArchiveOpportunity: (id: string) => void
   onDeleteOpportunity: (id: string) => void
   onSaveOpportunityDraft: () => void
   onScrollToTop: () => void
@@ -11930,6 +12267,7 @@ function WorkspaceView({
           savedOpportunityDraft={savedOpportunityDraft}
           sellerResearchProfile={sellerResearchProfile}
           workspaceId={workspaceId}
+          onArchiveOpportunity={onArchiveOpportunity}
           onDeleteCall={onDeleteCall}
           onDeleteOpportunity={onDeleteOpportunity}
           onNavigate={onNavigate}
@@ -11976,6 +12314,7 @@ function OpportunityWorkspace({
   savedOpportunityDraft,
   sellerResearchProfile,
   workspaceId,
+  onArchiveOpportunity,
   onDeleteCall,
   onDeleteOpportunity,
   onNavigate,
@@ -12002,6 +12341,7 @@ function OpportunityWorkspace({
   savedOpportunityDraft: OpportunityDraft
   sellerResearchProfile: SellerResearchProfile
   workspaceId: string
+  onArchiveOpportunity: (id: string) => void
   onDeleteCall: (callId: string) => void
   onDeleteOpportunity: (id: string) => void
   onNavigate: (view: string) => void
@@ -12089,7 +12429,17 @@ function OpportunityWorkspace({
         />
       </TabsContent>
       {opportunity.id ? (
-        <div className="flex justify-start pt-2">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="gap-2"
+            onClick={() => onArchiveOpportunity(opportunity.id)}
+          >
+            <ArchiveIcon />
+            Archive opportunity
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -15022,6 +15372,7 @@ function OpportunitiesView({
   opportunityDrafts,
   playbookFields,
   playbookRows,
+  onArchiveOpportunity,
   onCreateOpportunity,
   onDeleteOpportunity,
   onOpportunitySelect,
@@ -15031,6 +15382,7 @@ function OpportunitiesView({
   opportunityDrafts: Record<string, OpportunityDraft>
   playbookFields: PlaybookFieldRow[]
   playbookRows: PlaybookRow[]
+  onArchiveOpportunity: (id: string) => void
   onCreateOpportunity: () => void
   onDeleteOpportunity: (id: string) => void
   onOpportunitySelect: (id: string) => void
@@ -15311,6 +15663,10 @@ function OpportunitiesView({
                         <DropdownMenuItem onSelect={() => onOpportunitySelect(opportunity.id)}>
                           <ExternalLinkIcon />
                           Open
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => onArchiveOpportunity(opportunity.id)}>
+                          <ArchiveIcon />
+                          Archive
                         </DropdownMenuItem>
                         <DropdownMenuItem variant="destructive" onSelect={() => onDeleteOpportunity(opportunity.id)}>
                           <Trash2Icon />
@@ -16533,6 +16889,9 @@ function CustomFrameworkEditor({
 }
 
 function PersonalAccountView({
+  accounts,
+  archivedAccounts,
+  archivedOpportunities,
   bulkImportStatus,
   bulkImportStatusLoading,
   bulkImportStatusMessage,
@@ -16542,11 +16901,16 @@ function PersonalAccountView({
   workspaceId,
   onOpenCsvImport,
   onRefreshBulkImportStatus,
+  onRestoreArchivedAccount,
+  onRestoreArchivedOpportunity,
   onRetryFailedBulkEnrichment,
   onProfileChange,
   onSellerResearchProfileChange,
   onOpenSettings,
 }: {
+  accounts: AccountNavItem[]
+  archivedAccounts: AccountRow[]
+  archivedOpportunities: OpportunityRow[]
   bulkImportStatus: BulkImportStatusResponse | null
   bulkImportStatusLoading: boolean
   bulkImportStatusMessage: string
@@ -16556,6 +16920,8 @@ function PersonalAccountView({
   workspaceId: string
   onOpenCsvImport: (mode: CsvImportType) => void
   onRefreshBulkImportStatus: () => void
+  onRestoreArchivedAccount: (accountId: string) => Promise<RecordMutationResult> | RecordMutationResult
+  onRestoreArchivedOpportunity: (opportunityId: string) => Promise<RecordMutationResult> | RecordMutationResult
   onRetryFailedBulkEnrichment: () => void
   onProfileChange: (profile: PersonalAccountProfile) => void
   onSellerResearchProfileChange: (profile: SellerResearchProfile) => void
@@ -16934,6 +17300,14 @@ function PersonalAccountView({
         </CardContent>
       </Card>
 
+      <ArchiveRestoreCard
+        accounts={accounts}
+        archivedAccounts={archivedAccounts}
+        archivedOpportunities={archivedOpportunities}
+        onRestoreAccount={onRestoreArchivedAccount}
+        onRestoreOpportunity={onRestoreArchivedOpportunity}
+      />
+
       <Card>
         <CardHeader>
           <CardTitle>Delete account</CardTitle>
@@ -16969,6 +17343,181 @@ function PersonalAccountView({
       </Card>
 
     </div>
+  )
+}
+
+function ArchiveRestoreCard({
+  accounts,
+  archivedAccounts,
+  archivedOpportunities,
+  onRestoreAccount,
+  onRestoreOpportunity,
+}: {
+  accounts: AccountNavItem[]
+  archivedAccounts: AccountRow[]
+  archivedOpportunities: OpportunityRow[]
+  onRestoreAccount: (accountId: string) => Promise<RecordMutationResult> | RecordMutationResult
+  onRestoreOpportunity: (opportunityId: string) => Promise<RecordMutationResult> | RecordMutationResult
+}) {
+  const [restorePendingId, setRestorePendingId] = React.useState("")
+  const [restoreMessage, setRestoreMessage] = React.useState("")
+  const [restoreMessageTone, setRestoreMessageTone] = React.useState<"success" | "error" | "info">("info")
+  const activeAccountById = React.useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
+  const archivedAccountById = React.useMemo(
+    () => new Map(archivedAccounts.map((account) => [account.id, account])),
+    [archivedAccounts]
+  )
+
+  const handleRestore = async ({
+    id,
+    label,
+    restore,
+  }: {
+    id: string
+    label: string
+    restore: (id: string) => Promise<RecordMutationResult> | RecordMutationResult
+  }) => {
+    setRestorePendingId(id)
+    setRestoreMessage("")
+    setRestoreMessageTone("info")
+
+    const result = await restore(id)
+
+    if (!result.ok) {
+      setRestoreMessage(result.message)
+      setRestoreMessageTone("error")
+      setRestorePendingId("")
+      return
+    }
+
+    setRestoreMessage(`${label} restored.`)
+    setRestoreMessageTone("success")
+    setRestorePendingId("")
+  }
+
+  const hasArchivedRecords = archivedAccounts.length > 0 || archivedOpportunities.length > 0
+
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>Archive</CardTitle>
+          <CardDescription>Restore accounts and opportunities hidden from the active workspace.</CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        {!hasArchivedRecords ? (
+          <ListEmptyState
+            icon={<ArchiveIcon />}
+            title="Nothing archived yet"
+            message="Good, clean workspace."
+          />
+        ) : null}
+
+        {archivedAccounts.length ? (
+          <div className="grid gap-2">
+            <h3 className="text-sm font-medium">Archived accounts</h3>
+            <div className="grid gap-2">
+              {archivedAccounts.map((account) => (
+                <div
+                  key={account.id}
+                  className="grid gap-3 rounded-lg bg-muted/30 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.55fr)_auto] sm:items-center"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{account.name}</p>
+                    <p className="truncate text-sm text-muted-foreground">{account.website || "No website saved"}</p>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {account.archived_at ? formatSavedAt(account.archived_at) : "Archived"}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="w-full gap-2 sm:w-auto"
+                    disabled={restorePendingId === account.id}
+                    onClick={() =>
+                      void handleRestore({
+                        id: account.id,
+                        label: account.name,
+                        restore: onRestoreAccount,
+                      })
+                    }
+                  >
+                    <Undo2Icon />
+                    {restorePendingId === account.id ? "Restoring..." : "Restore account"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {archivedOpportunities.length ? (
+          <div className="grid gap-2">
+            <h3 className="text-sm font-medium">Archived opportunities</h3>
+            <div className="grid gap-2">
+              {archivedOpportunities.map((opportunity) => {
+                const activeParentAccount = activeAccountById.get(opportunity.account_id)
+                const archivedParentAccount = archivedAccountById.get(opportunity.account_id)
+                const parentAccountName = activeParentAccount?.name ?? archivedParentAccount?.name ?? "Account not found"
+                const isParentArchived = Boolean(archivedParentAccount)
+
+                return (
+                  <div
+                    key={opportunity.id}
+                    className="grid gap-3 rounded-lg bg-muted/30 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.55fr)_auto] sm:items-center"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{opportunity.name}</p>
+                      <p className="truncate text-sm text-muted-foreground">
+                        {isParentArchived ? `${parentAccountName} is archived` : parentAccountName}
+                      </p>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {opportunity.archived_at ? formatSavedAt(opportunity.archived_at) : "Archived"}
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="w-full gap-2 sm:w-auto"
+                      disabled={isParentArchived || restorePendingId === opportunity.id}
+                      title={isParentArchived ? "Restore the account before restoring this opportunity." : undefined}
+                      onClick={() =>
+                        void handleRestore({
+                          id: opportunity.id,
+                          label: opportunity.name,
+                          restore: onRestoreOpportunity,
+                        })
+                      }
+                    >
+                      <Undo2Icon />
+                      {restorePendingId === opportunity.id ? "Restoring..." : "Restore opportunity"}
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {restoreMessage ? (
+          <p
+            className={cn(
+              "text-sm",
+              restoreMessageTone === "error" && "text-destructive",
+              restoreMessageTone === "success" && "text-emerald-600",
+              restoreMessageTone === "info" && "text-muted-foreground"
+            )}
+            role={restoreMessageTone === "error" ? "alert" : "status"}
+            aria-live={restoreMessageTone === "error" ? "assertive" : "polite"}
+          >
+            {restoreMessage}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
   )
 }
 

@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 
 import type { Database, Json, TablesUpdate } from "../../src/lib/supabase/database.types"
 import { AppError, badRequest, dataResponse, errorResponse, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
-import { buildAccountLogoMetadata } from "./_shared/account-logo"
+import { resolveAccountLogoMetadata } from "./_shared/account-logo"
 import { callOpenAiWebSearchJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { assertRateLimit } from "./_shared/rate-limit"
@@ -218,12 +218,13 @@ function assertCoreField(value: unknown, fallback = ""): AccountEnrichmentCoreFi
 }
 
 function normalizeEmployeeCountCoreField(field: AccountEnrichmentCoreField): AccountEnrichmentCoreField {
-  const valueText = field.value.toLowerCase()
+  const originalValue = field.value.trim()
+  const valueText = originalValue.toLowerCase()
   const contextText = `${field.rationale} ${field.sourceLabel}`.toLowerCase()
   const employeeSignalPattern =
     /\b(employee|employees|headcount|staff|workforce|workers|people employed|team members|company size|organisation size|organization size|fte)\b/
   const nonEmployeeScalePattern =
-    /\b(active users?|monthly active users?|users?|customers?|subscribers?|members?|creators?|downloads?|visitors?|accounts?|revenue|valuation|market cap)\b/
+    /\b(active users?|monthly active users?|users?|customers?|subscribers?|members?|creators?|downloads?|visitors?|accounts?|stores?|locations?|offices?|branches?|outlets?|sites?|revenue|valuation|market cap)\b/
   const highScaleNumberPattern = /\b\d+(?:[.,]\d+)?\s*(?:m|mn|million|b|bn|billion)\+?\b/
   const valueHasEmployeeSignal = employeeSignalPattern.test(valueText)
   const contextHasEmployeeSignal = employeeSignalPattern.test(contextText)
@@ -235,7 +236,7 @@ function normalizeEmployeeCountCoreField(field: AccountEnrichmentCoreField): Acc
     !contextHasEmployeeSignal
 
   if (
-    field.value &&
+    originalValue &&
     (
       valueHasNonEmployeeScaleSignal ||
       valueLooksLikeAudienceScale ||
@@ -253,7 +254,72 @@ function normalizeEmployeeCountCoreField(field: AccountEnrichmentCoreField): Acc
     }
   }
 
-  return field
+  if (!originalValue) return field
+
+  const employeeKeyword =
+    "(?:employees?|headcount|staff|workforce|workers?|people employed|team members?|company size|organisation size|organization size|fte)"
+  const scaleKeyword = "(?:k|m|mn|b|bn|thousand|million|billion)?"
+  const rangeBeforeEmployeePattern = new RegExp(
+    `(\\d[\\d,]*(?:\\.\\d+)?)\\s*(${scaleKeyword})\\s*(?:\\+?\\s*(?:-|to|–|—)\\s*)\\d[\\d,]*(?:\\.\\d+)?\\s*(?:${scaleKeyword})\\s*${employeeKeyword}`,
+    "i"
+  )
+  const numberBeforeEmployeePattern = new RegExp(
+    `(\\d[\\d,]*(?:\\.\\d+)?)\\s*(${scaleKeyword})\\+?\\s*${employeeKeyword}`,
+    "i"
+  )
+  const numberAfterEmployeePattern = new RegExp(
+    `${employeeKeyword}\\D{0,32}(\\d[\\d,]*(?:\\.\\d+)?)\\s*(${scaleKeyword})`,
+    "i"
+  )
+  const genericNumberPattern = /(\d[\d,]*(?:\.\d+)?)\s*(k|m|mn|b|bn|thousand|million|billion)?/i
+
+  const numericMatch =
+    originalValue.match(rangeBeforeEmployeePattern) ||
+    originalValue.match(numberBeforeEmployeePattern) ||
+    originalValue.match(numberAfterEmployeePattern) ||
+    (!valueHasNonEmployeeScaleSignal ? originalValue.match(genericNumberPattern) : null)
+  const normalizedEmployeeCount = normalizeEmployeeNumberMatch(numericMatch)
+
+  if (!normalizedEmployeeCount) {
+    return {
+      ...field,
+      confidence: "low",
+      rationale: [
+        field.rationale,
+        "Rejected for employee count because the value could not be normalized to a plain workforce number.",
+      ].filter(Boolean).join(" "),
+      value: "",
+    }
+  }
+
+  return {
+    ...field,
+    value: normalizedEmployeeCount,
+  }
+}
+
+function normalizeEmployeeNumberMatch(match: RegExpMatchArray | null): string {
+  if (!match) return ""
+
+  const rawNumber = match[1]
+  const rawScale = match[2]?.toLowerCase() ?? ""
+  if (!rawNumber) return ""
+
+  const numericValue = Number(rawScale ? rawNumber.replace(/,/g, ".") : rawNumber.replace(/,/g, ""))
+  if (!Number.isFinite(numericValue) || numericValue <= 0) return ""
+
+  const multiplier =
+    rawScale === "k" || rawScale === "thousand"
+      ? 1_000
+      : rawScale === "m" || rawScale === "mn" || rawScale === "million"
+        ? 1_000_000
+        : rawScale === "b" || rawScale === "bn" || rawScale === "billion"
+          ? 1_000_000_000
+          : 1
+  const normalized = Math.round(numericValue * multiplier)
+
+  if (!Number.isFinite(normalized) || normalized <= 0 || normalized > 10_000_000) return ""
+  return String(normalized)
 }
 
 function assertSalesSignals(value: unknown): AccountEnrichmentResult["salesSignals"] {
@@ -453,7 +519,7 @@ export async function runAccountEnrichmentForAccount({
       schema: accountEnrichmentSchema,
       schemaName: "salesframe_account_enrichment",
       system:
-        "You are SalesFrame's account enrichment analyst. Return only schema-valid JSON. Use public web research and trusted sources only. Prioritize the official website, careers page, newsroom, investor or filings pages, business registry, public news including Google or GDELT-style coverage, jobs or ATS pages, review/customer sentiment sites, public technographic references, and government procurement portals. For reviewSentimentSignals, treat Google Maps, Trustpilot, G2, Reddit/forums, Product Hunt, app stores, and software marketplaces as public source signals only: summarize high-level themes, profile presence, broad rating/review indicators when visible, and confidence; do not copy raw review text, do not scrape, do not imply API-level completeness, and leave the field blank or low confidence when sources are thin. Prefer first-party customer proof pages and case studies over unsupported third-party claims. Do not invent facts. Leave fields blank when evidence is weak. Make sales signals useful for live B2B discovery questions. For employeeCount, return only workforce headcount or employee range. Never put users, active users, customers, subscribers, creators, members, downloads, revenue, valuation, or market scale into employeeCount; put those facts in sales signals or notes instead.",
+        "You are SalesFrame's account enrichment analyst. Return only schema-valid JSON. Use public web research and trusted sources only. Prioritize the official website, careers page, newsroom, investor or filings pages, business registry, public news including Google or GDELT-style coverage, jobs or ATS pages, review/customer sentiment sites, public technographic references, and government procurement portals. For reviewSentimentSignals, treat Google Maps, Trustpilot, G2, Reddit/forums, Product Hunt, app stores, and software marketplaces as public source signals only: summarize high-level themes, profile presence, broad rating/review indicators when visible, and confidence; do not copy raw review text, do not scrape, do not imply API-level completeness, and leave the field blank or low confidence when sources are thin. Prefer first-party customer proof pages and case studies over unsupported third-party claims. Do not invent facts. Leave fields blank when evidence is weak. Make sales signals useful for live B2B discovery questions. For employeeCount, return only a plain numeric workforce headcount value as digits with no commas, suffixes, ranges, words, or symbols. Never put users, active users, customers, subscribers, creators, members, downloads, revenue, valuation, or market scale into employeeCount; put those facts in sales signals or notes instead.",
       input: JSON.stringify({
         account: {
           name: accountName,
@@ -479,7 +545,7 @@ export async function runAccountEnrichmentForAccount({
           "Do not quote raw review text or present private, paywalled, scraped, or unsourced sentiment.",
           "Prefer concise, practical B2B sales language.",
           "Return high confidence only when a source directly supports the field.",
-          "employeeCount must be employee/headcount/workforce only; if exact employee evidence is unavailable, return an empty value with low confidence.",
+          "employeeCount must be employee/headcount/workforce only and must be digits only; if exact employee evidence is unavailable, return an empty value with low confidence.",
           "Return low confidence for inferred or conflicting facts.",
           "Do not use private, scraped, or paywalled-only facts.",
         ],
@@ -501,16 +567,11 @@ export async function runAccountEnrichmentForAccount({
       updatedAccount = data
     }
 
-    const logoMetadata = buildAccountLogoMetadata(updatedAccount.website || accountDomain)
-    const logoUrlCanBePreserved =
-      logoMetadata.logo_domain &&
-      logoMetadata.logo_domain === updatedAccount.logo_domain &&
-      updatedAccount.logo_url
-    const nextLogoMetadata = {
-      ...logoMetadata,
-      logo_status: logoMetadata.logo_url || logoUrlCanBePreserved ? "resolved" : logoMetadata.logo_status,
-      logo_url: logoMetadata.logo_url || logoUrlCanBePreserved || null,
-    }
+    const nextLogoMetadata = await resolveAccountLogoMetadata(updatedAccount.website || accountDomain, {
+      logo_domain: updatedAccount.logo_domain,
+      logo_status: updatedAccount.logo_status,
+      logo_url: updatedAccount.logo_url,
+    })
     const { data: accountWithLogo, error: logoError } = await supabase
       .from("accounts")
       .update(nextLogoMetadata)

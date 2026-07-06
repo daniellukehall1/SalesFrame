@@ -16,6 +16,7 @@ import {
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
 import {
+  ArchiveIcon,
   Building2Icon,
   ChevronRightIcon,
   CircleDotIcon,
@@ -60,6 +61,8 @@ export function NavProjects({
   activeAccountId,
   activeOpportunityId,
   onAccountSelect,
+  onArchiveAccount,
+  onArchiveOpportunity,
   onCreateAccount,
   onCreateOpportunity,
   onDeleteAccount,
@@ -72,6 +75,8 @@ export function NavProjects({
   activeAccountId: string
   activeOpportunityId: string
   onAccountSelect: (id: string) => void
+  onArchiveAccount: (id: string) => void
+  onArchiveOpportunity: (id: string) => void
   onCreateAccount: () => void
   onCreateOpportunity: (accountId: string) => void
   onDeleteAccount: (id: string) => void
@@ -249,6 +254,10 @@ export function NavProjects({
                     Add opportunity
                   </ContextMenuItem>
                   <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => onArchiveAccount(account.id)}>
+                    <ArchiveIcon />
+                    Archive account
+                  </ContextMenuItem>
                   <ContextMenuItem
                     variant="destructive"
                     onSelect={() => onDeleteAccount(account.id)}
@@ -289,6 +298,10 @@ export function NavProjects({
                             View account
                           </ContextMenuItem>
                           <ContextMenuSeparator />
+                          <ContextMenuItem onSelect={() => onArchiveOpportunity(opportunity.id)}>
+                            <ArchiveIcon />
+                            Archive opportunity
+                          </ContextMenuItem>
                           <ContextMenuItem
                             variant="destructive"
                             onSelect={() => onDeleteOpportunity(opportunity.id)}

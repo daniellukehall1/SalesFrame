@@ -86,9 +86,13 @@ test("protected OpenAI functions use typed envelopes and authorization helpers",
   assert.doesNotMatch(accountEnrichment, /Apply the latest Supabase migration/)
   assert.doesNotMatch(accountEnrichment, /being prepared/)
   assert.match(accountEnrichment, /function normalizeEmployeeCountCoreField/)
+  assert.match(accountEnrichment, /function normalizeEmployeeNumberMatch/)
   assert.match(accountEnrichment, /valueHasNonEmployeeScaleSignal/)
   assert.match(accountEnrichment, /valueLooksLikeAudienceScale/)
   assert.match(accountEnrichment, /Rejected for employee count because the source describes users, customers, revenue, market scale, or another non-workforce metric rather than headcount/)
+  assert.match(accountEnrichment, /Rejected for employee count because the value could not be normalized to a plain workforce number/)
+  assert.match(accountEnrichment, /For employeeCount, return only a plain numeric workforce headcount value as digits/)
+  assert.match(accountEnrichment, /employeeCount must be employee\/headcount\/workforce only and must be digits only/)
   assert.match(accountEnrichment, /callOpenAiWebSearchJson/)
   assert.match(accountEnrichment, /dataResponse/)
 

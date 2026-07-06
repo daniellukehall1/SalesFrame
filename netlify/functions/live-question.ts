@@ -251,7 +251,16 @@ function latestActedQuestion(feedback: SellerFeedbackSignal[]) {
     .find((signal) => signal.action === "asked" || signal.action === "skip" || signal.action === "too_soon" || signal.action === "softer")
 }
 
-function requireLiveQuestionResult(value: unknown, blockedQuestions: string[]) {
+function requireLiveQuestionResult(
+  value: unknown,
+  blockedQuestions: string[],
+  fallbacks: {
+    playbookLabel: string
+    primaryIntentClusterId: string
+    primaryIntentLabel: string
+    target: string
+  }
+) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw upstreamFailure("Live question returned an invalid shape.", "openai_invalid_live_question")
   }
@@ -259,16 +268,19 @@ function requireLiveQuestionResult(value: unknown, blockedQuestions: string[]) {
   const result = value as LiveQuestionResult
   const question = cleanText(result.question)
   const shortReason = cleanText(result.shortReason)
-  const target = cleanText(result.target)
-  const playbookLabel = cleanText(result.playbookLabel)
-  const primaryIntentClusterId = cleanText(result.primaryIntentClusterId)
-  const primaryIntentLabel = cleanText(result.primaryIntentLabel)
+  const primaryIntentClusterId = cleanText(result.primaryIntentClusterId, fallbacks.primaryIntentClusterId)
+  const primaryIntentLabel = cleanText(result.primaryIntentLabel, fallbacks.primaryIntentLabel)
+  const target = cleanText(result.target, primaryIntentLabel || fallbacks.target)
+  const playbookLabel = cleanText(result.playbookLabel, fallbacks.playbookLabel)
   const lifecycle = result.questionLifecycle
+  const replacementReason = lifecycle && typeof lifecycle === "object" && !Array.isArray(lifecycle)
+    ? cleanText(lifecycle.replacementReason, shortReason)
+    : ""
 
   if (!question || !shortReason || !target || !playbookLabel || !primaryIntentClusterId || !primaryIntentLabel) {
     throw upstreamFailure("Live question did not return a complete recommendation.", "openai_invalid_live_question_recommendation")
   }
-  if (!lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle) || !cleanText(lifecycle.replacementReason)) {
+  if (!lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle) || !replacementReason) {
     throw upstreamFailure("Live question did not return question lifecycle reasoning.", "openai_invalid_live_question_lifecycle")
   }
 
@@ -284,6 +296,10 @@ function requireLiveQuestionResult(value: unknown, blockedQuestions: string[]) {
     playbookLabel,
     primaryIntentClusterId,
     primaryIntentLabel,
+    questionLifecycle: {
+      ...result.questionLifecycle,
+      replacementReason,
+    },
   }
 }
 
@@ -595,7 +611,14 @@ export default async (request: Request, _context: Context) => {
       }),
     })
 
-    const result = requireLiveQuestionResult(rawResult, blockedQuestions)
+    const fallbackIntentCluster = intentClusters.find((cluster) => cluster.status !== "confirmed") ?? intentClusters[0]
+    const fallbackIntentField = fallbackIntentCluster?.fields[0]
+    const result = requireLiveQuestionResult(rawResult, blockedQuestions, {
+      playbookLabel: cleanText(fallbackIntentField?.playbookLabel, selectedPlaybookRows[0]?.name ?? "Selected playbook"),
+      primaryIntentClusterId: cleanText(fallbackIntentCluster?.id, "selected_intent"),
+      primaryIntentLabel: cleanText(fallbackIntentCluster?.label, "Selected intent"),
+      target: cleanText(fallbackIntentCluster?.label, "Selected intent"),
+    })
 
     return dataResponse({ guidance: hydrateGuidance(result) })
   } catch (error) {

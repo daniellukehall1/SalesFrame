@@ -94,6 +94,8 @@ export function AppSidebar({
   onCreateAccount,
   onCreateOpportunity,
   onCreateWorkspace,
+  onArchiveAccount,
+  onArchiveOpportunity,
   onDeleteAccount,
   onDeleteOpportunity,
   onDeleteWorkspace,
@@ -116,6 +118,8 @@ export function AppSidebar({
   activeView: string
   workspaces: WorkspaceNavItem[]
   onAccountSelect: (id: string) => void
+  onArchiveAccount: (id: string) => void
+  onArchiveOpportunity: (id: string) => void
   onCreateAccount: () => void
   onCreateOpportunity: (accountId: string) => void
   onCreateWorkspace: () => void
@@ -186,6 +190,8 @@ export function AppSidebar({
               activeAccountId={activeAccountId}
               activeOpportunityId={activeOpportunityId}
               onAccountSelect={onAccountSelect}
+              onArchiveAccount={onArchiveAccount}
+              onArchiveOpportunity={onArchiveOpportunity}
               onCreateAccount={onCreateAccount}
               onCreateOpportunity={onCreateOpportunity}
               onDeleteAccount={onDeleteAccount}

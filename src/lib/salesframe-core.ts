@@ -435,6 +435,20 @@ export type PendingDeleteRecord =
       detail: string
     }
 
+export type PendingArchiveRecord =
+  | {
+      type: "account"
+      id: string
+      name: string
+      detail: string
+    }
+  | {
+      type: "opportunity"
+      id: string
+      name: string
+      detail: string
+    }
+
 export type OpportunityCoverageFilter = "all" | "low" | "mid" | "high" | "needs-attention"
 export type OpportunitySort = "gaps" | "coverage-asc" | "coverage-desc" | "value-desc" | "close-date"
 export type PlaybookFocusFilter = "all" | "qualification" | "discovery" | "value" | "commercial" | "custom"

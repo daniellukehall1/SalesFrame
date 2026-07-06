@@ -71,6 +71,19 @@ function missingAccountEnrichmentStorageMessage() {
   return "Account enrichment is still getting ready for this workspace. Your account is saved, and you can try Enrich account again in a moment."
 }
 
+async function getCurrentUserId(client?: SalesFrameClient) {
+  const supabase = getSupabase(client)
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError) throw new Error(userError.message)
+  if (!user) throw new Error("Sign in before changing this workspace.")
+
+  return user.id
+}
+
 export async function getCurrentUserProfile(client?: SalesFrameClient) {
   const supabase = getSupabase(client)
   const {
@@ -195,9 +208,21 @@ export async function listWorkspaceAccounts(workspaceId: string, client?: SalesF
     .from("accounts")
     .select("*")
     .eq("workspace_id", workspaceId)
+    .is("archived_at", null)
     .order("name", { ascending: true })
 
   return requireData(response, "No accounts returned.")
+}
+
+export async function listArchivedAccounts(workspaceId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("accounts")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .not("archived_at", "is", null)
+    .order("archived_at", { ascending: false, nullsFirst: false })
+
+  return requireData(response, "No archived accounts returned.")
 }
 
 export async function createAccount(values: TablesInsert<"accounts">, client?: SalesFrameClient) {
@@ -269,6 +294,37 @@ export async function deleteAccount(accountId: string, client?: SalesFrameClient
   if (response.error) throw new Error(response.error.message)
 }
 
+export async function archiveAccount(accountId: string, reason = "", client?: SalesFrameClient) {
+  const userId = await getCurrentUserId(client)
+  const response = await getSupabase(client)
+    .from("accounts")
+    .update({
+      archived_at: new Date().toISOString(),
+      archived_by: userId,
+      archive_reason: reason.trim() || null,
+    })
+    .eq("id", accountId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Account was not archived.")
+}
+
+export async function unarchiveAccount(accountId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("accounts")
+    .update({
+      archived_at: null,
+      archived_by: null,
+      archive_reason: null,
+    })
+    .eq("id", accountId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Account was not restored.")
+}
+
 export async function listWorkspaceOpportunities(
   workspaceId: string,
   accountId?: string,
@@ -278,6 +334,7 @@ export async function listWorkspaceOpportunities(
     .from("opportunities")
     .select("*")
     .eq("workspace_id", workspaceId)
+    .is("archived_at", null)
     .order("updated_at", { ascending: false })
 
   if (accountId) {
@@ -285,6 +342,17 @@ export async function listWorkspaceOpportunities(
   }
 
   return requireData(await query, "No opportunities returned.")
+}
+
+export async function listArchivedOpportunities(workspaceId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("opportunities")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .not("archived_at", "is", null)
+    .order("archived_at", { ascending: false, nullsFirst: false })
+
+  return requireData(response, "No archived opportunities returned.")
 }
 
 export async function createOpportunity(values: TablesInsert<"opportunities">, client?: SalesFrameClient) {
@@ -319,6 +387,37 @@ export async function deleteOpportunity(opportunityId: string, client?: SalesFra
     .eq("id", opportunityId)
 
   if (response.error) throw new Error(response.error.message)
+}
+
+export async function archiveOpportunity(opportunityId: string, reason = "", client?: SalesFrameClient) {
+  const userId = await getCurrentUserId(client)
+  const response = await getSupabase(client)
+    .from("opportunities")
+    .update({
+      archived_at: new Date().toISOString(),
+      archived_by: userId,
+      archive_reason: reason.trim() || null,
+    })
+    .eq("id", opportunityId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Opportunity was not archived.")
+}
+
+export async function unarchiveOpportunity(opportunityId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("opportunities")
+    .update({
+      archived_at: null,
+      archived_by: null,
+      archive_reason: null,
+    })
+    .eq("id", opportunityId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Opportunity was not restored.")
 }
 
 export async function listWorkspacePlaybooks(workspaceId?: string, client?: SalesFrameClient) {

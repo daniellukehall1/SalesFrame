@@ -129,6 +129,9 @@ export type Database = {
           logo_source: string
           logo_status: string
           logo_checked_at: string | null
+          archived_at: string | null
+          archived_by: string | null
+          archive_reason: string | null
           created_at: string
           updated_at: string
         },
@@ -151,6 +154,9 @@ export type Database = {
           logo_source?: string
           logo_status?: string
           logo_checked_at?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          archive_reason?: string | null
           created_at?: string
           updated_at?: string
         },
@@ -173,6 +179,9 @@ export type Database = {
           logo_source?: string
           logo_status?: string
           logo_checked_at?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          archive_reason?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -199,6 +208,9 @@ export type Database = {
           call_type: string
           next_question: string | null
           question_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          archive_reason: string | null
           created_at: string
           updated_at: string
         },
@@ -223,6 +235,9 @@ export type Database = {
           call_type?: string
           next_question?: string | null
           question_reason?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          archive_reason?: string | null
           created_at?: string
           updated_at?: string
         },
@@ -247,6 +262,9 @@ export type Database = {
           call_type?: string
           next_question?: string | null
           question_reason?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          archive_reason?: string | null
           created_at?: string
           updated_at?: string
         }
