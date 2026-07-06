@@ -1,7 +1,7 @@
 import type { Config, Context } from "@netlify/functions"
 
 import { createDeepgramTemporaryToken } from "./_shared/deepgram"
-import { dataResponse, errorResponse, methodNotAllowed } from "./_shared/http"
+import { dataResponse, errorResponse, logSafeEvent, methodNotAllowed } from "./_shared/http"
 import { assertRateLimit } from "./_shared/rate-limit"
 import { requireUser } from "./_shared/supabase"
 
@@ -19,6 +19,10 @@ export default async (request: Request, _context: Context) => {
 
     await createDeepgramTemporaryToken({
       check: "health",
+      userId: user.id,
+    })
+
+    logSafeEvent("info", "deepgram_health_ready", {
       userId: user.id,
     })
 

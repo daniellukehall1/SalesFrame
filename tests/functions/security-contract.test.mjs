@@ -74,6 +74,8 @@ test("protected OpenAI functions use typed envelopes and authorization helpers",
   assert.match(deepgramToken, /createDeepgramTemporaryToken/)
   assert.match(deepgramHealth, /path: "\/api\/deepgram\/health"/)
   assert.match(deepgramHealth, /createDeepgramTemporaryToken/)
+  assert.match(deepgramHealth, /deepgram_health_ready/)
+  assert.match(deepgramHealth, /logSafeEvent\("info", "deepgram_health_ready"/)
   assert.match(deepgramHealth, /provider: "deepgram_flux"/)
   assert.match(sharedDeepgram, /DEEPGRAM_API_KEY/)
   assert.match(sharedDeepgram, /deepgram_key_missing/)
@@ -179,7 +181,7 @@ test("shared HTTP errors use structured codes and expected statuses", async () =
 })
 
 test("shared HTTP error envelopes sanitize internal database and provider messages", async () => {
-  const { badRequest, errorResponse, getPublicErrorMessageForError, upstreamFailure } = await loadSharedHttpModule()
+  const { AppError, badRequest, errorResponse, getPublicErrorMessageForError, upstreamFailure } = await loadSharedHttpModule()
 
   const databaseResponse = errorResponse(
     new Error('duplicate key value violates unique constraint "transcript_segments_call_source_openai_segment_unique_idx"')
@@ -239,6 +241,36 @@ test("shared HTTP error envelopes sanitize internal database and provider messag
   assert.equal(htmlPlatformResponse.status, 502)
   assert.equal(htmlPlatformPayload.error.code, "openai_gateway_html")
   assert.equal(htmlPlatformPayload.error.message, "SalesFrame needs another moment to prepare this. Try again in a moment.")
+
+  const deepgramAuthResponse = errorResponse(
+    new AppError("deepgram_auth_failed", "SalesFrame cannot authenticate with Deepgram.", 503)
+  )
+  const deepgramAuthPayload = await deepgramAuthResponse.json()
+
+  assert.equal(deepgramAuthResponse.status, 503)
+  assert.equal(deepgramAuthPayload.error.code, "deepgram_auth_failed")
+  assert.equal(deepgramAuthPayload.error.message, "SalesFrame cannot authenticate with Deepgram.")
+
+  const deepgramMissingResponse = errorResponse(
+    new AppError("deepgram_key_missing", "SalesFrame transcription is not configured yet. Add the Deepgram key in Netlify.", 503)
+  )
+  const deepgramMissingPayload = await deepgramMissingResponse.json()
+
+  assert.equal(deepgramMissingResponse.status, 503)
+  assert.equal(deepgramMissingPayload.error.code, "deepgram_key_missing")
+  assert.equal(
+    deepgramMissingPayload.error.message,
+    "SalesFrame transcription is not configured yet. Add the Deepgram key in Netlify."
+  )
+
+  const deepgramRateLimitResponse = errorResponse(
+    new AppError("deepgram_rate_limited", "Deepgram is busy right now. Wait a moment, then try again.", 429)
+  )
+  const deepgramRateLimitPayload = await deepgramRateLimitResponse.json()
+
+  assert.equal(deepgramRateLimitResponse.status, 429)
+  assert.equal(deepgramRateLimitPayload.error.code, "deepgram_rate_limited")
+  assert.equal(deepgramRateLimitPayload.error.message, "Deepgram is busy right now. Wait a moment, then try again.")
 
   const runtimeResponse = errorResponse(new Error("TypeError: Cannot read properties of undefined (reading 'id')\nstack trace"))
   const runtimePayload = await runtimeResponse.json()

@@ -182,6 +182,10 @@ function getPublicAppErrorMessage(error: AppError, defaultMessage: string) {
   const requiredContextMessage = getMissingContextMessage(error)
   if (requiredContextMessage) return requiredContextMessage
 
+  if (/^deepgram_/.test(error.code)) {
+    return isTechnicalErrorMessage(message) ? defaultMessage : message
+  }
+
   if (error.status >= 500) {
     if (error.status === 502 || /^openai_|_openai_|upstream/.test(error.code)) {
       return getPublicAiProviderMessage(message)
