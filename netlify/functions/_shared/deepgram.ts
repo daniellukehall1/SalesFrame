@@ -21,6 +21,7 @@ export const deepgramListenUrl = "wss://api.deepgram.com/v2/listen"
 const defaultDeepgramListenHosts = ["api.au.deepgram.com", "api.deepgram.com"]
 
 type DeepgramFluxConfig = {
+  diarizeModel: string
   eagerEotThreshold: number
   encoding: string
   eotThreshold: number
@@ -75,6 +76,7 @@ export async function createDeepgramTemporaryToken(context: Record<string, unkno
 
 export function getDeepgramFluxConfig() {
   return {
+    diarizeModel: getEnv("DEEPGRAM_DIARIZE_MODEL", "latest").trim(),
     eagerEotThreshold: getNumberEnv("DEEPGRAM_FLUX_EAGER_EOT_THRESHOLD", 0.4, 0.3, 0.9),
     encoding: "linear16",
     eotThreshold: getNumberEnv("DEEPGRAM_FLUX_EOT_THRESHOLD", 0.75, 0.5, 0.9),
@@ -94,6 +96,9 @@ export function createDeepgramListenUrls(config: DeepgramFluxConfig) {
     url.searchParams.set("eager_eot_threshold", String(config.eagerEotThreshold))
     url.searchParams.set("eot_threshold", String(config.eotThreshold))
     url.searchParams.set("eot_timeout_ms", String(config.eotTimeoutMs))
+    if (config.diarizeModel) {
+      url.searchParams.set("diarize_model", config.diarizeModel)
+    }
 
     return url.toString()
   })

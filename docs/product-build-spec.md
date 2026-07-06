@@ -113,7 +113,7 @@ Live transcription must feel like a clean human conversation, not raw subtitle f
   - Mixed room audio is required for in-person/iPhone mode.
   - If remote meeting mode cannot hear buyer audio, block start and explain that SalesFrame can hear the mic but not the buyer.
 - Store preflight output on the call as `audio_preflight`, `audio_source_summary`, and `guidance_readiness` so poor transcript quality can be diagnosed later.
-- Deepgram Flux is the live transcription and turn-taking provider. The browser requests a short-lived token from `/api/deepgram/token`, then opens `wss://api.deepgram.com/v2/listen` using `flux-general-en`, `linear16`, `16000` Hz audio, and 80ms PCM chunks.
+- Deepgram Flux is the live transcription and turn-taking provider. The browser requests a short-lived token from `/api/deepgram/token`, then opens `/v2/listen` using `flux-general-en`, `diarize_model=latest`, `linear16`, `16000` Hz audio, and 80ms PCM chunks. Do not send `language_hint` with `flux-general-en`; Deepgram only supports `language_hint` on `flux-general-multi`, and rejects the English-only model when language hints are attached.
 - Deepgram `StartOfTurn`, `Update`, `EagerEndOfTurn`, `TurnResumed`, and `EndOfTurn` events drive the transcript state machine. `Update` only refreshes the live row; `EndOfTurn` is the only event that persists a durable transcript turn.
 - Never reintroduce a blind fixed-interval transcript commit loop. It chops speakers mid-thought and causes duplicate fragments.
 - Two-channel capture opens separate Deepgram streams for seller mic and shared customer/system audio. Source separation is the primary truth: `seller_mic` defaults to Seller and `meeting_audio` defaults to Customer.

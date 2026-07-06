@@ -37,6 +37,7 @@ export type DeepgramTranscriptionConnectionOptions = {
 type DeepgramTokenResponse = {
   accessToken: string
   config: {
+    diarizeModel?: string
     eagerEotThreshold: number
     encoding: string
     eotThreshold: number
@@ -433,6 +434,7 @@ function normalizeDeepgramTokenResponse(value: unknown): DeepgramTokenResponse {
   return {
     accessToken,
     config: {
+      diarizeModel: getString(config.diarizeModel) || undefined,
       eagerEotThreshold: getNumber(config.eagerEotThreshold, 0.4),
       encoding: getString(config.encoding) || "linear16",
       eotThreshold: getNumber(config.eotThreshold, 0.75),
