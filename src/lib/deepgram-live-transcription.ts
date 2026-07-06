@@ -87,7 +87,7 @@ type DeepgramWord = {
 
 const deepgramChunkMs = 80
 const deepgramKeepAliveMs = 5000
-const deepgramSocketOpenTimeoutMs = 10000
+const deepgramSocketOpenTimeoutMs = 15000
 const deepgramStartupAttempts = 3
 const deepgramReconnectAttempts = 2
 const maxBufferedAudioChunks = Math.ceil(4000 / deepgramChunkMs)
@@ -205,8 +205,8 @@ export async function connectDeepgramLiveTranscription({
   }
 
   try {
-    activeSocket = await connectSocket(deepgramStartupAttempts)
     audioPipeline.start()
+    activeSocket = await connectSocket(deepgramStartupAttempts)
     drainBufferedAudio()
     startKeepAlive()
   } catch (error) {
@@ -305,10 +305,11 @@ async function createOpenedDeepgramSocket(websocketUrl: string, accessToken: str
 }
 
 function getDeepgramAuthProtocolAttempts(accessToken: string) {
+  // Deepgram temporary tokens authenticate with Bearer. The "token" subprotocol
+  // is for raw API keys only, which must never be exposed to the browser.
   return [
     ["bearer", accessToken],
     ["Bearer", accessToken],
-    ["token", accessToken],
   ]
 }
 
