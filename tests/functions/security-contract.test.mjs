@@ -28,6 +28,8 @@ test("protected OpenAI functions use typed envelopes and authorization helpers",
   const liveState = await read("netlify/functions/live-state.ts")
   const postCallOutputs = await read("netlify/functions/post-call-outputs.ts")
   const deepgramToken = await read("netlify/functions/deepgram-token.ts")
+  const deepgramHealth = await read("netlify/functions/deepgram-health.ts")
+  const sharedDeepgram = await read("netlify/functions/_shared/deepgram.ts")
   const speakerAttribution = await read("netlify/functions/speaker-attribution.ts")
   const accountEnrichment = await read("netlify/functions/account-enrichment.ts")
   const sharedSupabase = await read("netlify/functions/_shared/supabase.ts")
@@ -69,7 +71,16 @@ test("protected OpenAI functions use typed envelopes and authorization helpers",
   assert.match(deepgramToken, /authorizeCall/)
   assert.match(deepgramToken, /callId is required/)
   assert.match(deepgramToken, /dataResponse/)
-  assert.match(deepgramToken, /DEEPGRAM_API_KEY/)
+  assert.match(deepgramToken, /createDeepgramTemporaryToken/)
+  assert.match(deepgramHealth, /path: "\/api\/deepgram\/health"/)
+  assert.match(deepgramHealth, /createDeepgramTemporaryToken/)
+  assert.match(deepgramHealth, /provider: "deepgram_flux"/)
+  assert.match(sharedDeepgram, /DEEPGRAM_API_KEY/)
+  assert.match(sharedDeepgram, /deepgram_key_missing/)
+  assert.match(sharedDeepgram, /deepgram_auth_failed/)
+  assert.match(sharedDeepgram, /deepgram_rate_limited/)
+  assert.match(sharedDeepgram, /https:\/\/api\.deepgram\.com\/v1\/auth\/grant/)
+  assert.doesNotMatch(sharedDeepgram, /VITE_DEEPGRAM/)
 
   assert.match(speakerAttribution, /authorizeCall/)
   assert.match(speakerAttribution, /segmentText is required/)
@@ -266,6 +277,8 @@ test("expensive AI functions enforce authenticated rate limits", async () => {
   const liveState = await read("netlify/functions/live-state.ts")
   const speakerAttribution = await read("netlify/functions/speaker-attribution.ts")
   const deepgramToken = await read("netlify/functions/deepgram-token.ts")
+  const deepgramHealth = await read("netlify/functions/deepgram-health.ts")
+  const sharedDeepgram = await read("netlify/functions/_shared/deepgram.ts")
   const postCallOutputs = await read("netlify/functions/post-call-outputs.ts")
   const smokeChecklist = await read("docs/production-smoke-checklist.md")
 
@@ -282,6 +295,7 @@ test("expensive AI functions enforce authenticated rate limits", async () => {
     liveState,
     speakerAttribution,
     deepgramToken,
+    deepgramHealth,
     postCallOutputs,
   ]) {
     assert.match(source, /assertRateLimit/)
@@ -296,14 +310,19 @@ test("expensive AI functions enforce authenticated rate limits", async () => {
   assert.match(liveState, /Do not expose database identifiers/)
   assert.doesNotMatch(liveState, /input: JSON\.stringify\(\{[\s\S]*account,[\s\S]*call,[\s\S]*opportunity,/)
   assert.match(deepgramToken, /authorizeCall\(user\.id, payload\.callId\)/)
-  assert.match(deepgramToken, /DEEPGRAM_API_KEY/)
-  assert.match(deepgramToken, /https:\/\/api\.deepgram\.com\/v1\/auth\/grant/)
-  assert.match(deepgramToken, /wss:\/\/api\.deepgram\.com\/v2\/listen/)
+  assert.match(deepgramToken, /createDeepgramTemporaryToken/)
+  assert.match(deepgramHealth, /name: "deepgram health"/)
+  assert.match(deepgramHealth, /createDeepgramTemporaryToken/)
+  assert.match(sharedDeepgram, /DEEPGRAM_API_KEY/)
+  assert.match(sharedDeepgram, /https:\/\/api\.deepgram\.com\/v1\/auth\/grant/)
+  assert.match(sharedDeepgram, /wss:\/\/api\.deepgram\.com\/v2\/listen/)
   assert.match(deepgramToken, /model", config\.model/)
   assert.match(deepgramToken, /diarize_model", config\.diarizeModel/)
   assert.match(deepgramToken, /eager_eot_threshold/)
   assert.match(deepgramToken, /eot_threshold/)
   assert.doesNotMatch(deepgramToken, /VITE_DEEPGRAM/)
+  assert.doesNotMatch(deepgramHealth, /VITE_DEEPGRAM/)
+  assert.doesNotMatch(sharedDeepgram, /VITE_DEEPGRAM/)
 
   assert.match(customerResearch, /name: "customer research"/)
   assert.match(accountEnrichment, /name: "account enrichment"/)
@@ -312,6 +331,7 @@ test("expensive AI functions enforce authenticated rate limits", async () => {
   assert.match(liveState, /name: "live state"/)
   assert.match(speakerAttribution, /name: "speaker attribution"/)
   assert.match(deepgramToken, /name: "deepgram transcription setup"/)
+  assert.match(deepgramHealth, /name: "deepgram health"/)
   assert.match(postCallOutputs, /name: "post-call generation"/)
   assert.match(smokeChecklist, /Repeated AI requests are throttled with `429`/)
 })

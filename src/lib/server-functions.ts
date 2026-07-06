@@ -39,6 +39,11 @@ export type DeepgramTranscriptionTokenResponse = {
   websocketUrl: string
 }
 
+export type DeepgramHealthResponse = {
+  provider: "deepgram_flux"
+  ready: boolean
+}
+
 export type SpeakerAttributionResponse = {
   attribution: {
     confidence: number
@@ -332,6 +337,12 @@ export function createDeepgramTranscriptionToken(
   return callFunction<DeepgramTranscriptionTokenResponse>("/api/deepgram/token", {
     method: "POST",
     body: { callId, ...options },
+    timeoutMs: 8000,
+  })
+}
+
+export function checkDeepgramTranscriptionHealth() {
+  return callFunction<DeepgramHealthResponse>("/api/deepgram/health", {
     timeoutMs: 8000,
   })
 }

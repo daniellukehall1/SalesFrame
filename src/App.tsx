@@ -160,6 +160,7 @@ import { createClient } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
 import {
   appendErrorReference,
+  checkDeepgramTranscriptionHealth,
   deleteOpenAiKey,
   getBulkImportStatus,
   getOpenAiKeyStatus,
@@ -3708,6 +3709,10 @@ function App() {
         throw new Error("OpenAI API key is required before starting a call.")
       }
 
+      updatePreparationStep("transcription", "Checking live transcript is ready.")
+      await checkDeepgramTranscriptionHealth()
+      throwIfStartCancelled()
+
       updatePreparationStep("records", "Attaching the call to the account, opportunity, and selected playbooks.")
 
       if (isNewAccount) {
@@ -7200,11 +7205,18 @@ function StartRecordingDialog({
       progress: 16,
     },
     {
+      id: "transcription",
+      label: "Checking live transcript",
+      description: "SalesFrame is making sure Deepgram is ready before audio capture begins.",
+      icon: Mic2Icon,
+      progress: 30,
+    },
+    {
       id: "records",
       label: "Putting this call in the right place",
       description: "We are linking the account, opportunity, playbooks, and call record.",
       icon: DatabaseIcon,
-      progress: 34,
+      progress: 44,
     },
     {
       id: "context",
@@ -7213,7 +7225,7 @@ function StartRecordingDialog({
         ? "Your seller research and account context are being folded into the first question."
         : "SalesFrame is checking the saved account, opportunity, and evidence so it does not ask twice.",
       icon: SearchIcon,
-      progress: 52,
+      progress: 58,
     },
     {
       id: "coach",
@@ -7498,6 +7510,34 @@ function StartRecordingDialog({
     if (/OpenAI key did not work|key needs billing|quota attention|Check the key in Settings/i.test(message)) {
       return appendErrorReference(
         "This workspace key needs attention. Check the key in Settings, then try again.",
+        error
+      )
+    }
+
+    if (/Deepgram key|transcription is not configured|deepgram_key_missing/i.test(message)) {
+      return appendErrorReference(
+        "SalesFrame transcription is not configured yet. Add the Deepgram key in Netlify.",
+        error
+      )
+    }
+
+    if (/authenticate with Deepgram|deepgram_auth_failed/i.test(message)) {
+      return appendErrorReference(
+        "SalesFrame cannot authenticate with Deepgram. Check the Deepgram key in Netlify.",
+        error
+      )
+    }
+
+    if (/browser or network blocked|live transcript connection was blocked|deepgram socket/i.test(message)) {
+      return appendErrorReference(
+        "This browser or network blocked the live transcript connection. Check browser/network permissions, then try again.",
+        error
+      )
+    }
+
+    if (/Deepgram|live transcription|transcription setup|transcription needs/i.test(message)) {
+      return appendErrorReference(
+        "Deepgram needs another moment. Try again shortly.",
         error
       )
     }

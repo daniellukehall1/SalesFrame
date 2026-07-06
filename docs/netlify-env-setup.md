@@ -109,4 +109,23 @@ Expected response:
 }
 ```
 
+For call transcription specifically, sign in and let Start Call run the live transcript check, or call the authenticated health endpoint:
+
+```text
+/api/deepgram/health
+```
+
+Expected response:
+
+```json
+{
+  "data": {
+    "provider": "deepgram_flux",
+    "ready": true
+  }
+}
+```
+
+If this returns `deepgram_key_missing`, `deepgram_auth_failed`, or `deepgram_rate_limited`, fix the Netlify `DEEPGRAM_API_KEY` secret before testing call capture.
+
 The endpoint reports only variable names and configured status. It never returns secret values.

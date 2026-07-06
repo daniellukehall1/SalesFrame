@@ -87,6 +87,11 @@ type DeepgramWord = {
 }
 
 const deepgramChunkMs = 80
+const deepgramKeepAliveMs = 5000
+const deepgramSocketOpenTimeoutMs = 4500
+const deepgramStartupAttempts = 3
+const deepgramReconnectAttempts = 2
+const maxBufferedAudioChunks = Math.ceil(4000 / deepgramChunkMs)
 const pcmWorkletName = "salesframe-pcm-capture"
 const providerName = "deepgram_flux" as const
 
@@ -97,24 +102,168 @@ export async function connectDeepgramLiveTranscription({
   sourceKind,
   stream,
 }: DeepgramTranscriptionConnectionOptions): Promise<DeepgramTranscriptionConnection> {
+  let activeSocket: WebSocket | null = null
+  let audioBacklog: ArrayBuffer[] = []
+  let bufferDrainTimer: number | undefined
+  let keepAliveTimer: number | undefined
+  let lastAudioSentAt = 0
+  let closedByClient = false
+  let reconnecting = false
+
+  const audioPipeline = await createPcmAudioPipeline({
+    onAudioChunk: (chunk) => {
+      if (chunk.byteLength === 0) return
+
+      if (activeSocket?.readyState === WebSocket.OPEN) {
+        activeSocket.send(chunk)
+        lastAudioSentAt = Date.now()
+        return
+      }
+
+      audioBacklog.push(chunk)
+      if (audioBacklog.length > maxBufferedAudioChunks) {
+        audioBacklog = audioBacklog.slice(-maxBufferedAudioChunks)
+      }
+    },
+    onError: onTranscriptError,
+    sampleRate: 16000,
+    stream,
+  })
+
+  const connectSocket = async (attempts: number) => {
+    let lastError: unknown
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const connection = await openDeepgramSocket({
+          callId,
+          onTranscriptError,
+          onTranscriptEvent,
+          onUnexpectedClose: () => {
+            if (closedByClient || reconnecting) return
+
+            reconnecting = true
+            activeSocket = null
+            void connectSocket(deepgramReconnectAttempts)
+              .then((socket) => {
+                reconnecting = false
+                activeSocket = socket
+                drainBufferedAudio()
+              })
+              .catch((error) => {
+                reconnecting = false
+                onTranscriptError(error)
+              })
+          },
+          sourceKind,
+        })
+
+        return connection
+      } catch (error) {
+        lastError = error
+        if (!shouldRetryDeepgramStartup(error) || attempt === attempts) break
+        await waitForDeepgramRetry(attempt)
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Deepgram needs another moment. Try again shortly.")
+  }
+
+  const drainBufferedAudio = () => {
+    if (bufferDrainTimer || !activeSocket || activeSocket.readyState !== WebSocket.OPEN) return
+
+    const drainNextChunk = () => {
+      bufferDrainTimer = undefined
+      if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return
+
+      const chunk = audioBacklog.shift()
+      if (chunk && chunk.byteLength > 0) {
+        activeSocket.send(chunk)
+        lastAudioSentAt = Date.now()
+      }
+
+      if (audioBacklog.length > 0) {
+        bufferDrainTimer = window.setTimeout(drainNextChunk, Math.round(deepgramChunkMs * 0.8))
+      }
+    }
+
+    drainNextChunk()
+  }
+
+  const startKeepAlive = () => {
+    keepAliveTimer = window.setInterval(() => {
+      if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return
+      if (Date.now() - lastAudioSentAt < deepgramKeepAliveMs) return
+
+      try {
+        activeSocket.send(JSON.stringify({ type: "KeepAlive" }))
+      } catch (error) {
+        onTranscriptError(error)
+      }
+    }, deepgramKeepAliveMs)
+  }
+
+  try {
+    activeSocket = await connectSocket(deepgramStartupAttempts)
+    audioPipeline.start()
+    drainBufferedAudio()
+    startKeepAlive()
+  } catch (error) {
+    audioPipeline.stop()
+    throw error
+  }
+
+  return {
+    close: () => {
+      closedByClient = true
+      if (bufferDrainTimer) window.clearTimeout(bufferDrainTimer)
+      if (keepAliveTimer) window.clearInterval(keepAliveTimer)
+      audioPipeline.stop()
+      const socket = activeSocket
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+        try {
+          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "CloseStream" }))
+        } catch {
+          // The socket may already be closing when a seller stops the call.
+        }
+        socket.close(1000, "call_stopped")
+      }
+      activeSocket = null
+    },
+    flush: () => {
+      try {
+        if (activeSocket?.readyState === WebSocket.OPEN) activeSocket.send(JSON.stringify({ type: "Finalize" }))
+      } catch {
+        // Finalize is best-effort during stop.
+      }
+    },
+  }
+}
+
+async function openDeepgramSocket({
+  callId,
+  onTranscriptError,
+  onTranscriptEvent,
+  onUnexpectedClose,
+  sourceKind,
+}: {
+  callId: string
+  onTranscriptError: (error: unknown) => void
+  onTranscriptEvent: (event: DeepgramTranscriptEvent) => void | Promise<void>
+  onUnexpectedClose: () => void
+  sourceKind: AudioSourceKind
+}) {
   const session = await createDeepgramTranscriptionToken(callId, { sourceKind })
   const tokenResponse = normalizeDeepgramTokenResponse(session)
   const providerSessionId = createProviderSessionId(sourceKind)
   const websocketUrl = getDeepgramWebsocketUrl(tokenResponse.websocketUrl)
   const socket = new WebSocket(websocketUrl, ["token", tokenResponse.accessToken])
-  const audioPipeline = await createPcmAudioPipeline({
-    onAudioChunk: (chunk) => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(chunk)
-    },
-    onError: onTranscriptError,
-    sampleRate: tokenResponse.config.sampleRate,
-    stream,
-  })
 
   socket.binaryType = "arraybuffer"
-  socket.addEventListener("open", () => {
-    audioPipeline.start()
-  })
+  await waitForDeepgramSocketOpen(socket)
+
   socket.addEventListener("message", (event) => {
     const transcriptEvent = extractDeepgramTranscriptEvent({
       message: event.data,
@@ -125,35 +274,61 @@ export async function connectDeepgramLiveTranscription({
       void Promise.resolve(onTranscriptEvent(transcriptEvent)).catch(onTranscriptError)
     }
   })
-  socket.addEventListener("error", () => {
-    onTranscriptError(new Error("Deepgram live transcription needs another connection attempt."))
-  })
   socket.addEventListener("close", (event) => {
-    audioPipeline.stop()
     if (event.wasClean || event.code === 1000) return
-    onTranscriptError(new Error("Deepgram live transcription connection closed early."))
+    onUnexpectedClose()
   })
+  socket.addEventListener("error", onUnexpectedClose)
 
-  return {
-    close: () => {
-      audioPipeline.stop()
-      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-        try {
-          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "CloseStream" }))
-        } catch {
-          // The socket may already be closing when a seller stops the call.
-        }
-        socket.close(1000, "call_stopped")
-      }
-    },
-    flush: () => {
+  return socket
+}
+
+function waitForDeepgramSocketOpen(socket: WebSocket) {
+  return new Promise<void>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      cleanup()
       try {
-        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "Finalize" }))
+        socket.close()
       } catch {
-        // Finalize is best-effort during stop.
+        // The browser may already be closing the socket.
       }
-    },
-  }
+      reject(new Error("This browser or network blocked the live transcript connection."))
+    }, deepgramSocketOpenTimeoutMs)
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId)
+      socket.removeEventListener("open", handleOpen)
+      socket.removeEventListener("error", handleError)
+      socket.removeEventListener("close", handleClose)
+    }
+    const handleOpen = () => {
+      cleanup()
+      resolve()
+    }
+    const handleError = () => {
+      cleanup()
+      reject(new Error("This browser or network blocked the live transcript connection."))
+    }
+    const handleClose = () => {
+      cleanup()
+      reject(new Error("Deepgram needs another moment. Try again shortly."))
+    }
+
+    socket.addEventListener("open", handleOpen)
+    socket.addEventListener("error", handleError)
+    socket.addEventListener("close", handleClose)
+  })
+}
+
+function shouldRetryDeepgramStartup(error: unknown) {
+  const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined
+  if (code === "deepgram_key_missing" || code === "deepgram_auth_failed") return false
+
+  return true
+}
+
+function waitForDeepgramRetry(attempt: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, 250 * attempt))
 }
 
 export function flushDeepgramAudioBuffers(connections: DeepgramTranscriptionConnection[]) {

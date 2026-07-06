@@ -349,7 +349,7 @@ export type StartRecordingPayload = {
   onPreparationStep?: (update: StartCallPreparationUpdate) => void
 }
 
-export type StartCallPreparationStepId = "ai_access" | "records" | "context" | "coach" | "audio"
+export type StartCallPreparationStepId = "ai_access" | "transcription" | "records" | "context" | "coach" | "audio"
 
 export type StartCallPreparationUpdate = {
   detail?: string
