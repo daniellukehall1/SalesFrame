@@ -2,6 +2,13 @@ import * as React from "react"
 import { AudioLinesIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 const heroVideoUrl = "/media/salesframe-hero.mp4"
 const heroFallbackImageUrl = "/media/salesframe-hero-poster.png"
@@ -12,6 +19,51 @@ const mobileTypedIntro =
   "Glad you stopped in.\nSalesFrame is built to help you sell. Now, where do you want to start?"
 const desktopTypedIntro =
   "Glad you stopped in.\nSalesFrame is built to help you sell.\nNow, where do you want to start?"
+
+const howItWorksSteps = [
+  {
+    title: "Start with your selling world",
+    body:
+      "Bring SalesFrame into the way your team already sells. Set up your workspace, tell us what you sell, and give the coach enough context to sound like it belongs in the room.",
+    note: "Good questions start with the world your sellers already know.",
+  },
+  {
+    title: "Add the accounts and opportunities that matter",
+    body:
+      "Create them one by one, or bring them in from a CSV. SalesFrame turns the workspace into a clean selling map, so every call starts with context.",
+    note: "Less hunting around. More useful conversations.",
+  },
+  {
+    title: "Let AI enrich the account",
+    body:
+      "When there’s a website, SalesFrame can research the account, find useful signals, and shape sharper discovery angles before the conversation starts.",
+    note: "The call feels prepared before anyone says hello.",
+  },
+  {
+    title: "Choose the playbooks you actually use",
+    body:
+      "MEDDICC, BANT, Sandler, SPICED, Challenger, and more. SalesFrame keeps the methodology discipline in the background, so the seller gets one natural question at a time.",
+    note: "Strict methodology in the background. Human conversation up front.",
+  },
+  {
+    title: "Capture the conversation live",
+    body:
+      "SalesFrame listens as the call unfolds, keeps the transcript moving, and watches for the moments that change what should be asked next.",
+    note: "The coach follows the call, not a rigid checklist.",
+  },
+  {
+    title: "Ask the better next question",
+    body:
+      "The coach reads the account, opportunity, playbooks, and live conversation flow, then gives the seller the next question that feels timely, useful, and human.",
+    note: "One better question can change the shape of the deal.",
+  },
+  {
+    title: "Leave the call with the work already shaped",
+    body:
+      "After the call, SalesFrame helps turn the conversation into notes, evidence, follow-up, and prep for the next meeting.",
+    note: "The call ends. The next move is already clearer.",
+  },
+]
 
 function useIsMobileLandingViewport() {
   const getIsMobile = React.useCallback(() => {
@@ -125,6 +177,111 @@ function salesFrameWaveformMark() {
   return <AudioLinesIcon aria-hidden="true" className="size-6 shrink-0 text-black sm:size-7" />
 }
 
+function HowItWorksDialog({
+  onOpenChange,
+  onSignup,
+  open,
+}: {
+  onOpenChange: (open: boolean) => void
+  onSignup: () => void
+  open: boolean
+}) {
+  const [stepIndex, setStepIndex] = React.useState(0)
+  const activeStep = howItWorksSteps[stepIndex]
+  const isFinalStep = stepIndex === howItWorksSteps.length - 1
+
+  React.useEffect(() => {
+    if (open) setStepIndex(0)
+  }, [open])
+
+  const handleBack = () => {
+    setStepIndex((currentStep) => Math.max(0, currentStep - 1))
+  }
+
+  const handleNext = () => {
+    setStepIndex((currentStep) => Math.min(howItWorksSteps.length - 1, currentStep + 1))
+  }
+
+  const handleSignup = () => {
+    onOpenChange(false)
+    onSignup()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[calc(100svh-1rem)] overflow-x-hidden overflow-y-auto bg-white p-4 text-black sm:max-w-lg">
+        <DialogHeader className="sr-only">
+          <DialogTitle>How SalesFrame works</DialogTitle>
+          <DialogDescription>
+            A quick look at how SalesFrame helps sellers prepare, run, and follow up from better sales calls.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid min-h-0 gap-4">
+          <div
+            aria-hidden="true"
+            className="aspect-[16/9] rounded-lg bg-[linear-gradient(135deg,rgba(15,15,16,0.08),rgba(255,255,255,0.72))] ring-1 ring-black/10"
+          />
+
+          <div className="grid gap-3">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-black/45">
+              Step {stepIndex + 1} of {howItWorksSteps.length}
+            </p>
+            <h2 className="font-heading text-2xl leading-tight tracking-tight text-black sm:text-3xl">
+              {activeStep.title}
+            </h2>
+            <p className="text-base leading-7 text-black/70">{activeStep.body}</p>
+            <p className="rounded-lg bg-black/[0.04] p-3 text-sm leading-6 text-black/60">
+              {activeStep.note}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-center gap-1.5" aria-label={`Step ${stepIndex + 1} of ${howItWorksSteps.length}`}>
+            {howItWorksSteps.map((step, index) => (
+              <button
+                key={step.title}
+                type="button"
+                aria-label={`Show ${step.title}`}
+                aria-current={index === stepIndex ? "step" : undefined}
+                className={[
+                  "h-2 rounded-full transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/30",
+                  index === stepIndex ? "w-7 bg-black" : "w-2 bg-black/20 hover:bg-black/40",
+                ].join(" ")}
+                onClick={() => setStepIndex(index)}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="-mx-4 -mb-4 grid gap-3 rounded-b-xl border-t border-black/10 bg-black/[0.03] p-4 sm:flex sm:items-center sm:justify-between">
+          <Button variant="outline" className="border-black/15 bg-white text-black hover:bg-black hover:text-white" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+          <div className="grid gap-2 sm:flex sm:justify-end">
+            <Button
+              variant="outline"
+              className="border-black/15 bg-white text-black hover:bg-black hover:text-white"
+              disabled={stepIndex === 0}
+              onClick={handleBack}
+            >
+              Back
+            </Button>
+            {isFinalStep ? (
+              <Button className="bg-black text-white hover:bg-black/85" onClick={handleSignup}>
+                Sign Up
+              </Button>
+            ) : (
+              <Button className="bg-black text-white hover:bg-black/85" onClick={handleNext}>
+                Next
+              </Button>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 const landingOutlineButtonClass =
   "landing-action-button border-black/15 bg-white/90 text-black shadow-sm backdrop-blur-sm hover:border-black hover:bg-black hover:text-white focus-visible:border-black/30 focus-visible:ring-black/20"
 
@@ -151,6 +308,7 @@ export function MarketingLandingPage({
   const prefersReducedMotion = usePrefersReducedMotion()
   const [actionsVisible, setActionsVisible] = React.useState(prefersReducedMotion)
   const [copied, setCopied] = React.useState(false)
+  const [howItWorksOpen, setHowItWorksOpen] = React.useState(false)
   const [videoReady, setVideoReady] = React.useState(false)
   const [videoUnavailable, setVideoUnavailable] = React.useState(false)
   const { displayed, done } = useTypewriter(
@@ -374,10 +532,14 @@ export function MarketingLandingPage({
                 Login
               </a>
             </Button>
-            <Button variant="outline" size="lg" className={landingOutlineButtonClass} asChild>
-              <a href={`mailto:${contactEmail}?subject=${encodeURIComponent("How SalesFrame works")}`}>
-                How it works
-              </a>
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className={landingOutlineButtonClass}
+              onClick={() => setHowItWorksOpen(true)}
+            >
+              How it works
             </Button>
             <Button variant="outline" size="lg" className={landingOutlineButtonClass} asChild>
               <a href={`mailto:${contactEmail}?subject=${encodeURIComponent("SalesFrame pricing")}`}>
@@ -399,6 +561,7 @@ export function MarketingLandingPage({
           </div>
         </div>
       </section>
+      <HowItWorksDialog open={howItWorksOpen} onOpenChange={setHowItWorksOpen} onSignup={onSignup} />
     </main>
   )
 }

@@ -7065,7 +7065,7 @@ function StartRecordingDialog({
       label: "Getting ready to listen",
       description:
         audioCaptureMode === "meeting_audio"
-          ? "Next up: two-channel capture with your mic plus customer-side app, tab, or system audio."
+          ? "Next up: two-channel capture with your mic plus buyer-side app, tab, or system audio."
           : "Next up: one-channel capture through this device microphone.",
       icon: Mic2Icon,
       progress: 94,
@@ -13899,17 +13899,26 @@ function getAudioHealthIndicators({
         : isStarting
           ? { label: "Seller mic", tone: "building", value: "Checking" }
           : { label: "Seller mic", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
+  const buyerAudioSilent = audioPreflight?.warnings.some((warning) =>
+    warning.includes("Buyer audio looks silent") || warning.includes("meter is quiet")
+  ) ?? false
   const customerAudio: CaptureSignalIndicator = audioPreflight
     ? audioPreflight.requiredCustomerAudio
       ? audioPreflight.customerAudioReady
-        ? { label: "Customer audio", tone: isLive ? "live" : "building", value: isLive ? "Two channels" : "Connected" }
-        : { label: "Customer audio", tone: needsAttention ? "error" : "warning", value: "Not detected" }
+        ? buyerAudioSilent
+          ? { label: "Buyer audio", tone: "warning", value: "Silent" }
+          : { label: "Buyer audio", tone: isLive ? "live" : "building", value: isLive ? "Two channels" : "Connected" }
+        : {
+            label: "Buyer audio",
+            tone: needsAttention || isLive ? "error" : "warning",
+            value: "Not detected",
+          }
       : audioPreflight.mixedRoomReady
-        ? { label: "Customer audio", tone: isLive ? "warning" : "building", value: isLive ? "Inferred" : "One channel" }
-        : { label: "Customer audio", tone: "muted", value: "One channel" }
+        ? { label: "Buyer audio", tone: isLive ? "warning" : "building", value: isLive ? "Inferred" : "One channel" }
+        : { label: "Buyer audio", tone: "muted", value: "One channel" }
     : isStarting
-      ? { label: "Customer audio", tone: "building", value: "Checking" }
-      : { label: "Customer audio", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
+      ? { label: "Buyer audio", tone: "building", value: "Checking" }
+      : { label: "Buyer audio", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
   const liveTranscript: CaptureSignalIndicator = guidance
     ? { label: "Live transcript", tone: "live", value: isLive ? "Deepgram live" : "Ready" }
     : isLive

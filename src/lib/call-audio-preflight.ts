@@ -39,6 +39,24 @@ const preflightSampleMs = 1200
 const preflightPollMs = 80
 const preflightVoiceThreshold = 0.018
 
+export class AudioPreflightError extends Error {
+  result: AudioPreflightResult
+
+  constructor(message: string, result: AudioPreflightResult) {
+    super(message)
+    this.name = "AudioPreflightError"
+    this.result = result
+  }
+}
+
+export function getAudioPreflightErrorResult(error: unknown) {
+  return error instanceof AudioPreflightError ? error.result : null
+}
+
+export function isAudibleVoiceLevel(level: number) {
+  return Number.isFinite(level) && level >= preflightVoiceThreshold
+}
+
 export async function runAudioPreflight(mode: CallAudioCaptureMode) {
   const sources = await requestAudioSources(mode)
   const measuredSources = await Promise.all(
@@ -54,7 +72,7 @@ export async function runAudioPreflight(mode: CallAudioCaptureMode) {
       source.stream.getTracks().forEach((track) => track.stop())
     })
 
-    throw new Error(getAudioPreflightFailureMessage(result))
+    throw new AudioPreflightError(getAudioPreflightFailureMessage(result), result)
   }
 
   return {
@@ -85,6 +103,9 @@ function createAudioPreflightResult(
   const mixedSources = sources.filter((source) => source.kind === "mixed_audio" || source.kind === "in_person_microphone")
   const sellerMicReady = sellerSources.some((source) => source.stream.getAudioTracks().length > 0)
   const customerAudioTrackReady = meetingSources.some((source) => source.stream.getAudioTracks().length > 0)
+  const customerAudioLevelReady = meetingSources.some((source) =>
+    source.stream.getAudioTracks().length > 0 && isAudibleVoiceLevel(source.level)
+  )
   const customerAudioReady = customerAudioTrackReady
   const mixedRoomReady = mixedSources.some((source) => source.stream.getAudioTracks().length > 0)
   const requiredCustomerAudio = mode === "meeting_audio"
@@ -100,14 +121,10 @@ function createAudioPreflightResult(
   if (mode === "in_person_microphone") {
     warnings.push("One-channel mode uses mixed audio, so speaker labels are lower confidence and remain editable.")
   }
-  if (mode === "meeting_audio" && customerAudioTrackReady) {
-    const hasVoiceDuringPreflight = meetingSources.some((source) => source.level >= preflightVoiceThreshold)
-
-    if (!hasVoiceDuringPreflight) {
-      warnings.push(
-        "Customer audio is connected, but no customer-side speech was detected during preflight. Keep the Zoom, Teams, Meet, or tab audio active if buyer transcript does not appear."
-      )
-    }
+  if (mode === "meeting_audio" && customerAudioTrackReady && !customerAudioLevelReady) {
+    warnings.push(
+      "Buyer audio is connected, but the meter is quiet right now. SalesFrame will keep watching the shared source during the call."
+    )
   }
 
   return {
@@ -143,8 +160,8 @@ function getAudioPreflightStatusMessage({
 }) {
   if (mode === "meeting_audio") {
     return customerAudioReady
-      ? "Customer audio detected: start call."
-      : "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, one-channel mode, or install SalesFrame Audio Connector."
+      ? "Buyer audio source connected: start call."
+      : "SalesFrame needs a shared buyer-audio source before two-channel mode can start."
   }
   if (mode === "in_person_microphone") {
     return mixedRoomReady
@@ -159,7 +176,7 @@ function getAudioPreflightStatusMessage({
 
 function getAudioPreflightFailureMessage(preflight: AudioPreflightResult) {
   if (preflight.mode === "meeting_audio" && !preflight.customerAudioReady) {
-    return "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, one-channel mode, or install SalesFrame Audio Connector."
+    return "SalesFrame cannot hear buyer audio from that share. Share a browser tab or Entire Screen with Share audio/System audio turned on, or switch to one-channel mode."
   }
   if (!preflight.sellerMicReady) {
     return "SalesFrame needs access to your microphone before the call can start."
@@ -204,17 +221,17 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
       } else {
         displayStream.getTracks().forEach((track) => track.stop())
         throw new Error(
-          "SalesFrame cannot hear customer audio from that share. Choose a browser tab or Entire Screen with Share audio/System audio turned on, or switch to one-channel mode."
+          "SalesFrame cannot hear buyer audio from that share. Choose a browser tab or Entire Screen with Share audio/System audio turned on, or switch to one-channel mode."
         )
       }
     } catch (caughtError: unknown) {
       stopCapturedSources(sources)
-      if (caughtError instanceof Error && caughtError.message.includes("SalesFrame cannot hear customer audio")) {
+      if (caughtError instanceof Error && caughtError.message.includes("SalesFrame cannot hear buyer audio")) {
         throw caughtError
       }
       if (isDisplayCapturePermissionError(caughtError)) {
         throw new Error(
-          "SalesFrame needs customer-side audio before this call can start. Share a meeting tab or Entire Screen with Share audio/System audio turned on, or switch to one-channel mode."
+          "SalesFrame needs buyer-side audio before this call can start. Share a meeting tab or Entire Screen with Share audio/System audio turned on, or switch to one-channel mode."
         )
       }
 
@@ -261,7 +278,7 @@ async function requestAudioSources(mode: CallAudioCaptureMode): Promise<Captured
   } catch (caughtError: unknown) {
     if (mode === "meeting_audio") {
       stopCapturedSources(sources)
-      throw new Error("SalesFrame can hear customer audio, but still needs your microphone before the call can start.")
+      throw new Error("SalesFrame can hear buyer audio, but still needs your microphone before the call can start.")
     }
 
     throw caughtError
@@ -339,7 +356,7 @@ function getSupportedAudioConstraints(
   ) as MediaTrackConstraints
 }
 
-async function measureStreamVoiceLevel(stream: MediaStream) {
+export async function measureStreamVoiceLevel(stream: MediaStream) {
   const AudioContextCtor =
     window.AudioContext ||
     (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext

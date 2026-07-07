@@ -2,6 +2,9 @@ import * as React from "react"
 
 import { requestSpeakerAttribution } from "@/lib/server-functions"
 import {
+  getAudioPreflightErrorResult,
+  isAudibleVoiceLevel,
+  measureStreamVoiceLevel,
   runAudioPreflight,
   summarizeAudioSource,
   type AudioSourceKind,
@@ -161,6 +164,7 @@ export function useCallCapture() {
   const partialTranscriptTextRef = React.useRef<Map<string, string>>(new Map())
   const deepgramConnectionsRef = React.useRef<DeepgramTranscriptionConnection[]>([])
   const sourceStreamsRef = React.useRef<MediaStream[]>([])
+  const audioHealthTimerRef = React.useRef<number | null>(null)
   const persistedTranscriptKeysRef = React.useRef<Set<string>>(new Set())
   const recentFinalTranscriptEventsRef = React.useRef<RecentFinalTranscriptEvent[]>([])
   const recentTranscriptRef = React.useRef<CallCaptureTranscriptLine[]>([])
@@ -170,6 +174,11 @@ export function useCallCapture() {
   const transcriptTurnSequenceRef = React.useRef(0)
 
   const cleanup = React.useCallback(() => {
+    if (audioHealthTimerRef.current !== null) {
+      window.clearInterval(audioHealthTimerRef.current)
+      audioHealthTimerRef.current = null
+    }
+
     deepgramConnectionsRef.current.forEach((connection) => connection.close())
     deepgramConnectionsRef.current = []
 
@@ -183,6 +192,78 @@ export function useCallCapture() {
   }, [])
 
   React.useEffect(() => cleanup, [cleanup])
+
+  const startLiveAudioHealthMonitoring = React.useCallback(
+    (basePreflight: AudioPreflightResult, sources: CapturedAudioSource[]) => {
+      if (audioHealthTimerRef.current !== null) {
+        window.clearInterval(audioHealthTimerRef.current)
+        audioHealthTimerRef.current = null
+      }
+
+      let silentBuyerChecks = 0
+
+      const refreshAudioLevels = async () => {
+        const measuredSources = await Promise.all(
+          sources.map(async (source) => ({
+            ...source,
+            level: await measureStreamVoiceLevel(source.stream).catch(() => 0),
+          }))
+        )
+
+        measuredSources.forEach((source, index) => {
+          sources[index].level = source.level
+        })
+
+        const sellerSources = measuredSources.filter((source) =>
+          source.kind === "seller_mic" || source.kind === "mixed_audio" || source.kind === "in_person_microphone"
+        )
+        const meetingSources = measuredSources.filter((source) => source.kind === "meeting_audio")
+        const mixedSources = measuredSources.filter((source) =>
+          source.kind === "mixed_audio" || source.kind === "in_person_microphone"
+        )
+        const sellerMicReady = sellerSources.some((source) => source.stream.getAudioTracks().length > 0)
+        const sellerMicHot = sellerSources.some((source) => isAudibleVoiceLevel(source.level))
+        const buyerAudioTrackReady = meetingSources.some((source) => source.stream.getAudioTracks().length > 0)
+        const buyerAudioReady = meetingSources.some((source) =>
+          source.stream.getAudioTracks().length > 0 && isAudibleVoiceLevel(source.level)
+        )
+        const mixedRoomReady = mixedSources.some((source) => source.stream.getAudioTracks().length > 0)
+        const warnings = basePreflight.warnings.filter((warning) => warning !== "Buyer audio looks silent. Check the shared audio source.")
+
+        if (basePreflight.requiredCustomerAudio && sellerMicHot && !buyerAudioReady) {
+          silentBuyerChecks += 1
+        } else {
+          silentBuyerChecks = 0
+        }
+
+        if (silentBuyerChecks >= 2) {
+          warnings.push("Buyer audio looks silent. Check the shared audio source.")
+        }
+
+        setAudioPreflight((currentPreflight) => {
+          const snapshot = currentPreflight ?? basePreflight
+
+          return {
+            ...snapshot,
+            checkedAt: new Date().toISOString(),
+            customerAudioReady: basePreflight.requiredCustomerAudio
+              ? buyerAudioTrackReady
+              : snapshot.customerAudioReady,
+            mixedRoomReady,
+            sellerMicReady,
+            sources: measuredSources.map(summarizeAudioSource),
+            warnings,
+          }
+        })
+      }
+
+      void refreshAudioLevels()
+      audioHealthTimerRef.current = window.setInterval(() => {
+        void refreshAudioLevels()
+      }, 5000)
+    },
+    []
+  )
 
   const startCall = React.useCallback(
     async (config: StartCallCaptureConfig) => {
@@ -469,9 +550,12 @@ export function useCallCapture() {
         deepgramConnectionsRef.current = connections
 
         throwIfCallStartCancelled(config.abortSignal)
+        startLiveAudioHealthMonitoring(preflight, sources)
         recorder.start(1000)
         setStatus("recording")
       } catch (caughtError: unknown) {
+        const failedPreflight = getAudioPreflightErrorResult(caughtError)
+
         cleanup()
         if (config.abortSignal?.aborted) {
           setError(null)
@@ -499,12 +583,20 @@ export function useCallCapture() {
 
         setError(message)
         setActiveCallId("")
-        setAudioPreflight(null)
-        await updateCall(config.callId, { status: "needs_attention" }).catch(() => undefined)
+        setAudioPreflight(failedPreflight)
+        await updateCall(config.callId, {
+          ...(failedPreflight
+            ? {
+                audio_preflight: failedPreflight,
+                audio_source_summary: failedPreflight.sources,
+              }
+            : {}),
+          status: "needs_attention",
+        }).catch(() => undefined)
         throw caughtError
       }
     },
-    [cleanup]
+    [cleanup, startLiveAudioHealthMonitoring]
   )
 
   const stopCall = React.useCallback(async (): Promise<CallCaptureStopResult | null> => {
