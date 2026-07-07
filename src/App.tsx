@@ -574,6 +574,12 @@ function getPublicAuthRouteFromPath(): PublicAuthRoute {
   return "landing"
 }
 
+function isDevPublicLandingPreviewRoute() {
+  if (!import.meta.env.DEV || typeof window === "undefined") return false
+
+  return new URLSearchParams(window.location.search).has("salesframe_public_preview")
+}
+
 function getAuthRedirectUrl(path: "/login" | "/signup" = "/login") {
   if (typeof window === "undefined") return path
 
@@ -5267,6 +5273,14 @@ function App() {
     )
   }
 
+  if (isDevPublicLandingPreviewRoute()) {
+    return (
+      <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} surface="landing" />}>
+        <MarketingLandingPage onLogin={handleLandingLogin} onSignup={handleLandingSignup} />
+      </React.Suspense>
+    )
+  }
+
   if (legalPage) {
     return (
       <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} />}>
@@ -6884,11 +6898,23 @@ function StartCallPreparingView({
               <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-primary">
                 <ActiveIcon className="size-4" />
               </span>
-              <p className="truncate text-sm font-medium">{activeStep?.label ?? "Preparing call"}</p>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{activeStep?.label ?? "Preparing call"}</p>
+                <p className="text-xs text-muted-foreground">
+                  Step {Math.min(activeIndex + 1, steps.length)} of {steps.length}
+                </p>
+              </div>
             </div>
             <p className="shrink-0 text-sm tabular-nums text-muted-foreground">{Math.round(progress)}%</p>
           </div>
-          <Progress className="h-2" value={progress} />
+          <Progress
+            aria-label="Start call preparation progress"
+            aria-valuetext={`${Math.round(progress)}% complete. ${
+              activeStep?.label ?? "Preparing call"
+            }.`}
+            className="h-2"
+            value={progress}
+          />
           <p className="text-sm leading-relaxed text-muted-foreground">{currentDescription}</p>
         </div>
 

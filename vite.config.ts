@@ -11,16 +11,18 @@ const localFunctionRoutes: Record<string, string> = {
   "/api/import/accounts": "import-accounts",
   "/api/import/opportunities": "import-opportunities",
   "/api/openai/account-enrichment": "account-enrichment",
-  "/api/openai/call-diarization": "call-diarization",
   "/api/openai/customer-research": "customer-research",
   "/api/openai/health": "openai-health",
   "/api/openai/key": "openai-key",
   "/api/openai/live-guidance": "live-guidance",
   "/api/openai/live-state": "live-state",
   "/api/openai/post-call-outputs": "post-call-outputs",
-  "/api/openai/realtime-transcription": "realtime-transcription",
   "/api/openai/seller-domain-research": "seller-domain-research",
   "/api/openai/speaker-attribution": "speaker-attribution",
+}
+
+function normalizeModuleId(id: string) {
+  return id.split(path.sep).join("/")
 }
 
 function localNetlifyFunctionsPlugin(): Plugin {
@@ -73,7 +75,23 @@ export default defineConfig(({ mode }) => {
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined
+          if (!id.includes("node_modules")) {
+            const normalizedId = normalizeModuleId(id)
+
+            if (
+              normalizedId.includes("/src/hooks/use-call-capture.ts") ||
+              normalizedId.includes("/src/lib/call-audio-preflight.ts") ||
+              normalizedId.includes("/src/lib/turn-assembler.ts")
+            ) return "call-capture"
+
+            if (
+              normalizedId.includes("/src/lib/supabase/salesframe-adapters.tsx") ||
+              normalizedId.includes("/src/lib/supabase/salesframe-data.ts")
+            ) return "salesframe-data"
+
+            return undefined
+          }
+
           if (
             id.includes("lucide-react") ||
             id.includes("radix-ui") ||

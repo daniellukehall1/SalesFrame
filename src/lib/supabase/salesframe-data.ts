@@ -423,15 +423,30 @@ export async function unarchiveOpportunity(opportunityId: string, client?: Sales
 }
 
 export async function listWorkspacePlaybooks(workspaceId?: string, client?: SalesFrameClient) {
-  let query = getSupabase(client)
+  const supabase = getSupabase(client)
+  const systemQuery = supabase
     .from("playbooks")
     .select("*")
-    .order("is_system", { ascending: false })
+    .eq("is_system", true)
     .order("name", { ascending: true })
 
-  query = workspaceId ? query.or(`is_system.eq.true,workspace_id.eq.${workspaceId}`) : query.eq("is_system", true)
+  if (!workspaceId) {
+    return requireData(await systemQuery, "No playbooks returned.")
+  }
 
-  return requireData(await query, "No playbooks returned.")
+  const [systemResponse, workspaceResponse] = await Promise.all([
+    systemQuery,
+    supabase
+      .from("playbooks")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("name", { ascending: true }),
+  ])
+
+  return [
+    ...requireData(systemResponse, "No system playbooks returned."),
+    ...requireData(workspaceResponse, "No workspace playbooks returned."),
+  ]
 }
 
 export async function listPlaybookFields(playbookIds: string[], client?: SalesFrameClient) {

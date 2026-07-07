@@ -6,6 +6,7 @@ import {
   processQueuedEnrichmentJobs,
   retryFailedEnrichmentJobs,
 } from "./_shared/import-enrichment"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeWorkspace, requireUser } from "./_shared/supabase"
 
 type StatusPayload = {
@@ -32,6 +33,12 @@ export default async (request: Request, context: Context) => {
       const workspaceId = payload.workspaceId ?? queryWorkspaceId
       if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
       await authorizeWorkspace(user.id, workspaceId, supabase)
+      assertRateLimit({
+        key: `${user.id}:${workspaceId}`,
+        limit: 30,
+        name: "import enrichment",
+        windowMs: 5 * 60 * 1000,
+      })
 
       if (payload.action === "retry_failed") {
         await retryFailedEnrichmentJobs({ supabase, userId: user.id, workspaceId })

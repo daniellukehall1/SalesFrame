@@ -21,6 +21,7 @@ import {
   queueAccountEnrichmentJobs,
   type AccountEnrichmentQueueTarget,
 } from "./_shared/import-enrichment"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeWorkspace, requireUser } from "./_shared/supabase"
 
 type ImportAccountsPayload = {
@@ -43,6 +44,12 @@ export default async (request: Request, context: Context) => {
     if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
 
     await authorizeWorkspace(user.id, workspaceId, supabase)
+    assertRateLimit({
+      key: `${user.id}:${workspaceId}`,
+      limit: 12,
+      name: "CSV import",
+      windowMs: 10 * 60 * 1000,
+    })
 
     const rows = validateRows(payload.rows)
     const mapping = validateMapping(payload.mapping)

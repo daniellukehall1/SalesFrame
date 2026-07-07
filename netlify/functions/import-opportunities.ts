@@ -33,6 +33,7 @@ import {
   queueAccountEnrichmentJobs,
   type AccountEnrichmentQueueTarget,
 } from "./_shared/import-enrichment"
+import { assertRateLimit } from "./_shared/rate-limit"
 import { authorizeWorkspace, requireUser } from "./_shared/supabase"
 
 type ImportOpportunitiesPayload = {
@@ -59,6 +60,12 @@ export default async (request: Request, context: Context) => {
     if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
 
     await authorizeWorkspace(user.id, workspaceId, supabase)
+    assertRateLimit({
+      key: `${user.id}:${workspaceId}`,
+      limit: 12,
+      name: "CSV import",
+      windowMs: 10 * 60 * 1000,
+    })
 
     const rows = validateRows(payload.rows)
     const mapping = validateMapping(payload.mapping)
@@ -74,22 +81,27 @@ export default async (request: Request, context: Context) => {
       workspaceId,
     })
 
-    const [accountResponse, opportunityResponse, playbookResponse] = await Promise.all([
+    const [accountResponse, opportunityResponse, systemPlaybookResponse, workspacePlaybookResponse] = await Promise.all([
       supabase.from("accounts").select("id,name,website,currency").eq("workspace_id", workspaceId),
       supabase.from("opportunities").select("id,name,account_id").eq("workspace_id", workspaceId),
       supabase
         .from("playbooks")
         .select("id,name,slug,is_system,workspace_id")
-        .or(`is_system.eq.true,workspace_id.eq.${workspaceId}`),
+        .eq("is_system", true),
+      supabase
+        .from("playbooks")
+        .select("id,name,slug,is_system,workspace_id")
+        .eq("workspace_id", workspaceId),
     ])
 
     if (accountResponse.error) throw new Error(accountResponse.error.message)
     if (opportunityResponse.error) throw new Error(opportunityResponse.error.message)
-    if (playbookResponse.error) throw new Error(playbookResponse.error.message)
+    if (systemPlaybookResponse.error) throw new Error(systemPlaybookResponse.error.message)
+    if (workspacePlaybookResponse.error) throw new Error(workspacePlaybookResponse.error.message)
 
     const workspaceAccounts = [...(accountResponse.data ?? [])]
     const workspaceOpportunities = opportunityResponse.data ?? []
-    const playbooks = playbookResponse.data ?? []
+    const playbooks = [...(systemPlaybookResponse.data ?? []), ...(workspacePlaybookResponse.data ?? [])]
     const previewRows = applyCsvRowDecisions(
       buildCsvImportPreview({
         defaultCurrency,

@@ -31,7 +31,7 @@ const howItWorksSteps = [
     note: "Start with the selling world your team already knows.",
   },
   {
-    title: "Add the accounts and opportunities that matter",
+    title: "Add the accounts that matter",
     body:
       "Create accounts one by one, or bring them in from a CSV. SalesFrame turns the workspace into a clean selling map.",
     note: "Less hunting around. More useful conversations.",
@@ -212,7 +212,7 @@ function HowItWorksDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="grid h-[min(720px,calc(100svh-1rem))] max-h-[calc(100svh-1rem)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-white p-4 text-black sm:max-w-lg">
+      <DialogContent className="grid max-h-[calc(100svh-1rem)] w-[min(calc(100%-2rem),30rem)] grid-rows-[1fr_auto] gap-0 overflow-hidden bg-white p-0 text-black sm:max-w-lg">
         <DialogHeader className="sr-only">
           <DialogTitle>How SalesFrame works</DialogTitle>
           <DialogDescription>
@@ -220,7 +220,7 @@ function HowItWorksDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-0 grid-rows-[160px_minmax(0,1fr)_auto] gap-4 sm:grid-rows-[240px_minmax(0,1fr)_auto]">
+        <div className="grid min-h-[390px] grid-rows-[112px_minmax(0,1fr)_auto] gap-3 p-4 sm:min-h-[455px] sm:grid-rows-[160px_minmax(0,1fr)_auto] sm:gap-4">
           {activeStep.imageUrl ? (
             <img
               src={activeStep.imageUrl}
@@ -231,19 +231,19 @@ function HowItWorksDialog({
           ) : (
             <div
               aria-hidden="true"
-              className="h-full rounded-lg bg-[linear-gradient(135deg,rgba(15,15,16,0.08),rgba(255,255,255,0.72))] ring-1 ring-black/10"
+              className="h-full rounded-lg bg-[radial-gradient(circle_at_35%_35%,rgba(15,15,16,0.12),transparent_32%),linear-gradient(135deg,rgba(15,15,16,0.065),rgba(15,15,16,0.025))] ring-1 ring-black/10"
             />
           )}
 
-          <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+          <div className="grid min-h-0 content-start gap-2 overflow-hidden pr-1 sm:gap-3">
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-black/45">
               Step {stepIndex + 1} of {howItWorksSteps.length}
             </p>
             <h2 className="font-heading text-2xl leading-tight tracking-tight text-black sm:text-[1.7rem]">
               {activeStep.title}
             </h2>
-            <p className="text-sm leading-6 text-black/70 sm:text-base sm:leading-7">{activeStep.body}</p>
-            <p className="rounded-lg bg-black/[0.04] p-3 text-sm leading-6 text-black/60">
+            <p className="text-sm leading-6 text-black/70">{activeStep.body}</p>
+            <p className="rounded-lg bg-black/[0.04] p-2.5 text-sm leading-6 text-black/60 sm:p-3">
               {activeStep.note}
             </p>
           </div>
@@ -255,35 +255,40 @@ function HowItWorksDialog({
                 type="button"
                 aria-label={`Show ${step.title}`}
                 aria-current={index === stepIndex ? "step" : undefined}
-                className={[
-                  "h-2 rounded-full transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/30",
-                  index === stepIndex ? "w-7 bg-black" : "w-2 bg-black/20 hover:bg-black/40",
-                ].join(" ")}
+                className="group grid size-8 place-items-center rounded-md transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/30"
                 onClick={() => setStepIndex(index)}
-              />
+              >
+                <span
+                  aria-hidden="true"
+                  className={[
+                    "h-2 rounded-full transition-all duration-150",
+                    index === stepIndex ? "w-7 bg-black" : "w-2 bg-black/20 group-hover:bg-black/40",
+                  ].join(" ")}
+                />
+              </button>
             ))}
           </div>
         </div>
 
-        <div className="-mx-4 -mb-4 grid gap-3 rounded-b-xl border-t border-black/10 bg-black/[0.03] p-4 sm:flex sm:items-center sm:justify-between">
-          <Button variant="outline" className="border-black/15 bg-white text-black hover:bg-black hover:text-white" onClick={() => onOpenChange(false)}>
+        <div className="grid gap-3 border-t border-black/10 bg-black/[0.03] p-4 sm:flex sm:items-center sm:justify-between">
+          <Button variant="outline" className="min-h-11 border-black/15 bg-white text-black hover:bg-black hover:text-white sm:min-h-9" onClick={() => onOpenChange(false)}>
             Close
           </Button>
           <div className="grid gap-2 sm:flex sm:justify-end">
             <Button
               variant="outline"
-              className="border-black/15 bg-white text-black hover:bg-black hover:text-white"
+              className="min-h-11 border-black/15 bg-white text-black hover:bg-black hover:text-white sm:min-h-9"
               disabled={stepIndex === 0}
               onClick={handleBack}
             >
               Back
             </Button>
             {isFinalStep ? (
-              <Button className="bg-black text-white hover:bg-black/85" onClick={handleSignup}>
+              <Button className="min-h-11 bg-black text-white hover:bg-black/85 sm:min-h-9" onClick={handleSignup}>
                 Sign Up
               </Button>
             ) : (
-              <Button className="bg-black text-white hover:bg-black/85" onClick={handleNext}>
+              <Button className="min-h-11 bg-black text-white hover:bg-black/85 sm:min-h-9" onClick={handleNext}>
                 Next
               </Button>
             )}

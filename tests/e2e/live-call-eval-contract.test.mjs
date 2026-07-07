@@ -40,7 +40,8 @@ test("live-call implementation references the eval acceptance behaviors", async 
   const assembler = await read("src/lib/turn-assembler.ts")
   const liveGuidance = await read("netlify/functions/live-guidance.ts")
 
-  assert.match(preflight, /Customer audio detected: start call\./)
+  assert.match(preflight, /Buyer audio source connected: start call\./)
+  assert.match(preflight, /Buyer audio is connected, but the meter is quiet right now/)
   assert.match(preflight, /Native app audio is not available through this browser/)
   assert.match(preflight, /function getMeetingAudioDisplayOptions/)
   assert.match(preflight, /systemAudio: "include"/)

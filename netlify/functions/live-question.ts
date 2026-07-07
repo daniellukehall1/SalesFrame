@@ -2,7 +2,7 @@ import type { Config, Context } from "@netlify/functions"
 
 import { buildPlaybookIntentClusters, type PlaybookIntentCluster } from "../../src/lib/salesframe-intent-clusters"
 import { getEnv } from "./_shared/env"
-import { badRequest, dataResponse, errorResponse, forbidden, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
+import { badRequest, dataResponse, errorResponse, forbidden, logSafeEvent, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { assertRateLimit } from "./_shared/rate-limit"
@@ -966,7 +966,8 @@ export default async (request: Request, _context: Context) => {
       { data: opportunity, error: opportunityError },
       { data: call, error: callError },
       { data: accountEnrichmentProfile, error: accountEnrichmentError },
-      { data: playbookRows, error: playbookError },
+      { data: systemPlaybookRows, error: systemPlaybookError },
+      { data: workspacePlaybookRows, error: workspacePlaybookError },
       { data: opportunityEvidence, error: evidenceError },
       { data: intentLedgerRows, error: intentLedgerError },
       { data: stakeholderRows, error: stakeholderError },
@@ -983,7 +984,11 @@ export default async (request: Request, _context: Context) => {
       supabase
         .from("playbooks")
         .select("*")
-        .or(`is_system.eq.true,workspace_id.eq.${authorizedCall.workspace_id}`),
+        .eq("is_system", true),
+      supabase
+        .from("playbooks")
+        .select("*")
+        .eq("workspace_id", authorizedCall.workspace_id),
       supabase
         .from("opportunity_field_evidence")
         .select("*")
@@ -1007,11 +1012,13 @@ export default async (request: Request, _context: Context) => {
     if (accountEnrichmentError && !isMissingRelationError(accountEnrichmentError)) {
       throw new Error(accountEnrichmentError.message)
     }
-    if (playbookError) throw new Error(playbookError.message)
+    if (systemPlaybookError) throw new Error(systemPlaybookError.message)
+    if (workspacePlaybookError) throw new Error(workspacePlaybookError.message)
     if (evidenceError) throw new Error(evidenceError.message)
     if (intentLedgerError && !isMissingRelationError(intentLedgerError)) throw new Error(intentLedgerError.message)
     if (stakeholderError && !isMissingRelationError(stakeholderError)) throw new Error(stakeholderError.message)
 
+    const playbookRows = [...(systemPlaybookRows ?? []), ...(workspacePlaybookRows ?? [])]
     const selectedPlaybookRows = (playbookRows ?? []).filter((playbook) => {
       const nameKey = normalizeKey(playbook.name)
       const slugKey = normalizeKey(playbook.slug)
@@ -1122,9 +1129,10 @@ export default async (request: Request, _context: Context) => {
         workspaceId: authorizedCall.workspace_id,
       })
     } catch (memoryError) {
-      console.warn("live_question_memory_persist_failed", {
-        callId: authorizedCall.id,
-        error: memoryError instanceof Error ? memoryError.message : String(memoryError),
+      logSafeEvent("warn", "live_question_memory_persist_failed", {
+        diagnostic: getMemoryPersistenceDiagnostic(memoryError),
+        functionName: "live-question",
+        hasCallId: Boolean(authorizedCall.id),
       })
     }
 
@@ -1137,4 +1145,22 @@ export default async (request: Request, _context: Context) => {
 export const config: Config = {
   path: "/api/openai/live-question",
   method: ["POST"],
+}
+
+function getMemoryPersistenceDiagnostic(error: unknown) {
+  if (error instanceof Error) {
+    const message = error.message
+    if (/duplicate key value violates|violates .* constraint/i.test(message)) return "database_constraint"
+    if (/schema cache|could not find .* column|could not find .* table|relation .* does not exist|column .* does not exist/i.test(message)) {
+      return "database_schema"
+    }
+    if (/permission denied|row-level security|rls/i.test(message)) return "database_permission"
+    if (/timeout|timed out|gateway timeout/i.test(message)) return "timeout"
+
+    return error.name || "error"
+  }
+
+  if (typeof error === "string") return "string_error"
+
+  return "unknown_error"
 }

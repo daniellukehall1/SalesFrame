@@ -1,83 +1,99 @@
-# SalesFrame
+# SalesFrame.ai
 
-Glad you stopped in.
+Hey there, nice to meet you.
 
-SalesFrame is built to help sellers run better calls. It listens in the browser, keeps the opportunity context close, and shows one natural next question at the right time.
+SalesFrame helps sellers ask the better next question while the conversation is still happening.
 
-No giant checklist. No robotic script. Just the next useful move.
+Sales calls move quickly. Sellers are listening, thinking, taking notes, trying to follow the methodology, and still needing to sound like a real person. SalesFrame sits quietly beside them, reads the account and opportunity context, follows the live conversation, and gives them one calm next move.
 
-## What It Does
+No giant checklist. No robotic script. Just the next useful question.
 
-SalesFrame is a commercial SaaS app for individual B2B sellers.
+## The Promise
 
-Status: actively developed.
+SalesFrame is a real-time sales coach for B2B sellers.
 
-During a call, it brings together:
+It helps turn every call into a sharper conversation by bringing together:
 
-- The selected workspace, account, and opportunity.
-- Previous call history and saved opportunity evidence.
-- Live transcript turns from browser audio capture.
-- Selected sales playbooks and methodology gaps.
-- Account enrichment, customer research, and seller context.
-- OpenAI-powered live guidance.
+- The account and opportunity the seller is working on.
+- The playbooks the team already uses.
+- The live conversation as it unfolds.
+- What has already been answered, missed, or only weakly covered.
+- The context that makes a question feel specific, natural, and timely.
 
-The core promise:
+The seller does not need fifty prompts. They need the one question that fits now.
 
-> Real-time seller question guidance by opportunity and framework.
+## Why It Exists
 
-## Product Shape
+Great sellers do not sound like they are working through a form.
 
-SalesFrame is designed around a calm seller workflow:
+They know when to listen, when to go deeper, when to soften, when to move on, and when to circle back before the call ends. SalesFrame is built to make that kind of coaching available in the moment, not only after the call is over.
 
-1. Pick or create a workspace.
-2. Add accounts and opportunities manually or through CSV import.
-3. Save an OpenAI API key for the workspace.
-4. Start a call from Home, Account, Opportunity, or Calls.
-5. Let SalesFrame prepare audio, account context, and the first live recommendation.
-6. Ask one natural question at a time while the app quietly tracks playbook coverage.
-7. Review transcript, notes, evidence, follow-up, and next-call brief after the call.
+It keeps the methodology discipline in the background, so the seller can stay present in the foreground.
 
-## Key Features
+## What SalesFrame Does
 
-- Supabase Auth for signup, login, recovery, and workspace-scoped sessions.
-- Workspace-scoped accounts, opportunities, calls, playbooks, recordings, and AI settings.
-- Account and opportunity record management with save flows.
-- CSV import for accounts and opportunities.
-- Logo.dev account logos from account domains.
-- AI account enrichment with editable sales signals.
-- Sales playbooks including MEDDICC, MEDDPICC, BANT, Force Management, SPIN, Sandler, Challenger, Gap Selling, Value Selling, Strategic Selling, SPICED, and Custom framework.
-- Multi-playbook intent clustering so overlapping framework fields become one natural question.
-- Browser-based no-bot call capture with audio preflight.
-- OpenAI realtime transcription and live guidance.
-- Post-call outputs including notes, evidence, follow-up, and next-call brief.
-- Netlify Functions for all server-side AI and privileged operations.
-- Supabase RLS and explicit authorization helpers for workspace safety.
+- Prepares the call with account, opportunity, and seller context.
+- Helps teams create or import accounts and opportunities.
+- Enriches account intelligence so discovery starts warmer.
+- Supports the sales playbooks teams already trust, including MEDDICC, BANT, Sandler, Challenger, SPICED, SPIN, Gap Selling, Value Selling, Strategic Selling, Force Management, and custom frameworks.
+- Captures the conversation live and turns it into a usable transcript.
+- Shows one `Ask this next` recommendation in the call cockpit.
+- Adapts when the buyer answers, pushes back, moves topic, or changes pace.
+- Tracks playbook coverage without making the seller stare at a checklist.
+- Creates post-call notes, evidence, follow-up, and next-call prep.
 
-## Tech Stack
+## The Seller Experience
 
-- React 19
-- Vite 8
-- TypeScript 6
-- Tailwind CSS 4
-- shadcn-style components
-- Supabase Auth, Postgres, RLS, Realtime, and Storage
-- Netlify hosting and Netlify Functions
-- OpenAI APIs for transcription, guidance, enrichment, research, and post-call outputs
-- Logo.dev for account logo images
+1. Set up a workspace.
+2. Add accounts and opportunities manually or by CSV.
+3. Enrich the account so SalesFrame understands the company.
+4. Choose the playbooks that match the team’s selling motion.
+5. Start the call.
+6. Let SalesFrame listen, reason, and guide.
+7. Ask one better question at a time.
+8. Leave the call with the work already shaped.
 
-## Repo Map
+## What Makes It Different
 
-```text
-src/                    App, components, hooks, client data access, UI helpers
-netlify/functions/      Server-side API routes for OpenAI, imports, auth checks, cleanup
-supabase/migrations/    Database schema, RLS policies, storage, and app foundations
-supabase/templates/     Branded Supabase email templates
-docs/                   Product spec, design language, and implementation notes
-tests/                  Contract, function, and live-call pipeline tests
-public/                 Public assets, media, robots, sitemap, favicon
-```
+Most sales tools become another screen to manage.
 
-## Local Setup
+SalesFrame is designed to feel quieter than that. The cockpit is intentionally simple: one question, one short reason, and a few controls to move the coach along. The deeper methodology work still happens, but it does not take over the conversation.
+
+That matters because sellers need confidence, not clutter.
+
+## Built For
+
+SalesFrame is built for:
+
+- Account executives who want sharper live discovery.
+- Founders selling complex deals.
+- Sales leaders who want methodology adoption without script-reading.
+- Revenue teams that care about coaching, consistency, and call quality.
+- Teams that want better notes and evidence without turning calls into admin.
+
+## Product Principles
+
+SalesFrame should feel calm, premium, and useful.
+
+- Clear next action.
+- Human copy.
+- Low visual noise.
+- Methodology in the background.
+- Natural conversation in the foreground.
+- Honest loading and error states.
+- Seller confidence over maximum visible data.
+
+## For Developers
+
+SalesFrame is a proprietary SaaS application deployed with Netlify and Supabase. Deepgram powers live transcription, and OpenAI powers research, enrichment, live coaching, and post-call intelligence.
+
+For release confidence, the app includes Deepgram Flux live transcription and turn-taking, protected workspace data, AI coaching checks, and a production gate that keeps the essentials honest.
+
+It also keeps OpenAI live guidance, account enrichment, research, and post-call outputs behind server-side controls.
+
+Keep secrets out of GitHub. Store production credentials in Netlify and Supabase.
+
+### Run Locally
 
 Use Node 22.
 
@@ -87,205 +103,44 @@ pnpm install
 pnpm dev
 ```
 
-The app runs locally at:
+The local app usually runs at:
 
 ```text
 http://127.0.0.1:5173
 ```
 
-## Environment Variables
+Create `.env.local` from `.env.example` and fill only the values needed for local development.
 
-Create a local `.env.local` from `.env.example`.
+### Validation
 
-Browser-safe values:
-
-```text
-VITE_SUPABASE_URL=
-VITE_SUPABASE_PUBLISHABLE_KEY=
-VITE_LOGO_DEV_PUBLISHABLE_KEY=
-```
-
-Server-only values for Netlify Functions:
-
-```text
-SUPABASE_SERVICE_ROLE_KEY=
-OPENAI_KEY_ENCRYPTION_SECRET=
-```
-
-Optional model defaults:
-
-```text
-OPENAI_TEXT_MODEL=
-OPENAI_REALTIME_TRANSCRIPTION_MODEL=
-OPENAI_RESEARCH_WEB_SEARCH=
-OPENAI_LIVE_COACH_MODEL=
-OPENAI_LIVE_STATE_MODEL=
-OPENAI_SPEAKER_ATTRIBUTION_MODEL=
-```
-
-Local migration helper:
-
-```text
-SUPABASE_DATABASE_URL=
-```
-
-Keep secrets in Netlify and Supabase. Do not commit live secret values to GitHub.
-
-## Scripts
-
-```bash
-pnpm dev              # Start local Vite app
-pnpm build            # Typecheck and build production assets
-pnpm check            # Run the release gate: secret scan, lint, tests, and production build
-pnpm check:secrets    # Scan tracked files for high-risk committed secrets
-pnpm lint             # Typecheck without building
-pnpm test             # Run all Node test files
-pnpm test:e2e         # Run app contract tests
-pnpm test:functions   # Run function/security tests
-```
-
-## Supabase
-
-Supabase is the system of record for:
-
-- Workspaces
-- Accounts
-- Opportunities
-- Calls
-- Transcript segments
-- Call speakers
-- Playbooks and playbook fields
-- Opportunity evidence
-- Account enrichment profiles and runs
-- Recordings and storage lifecycle metadata
-- Workspace OpenAI key metadata
-
-Before changing production data behavior:
-
-1. Add or update a migration in `supabase/migrations`.
-2. Keep RLS enabled.
-3. Make sure Netlify Functions explicitly authorize workspace/account/opportunity/call access before privileged writes.
-4. Update generated types or local type definitions when schema changes.
-5. Add a contract test for the new behavior.
-
-## Netlify
-
-Netlify deploys from GitHub.
-
-GitHub Actions runs `pnpm check` on pushes and pull requests to `main`. That gate runs the secret scan, typecheck, tests, and production build before Netlify should be treated as release-ready.
-
-Build settings:
-
-```text
-Build command: pnpm build
-Publish directory: dist
-Functions directory: netlify/functions
-Node version: 22
-```
-
-Production URL:
-
-```text
-https://salesframe.ai
-```
-
-Netlify owns the production environment variables for server functions. GitHub stores code only.
-
-## OpenAI
-
-SalesFrame is OpenAI-first.
-
-The browser never receives the seller's OpenAI API key after it is saved. Frontend calls go through `/api/openai/*`, where Netlify Functions decrypt and use the workspace-scoped key.
-
-The live coach should not invent local fallback questions. If AI is unavailable, the UI should pause clearly and help the seller fix the connection.
-
-## QA Checklist
-
-Run this before deploying meaningful app changes:
+Before treating a change as release-ready:
 
 ```bash
 pnpm check
 ```
 
-For UX-sensitive changes, also verify in the browser:
-
-- Signup and login flows.
-- Workspace creation and switching skeletons.
-- Account creation, save, enrichment, and Logo.dev avatar rendering.
-- Opportunity creation, save, playbook selection, and deletion.
-- CSV import upload, mapping, review, and summary.
-- Start Call preflight and loading progress.
-- Call cockpit recording controls, transcript, and live guidance controls.
-- Post-call replay, transcript download, notes, and next-call brief.
-- Dark and light mode persistence.
-- Mobile viewport layout.
-
-## Design Principles
-
-SalesFrame should feel like a calm sales coach.
-
-- One clear primary action.
-- No decorative pill labels.
-- Human-voiced empty states.
-- Loading copy that explains what is happening now.
-- Error states that offer a recovery path.
-- Toggles only for persistent settings.
-- Buttons for one-time actions.
-- Strict methodology in the background.
-- Natural conversation in the foreground.
-
-More detail lives in:
-
-- `docs/product-build-spec.md`
-- `docs/design-language-states.md`
-
-## Deployment Flow
-
-Full release details live in `docs/deployment-runbook.md`.
-
-For ordinary releases:
-
-1. Make the change.
-2. Run `pnpm check`.
-3. Commit to `main`.
-4. Push to GitHub.
-5. Confirm Netlify deploys the exact commit.
-6. Smoke check `https://salesframe.ai`.
-
-Manual Netlify fallback:
+For smaller local checks:
 
 ```bash
-pnpm deploy:status
-pnpm deploy:prod
+pnpm lint
+pnpm test
+pnpm build
 ```
 
-Use a real local GitHub credential (`gh auth login` then `gh auth setup-git`).
-Do not paste GitHub or Netlify tokens into command lines.
+## Deployment
 
-## Security Notes
+GitHub stores the code. Netlify deploys the app. Supabase stores auth, database, and recordings.
 
-- Never commit service role keys, OpenAI keys, personal access tokens, or database passwords.
-- Treat any shared token as exposed and rotate it.
-- Keep Supabase service role usage server-side only.
-- Keep RLS on for workspace data.
-- Add explicit authorization helpers before any privileged function action.
-- Prefer structured AI outputs and fail closed when model output is malformed.
+GitHub Actions runs `pnpm check` before a release should be treated as ready.
 
-## Contributing
+Production release notes and operational steps live in:
 
-Keep changes small and useful.
+- `docs/deployment-runbook.md`
+- `docs/production-smoke-checklist.md`
 
-When adding a feature:
+## Contact
 
-1. Follow existing shadcn-style UI patterns.
-2. Keep live-call UI calm.
-3. Add or update tests for the behavior.
-4. Update docs when product behavior changes.
-5. Run the release checklist before pushing.
-
-## Support
-
-Questions, access, and product feedback:
+Reach us:
 
 ```text
 hello@salesframe.ai

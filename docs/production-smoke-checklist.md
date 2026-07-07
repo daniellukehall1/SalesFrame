@@ -42,6 +42,7 @@ Run this before every production deploy.
 ## Retention And Legal
 
 - Expired call recordings are removed by the scheduled retention cleanup.
+- Retention cleanup and import-enrichment worker appear with the `Scheduled` badge in the Netlify Functions UI, and `Run now` completes without exposing secrets in logs.
 - Expired calls no longer expose broken replay links.
 - `/terms` and `/privacy` render successfully for signed-out and signed-in users.
 

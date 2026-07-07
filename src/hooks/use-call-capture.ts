@@ -11,12 +11,9 @@ import {
   type AudioPreflightResult,
   type CapturedAudioSource,
 } from "@/lib/call-audio-preflight"
-import {
-  connectDeepgramLiveTranscription,
-  flushDeepgramAudioBuffers,
-  waitForDeepgramFlush,
-  type DeepgramTranscriptionConnection,
-  type DeepgramTranscriptEvent,
+import type {
+  DeepgramTranscriptionConnection,
+  DeepgramTranscriptEvent,
 } from "@/lib/deepgram-live-transcription"
 import {
   createCallRecordingSignedUrl,
@@ -142,6 +139,16 @@ type TranscriptTurn = {
 }
 
 const callStartCancelledMessage = "Call start was cancelled."
+
+type DeepgramLiveTranscriptionModule = typeof import("@/lib/deepgram-live-transcription")
+
+let deepgramLiveTranscriptionModulePromise: Promise<DeepgramLiveTranscriptionModule> | null = null
+
+function loadDeepgramLiveTranscriptionModule() {
+  deepgramLiveTranscriptionModulePromise ??= import("@/lib/deepgram-live-transcription")
+
+  return deepgramLiveTranscriptionModulePromise
+}
 
 function throwIfCallStartCancelled(signal?: AbortSignal) {
   if (!signal?.aborted) return
@@ -512,6 +519,7 @@ export function useCallCapture() {
           }
         }
 
+        const { connectDeepgramLiveTranscription } = await loadDeepgramLiveTranscriptionModule()
         const connections: DeepgramTranscriptionConnection[] = []
         for (const source of sources) {
           throwIfCallStartCancelled(config.abortSignal)
@@ -618,6 +626,8 @@ export function useCallCapture() {
 
     try {
       try {
+        const { flushDeepgramAudioBuffers, waitForDeepgramFlush } = await loadDeepgramLiveTranscriptionModule()
+
         flushDeepgramAudioBuffers(deepgramConnectionsRef.current)
         await waitForDeepgramFlush()
       } catch (caughtError: unknown) {

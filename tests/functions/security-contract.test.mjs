@@ -163,6 +163,10 @@ test("shared HTTP errors use structured codes and expected statuses", async () =
   assert.match(http, /"Strict-Transport-Security": "max-age=31536000; includeSubDomains"/)
   assert.match(http, /"X-Content-Type-Options": "nosniff"/)
   assert.match(http, /"X-Frame-Options": "DENY"/)
+  assert.match(http, /diagnostic: getDiagnosticErrorCategory\(error\)/)
+  assert.doesNotMatch(http, /message: getDiagnosticErrorMessage\(error\)/)
+  assert.doesNotMatch(http, /stack: getDiagnosticErrorStack\(error\)/)
+  assert.doesNotMatch(http, /function getDiagnosticErrorStack/)
   assert.match(http, /badRequest/)
   assert.match(http, /unauthorized/)
   assert.match(http, /forbidden/)
@@ -329,6 +333,7 @@ test("expensive AI functions enforce authenticated rate limits", async () => {
   const accountEnrichment = await read("netlify/functions/account-enrichment.ts")
   const sellerDomainResearch = await read("netlify/functions/seller-domain-research.ts")
   const liveGuidance = await read("netlify/functions/live-guidance.ts")
+  const liveQuestion = await read("netlify/functions/live-question.ts")
   const liveState = await read("netlify/functions/live-state.ts")
   const speakerAttribution = await read("netlify/functions/speaker-attribution.ts")
   const deepgramToken = await read("netlify/functions/deepgram-token.ts")
@@ -347,6 +352,7 @@ test("expensive AI functions enforce authenticated rate limits", async () => {
     accountEnrichment,
     sellerDomainResearch,
     liveGuidance,
+    liveQuestion,
     liveState,
     speakerAttribution,
     deepgramToken,
@@ -393,6 +399,9 @@ test("expensive AI functions enforce authenticated rate limits", async () => {
   assert.match(deepgramHealth, /name: "deepgram health"/)
   assert.match(postCallOutputs, /name: "post-call generation"/)
   assert.match(smokeChecklist, /Repeated AI requests are throttled with `429`/)
+  assert.match(liveQuestion, /logSafeEvent\("warn", "live_question_memory_persist_failed"/)
+  assert.match(liveQuestion, /getMemoryPersistenceDiagnostic/)
+  assert.doesNotMatch(liveQuestion, /console\.warn\("live_question_memory_persist_failed"/)
 })
 
 test("environment readiness endpoint requires an authenticated user", async () => {
@@ -402,8 +411,9 @@ test("environment readiness endpoint requires an authenticated user", async () =
   assert.match(envCheck, /dataResponse/)
 })
 
-test("retention cleanup only accepts scheduled POST payloads before service-role work", async () => {
+test("scheduled service-role workers require scheduled POST payloads before work", async () => {
   const retentionCleanup = await read("netlify/functions/retention-cleanup.ts")
+  const importEnrichmentWorker = await read("netlify/functions/import-enrichment-worker.ts")
 
   assert.match(retentionCleanup, /methodNotAllowed/)
   assert.match(retentionCleanup, /readJson<ScheduledCleanupPayload>/)
@@ -413,6 +423,14 @@ test("retention cleanup only accepts scheduled POST payloads before service-role
   assert.ok(retentionCleanup.indexOf("assertScheduledPayload") < retentionCleanup.indexOf("const supabase = getSupabaseAdmin()"))
   assert.match(retentionCleanup, /method: \["POST"\]/)
   assert.match(retentionCleanup, /schedule: "@daily"/)
+
+  assert.match(importEnrichmentWorker, /methodNotAllowed/)
+  assert.match(importEnrichmentWorker, /readJson<ScheduledImportEnrichmentPayload>/)
+  assert.match(importEnrichmentWorker, /function assertScheduledPayload/)
+  assert.match(importEnrichmentWorker, /invalid_scheduled_import_enrichment_request/)
+  assert.match(importEnrichmentWorker, /if \(request\.method !== "POST"\) return errorResponse\(methodNotAllowed\(\)\)/)
+  assert.ok(importEnrichmentWorker.indexOf("assertScheduledPayload") < importEnrichmentWorker.indexOf("getSupabaseAdmin()"))
+  assert.match(importEnrichmentWorker, /schedule: "@hourly"/)
 })
 
 test("OpenAI helper supports strict structured output schemas", async () => {
@@ -504,6 +522,32 @@ test("elite live-call migration stores audio preflight and transcript reconcilia
   assert.match(types, /guidance_latency_ms: number \| null/)
 })
 
+test("call recording storage policies require workspace and call access", async () => {
+  const initialStorageMigration = await read("supabase/migrations/202606270002_storage_buckets.sql")
+  const tightenedStorageMigration = await read("supabase/migrations/202607070002_tighten_call_recording_storage_rls.sql")
+  const data = await read("src/lib/supabase/salesframe-data.ts")
+
+  assert.match(initialStorageMigration, /workspace_id_from_storage_path/)
+  assert.match(tightenedStorageMigration, /create or replace function public\.call_id_from_storage_path/)
+  assert.match(tightenedStorageMigration, /storage\.foldername\(object_name\)\)\[2\]/)
+  assert.match(tightenedStorageMigration, /create or replace function public\.storage_path_matches_call_workspace/)
+  assert.match(tightenedStorageMigration, /call\.workspace_id = public\.workspace_id_from_storage_path\(object_name\)/)
+  assert.match(tightenedStorageMigration, /grant execute on function public\.call_id_from_storage_path\(text\) to authenticated/)
+  assert.match(tightenedStorageMigration, /grant execute on function public\.storage_path_matches_call_workspace\(text\) to authenticated/)
+
+  for (const policy of [
+    "Workspace members can read call recordings",
+    "Workspace members can upload call recordings",
+    "Workspace members can update call recordings",
+    "Workspace members can delete call recordings",
+  ]) {
+    assert.match(tightenedStorageMigration, new RegExp(policy))
+  }
+
+  assert.match(tightenedStorageMigration, /bucket_id = 'call-recordings'[\s\S]*public\.is_workspace_member\(public\.workspace_id_from_storage_path\(name\)\)[\s\S]*public\.storage_path_matches_call_workspace\(name\)[\s\S]*public\.can_access_call\(public\.call_id_from_storage_path\(name\)\)/)
+  assert.match(data, /return `\$\{workspaceId\}\/\$\{callId\}\/\$\{sanitizedFileName \|\| "recording\.webm"\}`/)
+})
+
 test("CSV import functions authorize the active workspace and reject cross-workspace writes", async () => {
   const accountImport = await read("netlify/functions/import-accounts.ts")
   const opportunityImport = await read("netlify/functions/import-opportunities.ts")
@@ -513,6 +557,9 @@ test("CSV import functions authorize the active workspace and reject cross-works
   assert.match(accountImport, /requireUser\(request\)/)
   assert.match(accountImport, /workspaceId is required/)
   assert.match(accountImport, /authorizeWorkspace\(user\.id, workspaceId, supabase\)/)
+  assert.match(accountImport, /assertRateLimit/)
+  assert.match(accountImport, /name: "CSV import"/)
+  assert.match(accountImport, /limit: 12/)
   assert.match(accountImport, /\.from\("accounts"\)[\s\S]*\.eq\("workspace_id", workspaceId\)/)
   assert.match(accountImport, /workspace_id: workspaceId/)
   assert.match(accountImport, /assertAccountInWorkspace/)
@@ -527,8 +574,14 @@ test("CSV import functions authorize the active workspace and reject cross-works
   assert.match(opportunityImport, /requireUser\(request\)/)
   assert.match(opportunityImport, /workspaceId is required/)
   assert.match(opportunityImport, /authorizeWorkspace\(user\.id, workspaceId, supabase\)/)
+  assert.match(opportunityImport, /assertRateLimit/)
+  assert.match(opportunityImport, /name: "CSV import"/)
+  assert.match(opportunityImport, /limit: 12/)
   assert.match(opportunityImport, /\.from\("accounts"\)\.select\("id,name,website,currency"\)\.eq\("workspace_id", workspaceId\)/)
   assert.match(opportunityImport, /\.from\("opportunities"\)\.select\("id,name,account_id"\)\.eq\("workspace_id", workspaceId\)/)
+  assert.match(opportunityImport, /\.from\("playbooks"\)[\s\S]*\.eq\("is_system", true\)/)
+  assert.match(opportunityImport, /\.from\("playbooks"\)[\s\S]*\.eq\("workspace_id", workspaceId\)/)
+  assert.doesNotMatch(opportunityImport, /is_system\.eq\.true,workspace_id\.eq/)
   assert.match(opportunityImport, /workspace_id: workspaceId/)
   assert.match(opportunityImport, /assertOpportunityInWorkspace/)
   assert.match(opportunityImport, /\.eq\("id", row\.matchedOpportunityId\)[\s\S]*\.eq\("workspace_id", workspaceId\)/)
@@ -558,4 +611,26 @@ test("CSV import functions authorize the active workspace and reject cross-works
   assert.match(csvImport, /const headers = \["Row", "Review note", "Values"\]/)
   assert.doesNotMatch(csvImport, /const headers = \["Row", "Error", "Values"\]/)
   assert.match(csvImport, /normalizeCsvImportPlaybooks/)
+})
+
+test("playbook workspace reads avoid raw PostgREST filter interpolation", async () => {
+  const salesframeData = await read("src/lib/supabase/salesframe-data.ts")
+  const liveGuidance = await read("netlify/functions/live-guidance.ts")
+  const liveQuestion = await read("netlify/functions/live-question.ts")
+  const opportunityImport = await read("netlify/functions/import-opportunities.ts")
+
+  for (const source of [salesframeData, liveGuidance, liveQuestion, opportunityImport]) {
+    assert.doesNotMatch(source, /\.or\(`is_system\.eq\.true,workspace_id\.eq\.\$\{/)
+    assert.doesNotMatch(source, /is_system\.eq\.true,workspace_id\.eq/)
+  }
+
+  assert.match(salesframeData, /const \[systemResponse, workspaceResponse\] = await Promise\.all/)
+  assert.match(salesframeData, /\.from\("playbooks"\)[\s\S]*\.eq\("is_system", true\)/)
+  assert.match(salesframeData, /\.from\("playbooks"\)[\s\S]*\.eq\("workspace_id", workspaceId\)/)
+  assert.match(liveGuidance, /systemPlaybookRows/)
+  assert.match(liveGuidance, /workspacePlaybookRows/)
+  assert.match(liveQuestion, /systemPlaybookRows/)
+  assert.match(liveQuestion, /workspacePlaybookRows/)
+  assert.match(opportunityImport, /systemPlaybookResponse/)
+  assert.match(opportunityImport, /workspacePlaybookResponse/)
 })

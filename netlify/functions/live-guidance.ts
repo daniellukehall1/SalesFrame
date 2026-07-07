@@ -1710,7 +1710,8 @@ export default async (request: Request, context: Context) => {
       { data: accountEnrichmentProfile, error: accountEnrichmentError },
       { data: researchRuns, error: researchError },
       { data: priorGuidanceEvents, error: guidanceHistoryError },
-      { data: playbookRows, error: playbookError },
+      { data: systemPlaybookRows, error: systemPlaybookError },
+      { data: workspacePlaybookRows, error: workspacePlaybookError },
       { data: opportunityEvidence, error: evidenceError },
       { data: priorFeedbackRows, error: feedbackError },
     ] = await Promise.all([
@@ -1738,7 +1739,11 @@ export default async (request: Request, context: Context) => {
       supabase
         .from("playbooks")
         .select("*")
-        .or(`is_system.eq.true,workspace_id.eq.${authorizedCall.workspace_id}`),
+        .eq("is_system", true),
+      supabase
+        .from("playbooks")
+        .select("*")
+        .eq("workspace_id", authorizedCall.workspace_id),
       supabase
         .from("opportunity_field_evidence")
         .select("*")
@@ -1760,11 +1765,13 @@ export default async (request: Request, context: Context) => {
     }
     if (researchError) throw new Error(researchError.message)
     if (guidanceHistoryError) throw new Error(guidanceHistoryError.message)
-    if (playbookError) throw new Error(playbookError.message)
+    if (systemPlaybookError) throw new Error(systemPlaybookError.message)
+    if (workspacePlaybookError) throw new Error(workspacePlaybookError.message)
     if (evidenceError) throw new Error(evidenceError.message)
     if (feedbackError) throw new Error(feedbackError.message)
 
     const selectedPlaybookKeys = new Set(selectedPlaybooks.map(normalizeKey))
+    const playbookRows = [...(systemPlaybookRows ?? []), ...(workspacePlaybookRows ?? [])]
     const selectedPlaybookRows = (playbookRows ?? []).filter((playbook) => {
       const nameKey = normalizeKey(playbook.name)
       const slugKey = normalizeKey(playbook.slug)

@@ -49,11 +49,10 @@ export async function reportClientError({ eventName, error, metadata = {} }: Cli
 
     await fetch("/api/client-error", {
       body: JSON.stringify({
-        eventName,
-        message: getErrorMessage(error),
-        metadata,
+        eventName: normalizeClientErrorEventName(eventName),
+        message: getSafeErrorMessage(error),
+        metadata: sanitizeClientErrorMetadata(metadata),
         route: typeof window !== "undefined" ? window.location.pathname : "",
-        stack: getErrorStack(error),
       }),
       headers,
       method: "POST",
@@ -63,13 +62,62 @@ export async function reportClientError({ eventName, error, metadata = {} }: Cli
   }
 }
 
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
+function normalizeClientErrorEventName(value: string) {
+  const normalized = value.replace(/[^a-z0-9_-]/gi, "_").slice(0, 64)
 
-  return "Unknown client error"
+  return normalized || "client_error"
 }
 
-function getErrorStack(error: unknown) {
-  return error instanceof Error ? error.stack ?? "" : ""
+function getSafeErrorMessage(error: unknown) {
+  const name = error instanceof Error && error.name ? error.name : "ClientError"
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : ""
+  const cleaned = sanitizeDiagnosticText(message)
+
+  if (!cleaned) return name
+
+  return `${name}: ${cleaned}`.slice(0, 240)
+}
+
+function sanitizeClientErrorMetadata(metadata: Record<string, unknown>) {
+  const sanitized: Record<string, unknown> = {}
+
+  if (typeof metadata.filename === "string") {
+    sanitized.filename = sanitizeDiagnosticText(metadata.filename)
+  }
+
+  if (typeof metadata.line === "number" && Number.isFinite(metadata.line)) {
+    sanitized.line = metadata.line
+  }
+
+  if (typeof metadata.column === "number" && Number.isFinite(metadata.column)) {
+    sanitized.column = metadata.column
+  }
+
+  if (typeof metadata.componentStack === "string") {
+    sanitized.componentStack = sanitizeComponentStack(metadata.componentStack)
+  }
+
+  return sanitized
+}
+
+function sanitizeComponentStack(value: string) {
+  return value
+    .split("\n")
+    .slice(0, 12)
+    .map((line) => sanitizeDiagnosticText(line))
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 1000)
+}
+
+function sanitizeDiagnosticText(value: string) {
+  return value
+    .replace(/sk-(proj-)?[A-Za-z0-9_-]{16,}/g, "[redacted-openai-key]")
+    .replace(/sb_secret_[A-Za-z0-9_-]+/g, "[redacted-supabase-secret]")
+    .replace(/sb_publishable_[A-Za-z0-9_-]+/g, "[redacted-supabase-publishable]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted-token]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted-jwt]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500)
 }

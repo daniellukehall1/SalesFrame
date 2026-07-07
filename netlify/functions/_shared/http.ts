@@ -55,12 +55,11 @@ export function errorResponse(
   logSafeEvent("error", "salesframe_function_error", {
     clientRequestId,
     code: appError.code,
+    diagnostic: getDiagnosticErrorCategory(error),
     functionName: options.functionName ?? getFunctionNameFromRequest(options.request),
-    message: getDiagnosticErrorMessage(error),
     metadata: options.metadata ?? {},
     publicMessage,
     requestId,
-    stack: getDiagnosticErrorStack(error),
     status: appError.status,
     traceId,
   })
@@ -296,21 +295,27 @@ function getFunctionNameFromRequest(request: Request | undefined) {
   }
 }
 
-function getDiagnosticErrorMessage(error: unknown) {
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
+function getDiagnosticErrorCategory(error: unknown) {
+  if (error instanceof AppError) return error.code
 
-  return "Unknown error"
-}
+  if (error instanceof Error) {
+    const message = error.message
+    if (isMissingServerConfiguration(error)) return "server_configuration_missing"
+    if (/duplicate key value violates|violates .* constraint/i.test(message)) return "database_constraint"
+    if (/schema cache|could not find .* column|could not find .* table|relation .* does not exist|column .* does not exist/i.test(message)) {
+      return "database_schema"
+    }
+    if (/permission denied|row-level security|rls/i.test(message)) return "database_permission"
+    if (/response_format|json_schema|schema validation|required .* properties/i.test(message)) return "ai_schema"
+    if (/timeout|timed out|gateway timeout/i.test(message)) return "timeout"
+    if (/bad gateway|service unavailable|temporarily unavailable|overloaded|<!doctype|<html/i.test(message)) return "upstream_unavailable"
+    if (/cannot read properties|is not a function|stack trace|traceback/i.test(message)) return "runtime_error"
+    return error.name || "error"
+  }
 
-function getDiagnosticErrorStack(error: unknown) {
-  if (!(error instanceof Error) || !error.stack) return ""
+  if (typeof error === "string") return "string_error"
 
-  return error.stack
-    .split("\n")
-    .slice(0, 8)
-    .map((line) => line.replace(/data:text\/javascript;base64,[A-Za-z0-9+/=]+/g, "data:text/javascript;base64,[redacted]"))
-    .join("\n")
+  return "unknown_error"
 }
 
 function sanitizeLogValue(value: unknown, depth = 0): unknown {
