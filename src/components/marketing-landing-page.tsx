@@ -212,7 +212,10 @@ function HowItWorksDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="grid max-h-[calc(100svh-1rem)] w-[min(calc(100%-2rem),30rem)] grid-rows-[1fr_auto] gap-0 overflow-hidden bg-white p-0 text-black sm:max-w-lg">
+      <DialogContent
+        className="grid h-[min(78svh,36rem)] max-h-[calc(100svh-1rem)] w-[min(calc(100vw-1.25rem),30rem)] grid-rows-[minmax(0,1fr)_auto] gap-0 overflow-hidden bg-white p-0 text-black max-sm:rounded-2xl max-sm:overflow-hidden sm:h-[40rem] sm:max-w-lg"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>How SalesFrame works</DialogTitle>
           <DialogDescription>
@@ -220,42 +223,47 @@ function HowItWorksDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-[390px] grid-rows-[112px_minmax(0,1fr)_auto] gap-3 p-4 sm:min-h-[455px] sm:grid-rows-[160px_minmax(0,1fr)_auto] sm:gap-4">
-          {activeStep.imageUrl ? (
-            <img
-              src={activeStep.imageUrl}
-              alt={activeStep.imageAlt ?? ""}
-              className="h-full w-full rounded-lg object-cover object-center ring-1 ring-black/10"
-              decoding="async"
-            />
-          ) : (
-            <div
-              aria-hidden="true"
-              className="h-full rounded-lg bg-[radial-gradient(circle_at_35%_35%,rgba(15,15,16,0.12),transparent_32%),linear-gradient(135deg,rgba(15,15,16,0.065),rgba(15,15,16,0.025))] ring-1 ring-black/10"
-            />
-          )}
-
-          <div className="grid min-h-0 content-start gap-2 overflow-hidden pr-1 sm:gap-3">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-black/45">
-              Step {stepIndex + 1} of {howItWorksSteps.length}
-            </p>
-            <h2 className="font-heading text-2xl leading-tight tracking-tight text-black sm:text-[1.7rem]">
-              {activeStep.title}
-            </h2>
-            <p className="text-sm leading-6 text-black/70">{activeStep.body}</p>
-            <p className="rounded-lg bg-black/[0.04] p-2.5 text-sm leading-6 text-black/60 sm:p-3">
-              {activeStep.note}
-            </p>
+        <div className="flex min-h-0 flex-col gap-3 overflow-hidden p-3 sm:gap-4 sm:p-4">
+          <div className="h-36 shrink-0 overflow-hidden rounded-xl bg-black/[0.04] ring-1 ring-black/10 sm:h-48">
+            {activeStep.imageUrl ? (
+              <img
+                src={activeStep.imageUrl}
+                alt={activeStep.imageAlt ?? ""}
+                className="h-full w-full object-cover object-center"
+                decoding="async"
+              />
+            ) : (
+              <div
+                aria-hidden="true"
+                className="h-full bg-[radial-gradient(circle_at_35%_35%,rgba(15,15,16,0.12),transparent_32%),linear-gradient(135deg,rgba(15,15,16,0.065),rgba(15,15,16,0.025))]"
+              />
+            )}
           </div>
 
-          <div className="flex items-center justify-center gap-1.5" aria-label={`Step ${stepIndex + 1} of ${howItWorksSteps.length}`}>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+            <div className="grid content-start gap-2 pb-1 sm:gap-3">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-black/45">
+                Step {stepIndex + 1} of {howItWorksSteps.length}
+              </p>
+              <h2 className="font-heading text-xl leading-tight tracking-tight text-black sm:text-[1.7rem]">
+                {activeStep.title}
+              </h2>
+              <p className="text-sm leading-6 text-black/70 sm:text-[0.95rem]">{activeStep.body}</p>
+              <p className="rounded-lg bg-black/[0.04] p-2.5 text-sm leading-6 text-black/60 sm:p-3">
+                {activeStep.note}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center justify-center gap-1.5" aria-label={`Step ${stepIndex + 1} of ${howItWorksSteps.length}`}>
             {howItWorksSteps.map((step, index) => (
               <button
                 key={step.title}
                 type="button"
                 aria-label={`Show ${step.title}`}
                 aria-current={index === stepIndex ? "step" : undefined}
-                className="group grid size-8 place-items-center rounded-md transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/30"
+                tabIndex={-1}
+                className="group grid size-8 place-items-center rounded-md transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
                 onClick={() => setStepIndex(index)}
               >
                 <span
@@ -270,11 +278,11 @@ function HowItWorksDialog({
           </div>
         </div>
 
-        <div className="grid gap-3 border-t border-black/10 bg-black/[0.03] p-4 sm:flex sm:items-center sm:justify-between">
+        <div className="grid grid-cols-2 gap-2 border-t border-black/10 bg-black/[0.03] p-3 sm:flex sm:items-center sm:justify-between sm:p-4">
           <Button variant="outline" className="min-h-11 border-black/15 bg-white text-black hover:bg-black hover:text-white sm:min-h-9" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <div className="grid gap-2 sm:flex sm:justify-end">
+          <div className="contents sm:flex sm:justify-end sm:gap-2">
             <Button
               variant="outline"
               className="min-h-11 border-black/15 bg-white text-black hover:bg-black hover:text-white sm:min-h-9"
@@ -284,11 +292,11 @@ function HowItWorksDialog({
               Back
             </Button>
             {isFinalStep ? (
-              <Button className="min-h-11 bg-black text-white hover:bg-black/85 sm:min-h-9" onClick={handleSignup}>
+              <Button className="col-span-2 min-h-11 bg-black text-white hover:bg-black/85 sm:min-h-9" onClick={handleSignup}>
                 Sign Up
               </Button>
             ) : (
-              <Button className="min-h-11 bg-black text-white hover:bg-black/85 sm:min-h-9" onClick={handleNext}>
+              <Button className="col-span-2 min-h-11 bg-black text-white hover:bg-black/85 sm:min-h-9" onClick={handleNext}>
                 Next
               </Button>
             )}
