@@ -12,6 +12,7 @@ import {
 
 const heroVideoUrl = "/media/salesframe-hero.mp4"
 const heroFallbackImageUrl = "/media/salesframe-hero-poster.png"
+const howItWorksStepOneImageUrl = "/media/salesframe-how-it-works-step-1.jpg"
 const contactEmail = "hello@salesframe.ai"
 const scrubSensitivity = 0.8
 const videoReadinessTimeoutMs = 3500
@@ -24,37 +25,39 @@ const howItWorksSteps = [
   {
     title: "Start with your selling world",
     body:
-      "Bring SalesFrame into the way your team already sells. Set up your workspace, tell us what you sell, and give the coach enough context to sound like it belongs in the room.",
-    note: "Good questions start with the world your sellers already know.",
+      "Set up your workspace, tell SalesFrame what you sell, and give the coach enough context to sound like it belongs in the room.",
+    imageUrl: howItWorksStepOneImageUrl,
+    imageAlt: "Two sales professionals reviewing SalesFrame on a laptop before a customer call.",
+    note: "Start with the selling world your team already knows.",
   },
   {
     title: "Add the accounts and opportunities that matter",
     body:
-      "Create them one by one, or bring them in from a CSV. SalesFrame turns the workspace into a clean selling map, so every call starts with context.",
+      "Create accounts one by one, or bring them in from a CSV. SalesFrame turns the workspace into a clean selling map.",
     note: "Less hunting around. More useful conversations.",
   },
   {
     title: "Let AI enrich the account",
     body:
-      "When there’s a website, SalesFrame can research the account, find useful signals, and shape sharper discovery angles before the conversation starts.",
+      "When there’s a website, SalesFrame can research the account, find useful signals, and shape sharper discovery angles.",
     note: "The call feels prepared before anyone says hello.",
   },
   {
     title: "Choose the playbooks you actually use",
     body:
-      "MEDDICC, BANT, Sandler, SPICED, Challenger, and more. SalesFrame keeps the methodology discipline in the background, so the seller gets one natural question at a time.",
-    note: "Strict methodology in the background. Human conversation up front.",
+      "MEDDICC, BANT, Sandler, SPICED, Challenger, and more. SalesFrame keeps the methodology discipline in the background.",
+    note: "Human conversation up front. Methodology quietly underneath.",
   },
   {
     title: "Capture the conversation live",
     body:
-      "SalesFrame listens as the call unfolds, keeps the transcript moving, and watches for the moments that change what should be asked next.",
+      "SalesFrame listens as the call unfolds, keeps the transcript moving, and watches for the moments that change the next move.",
     note: "The coach follows the call, not a rigid checklist.",
   },
   {
     title: "Ask the better next question",
     body:
-      "The coach reads the account, opportunity, playbooks, and live conversation flow, then gives the seller the next question that feels timely, useful, and human.",
+      "The coach reads the account, opportunity, playbooks, and conversation flow, then gives the seller one timely question.",
     note: "One better question can change the shape of the deal.",
   },
   {
@@ -209,7 +212,7 @@ function HowItWorksDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100svh-1rem)] overflow-x-hidden overflow-y-auto bg-white p-4 text-black sm:max-w-lg">
+      <DialogContent className="grid h-[min(720px,calc(100svh-1rem))] max-h-[calc(100svh-1rem)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-white p-4 text-black sm:max-w-lg">
         <DialogHeader className="sr-only">
           <DialogTitle>How SalesFrame works</DialogTitle>
           <DialogDescription>
@@ -217,20 +220,29 @@ function HowItWorksDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-0 gap-4">
-          <div
-            aria-hidden="true"
-            className="aspect-[16/9] rounded-lg bg-[linear-gradient(135deg,rgba(15,15,16,0.08),rgba(255,255,255,0.72))] ring-1 ring-black/10"
-          />
+        <div className="grid min-h-0 grid-rows-[160px_minmax(0,1fr)_auto] gap-4 sm:grid-rows-[240px_minmax(0,1fr)_auto]">
+          {activeStep.imageUrl ? (
+            <img
+              src={activeStep.imageUrl}
+              alt={activeStep.imageAlt ?? ""}
+              className="h-full w-full rounded-lg object-cover object-center ring-1 ring-black/10"
+              decoding="async"
+            />
+          ) : (
+            <div
+              aria-hidden="true"
+              className="h-full rounded-lg bg-[linear-gradient(135deg,rgba(15,15,16,0.08),rgba(255,255,255,0.72))] ring-1 ring-black/10"
+            />
+          )}
 
-          <div className="grid gap-3">
+          <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-black/45">
               Step {stepIndex + 1} of {howItWorksSteps.length}
             </p>
-            <h2 className="font-heading text-2xl leading-tight tracking-tight text-black sm:text-3xl">
+            <h2 className="font-heading text-2xl leading-tight tracking-tight text-black sm:text-[1.7rem]">
               {activeStep.title}
             </h2>
-            <p className="text-base leading-7 text-black/70">{activeStep.body}</p>
+            <p className="text-sm leading-6 text-black/70 sm:text-base sm:leading-7">{activeStep.body}</p>
             <p className="rounded-lg bg-black/[0.04] p-3 text-sm leading-6 text-black/60">
               {activeStep.note}
             </p>
