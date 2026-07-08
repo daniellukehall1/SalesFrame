@@ -15,9 +15,9 @@ Think like a combined product, engineering, security, and design review team fro
 
 ## Non-negotiable operating rules
 
-- Do not push to GitHub.
+- Push to GitHub only when the user explicitly asks for a commit/push.
 - Do not create or merge pull requests.
-- Do not trigger Netlify deploys.
+- Trigger Netlify deploys only when the user explicitly asks for a deploy.
 - Do not run production database migrations.
 - Do not modify production data.
 - Do not commit secrets, credentials, tokens, API keys, auth cookies, or `.env` files.

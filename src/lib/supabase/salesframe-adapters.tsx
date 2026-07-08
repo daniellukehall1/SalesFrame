@@ -13,6 +13,8 @@ import { createStarterOpportunity } from "@/lib/record-factories"
 import {
   defaultCustomerResearch,
   defaultSellerResearchProfile,
+  MAX_LIVE_CALL_SECONDS,
+  normalizeCallEndedReason,
   normalizeCurrencyCode,
   type AccountDraft,
   type CallSummary,
@@ -193,7 +195,9 @@ export function mapCallRowsToSummaries(calls: CallRow[]): CallSummary[] {
     title: call.title,
     date: formatCallDate(call.started_at ?? call.created_at),
     duration: formatCallDuration(call.duration_seconds),
+    durationLimitSeconds: call.duration_limit_seconds ?? MAX_LIVE_CALL_SECONDS,
     durationSeconds: call.duration_seconds ?? 0,
+    endedReason: normalizeCallEndedReason(call.ended_reason),
     recordingError: call.recording_error,
     recordingMimeType: call.recording_mime_type,
     recordingReadyAt: call.recording_ready_at,
@@ -512,8 +516,12 @@ function formatCallDate(value: string) {
 function formatCallDuration(value: number | null) {
   if (!value) return "Live"
 
-  const minutes = Math.floor(value / 60)
+  const hours = Math.floor(value / 3600)
+  const minutes = Math.floor((value % 3600) / 60)
   const seconds = value % 60
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+  }
 
   return `${minutes}:${seconds.toString().padStart(2, "0")}`
 }

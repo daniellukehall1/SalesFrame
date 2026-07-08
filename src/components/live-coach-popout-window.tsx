@@ -225,8 +225,15 @@ export function LiveCoachPopoutWindow({ darkMode }: { darkMode: boolean }) {
               <p className="truncate text-xs text-muted-foreground">{statusLabel}</p>
             </div>
           </div>
-          <div className="rounded-md bg-muted/40 px-2 py-1 text-xs font-medium text-muted-foreground">
-            {formatPopoutTime(snapshot.elapsedSeconds)}
+          <div className="grid justify-items-end gap-0.5">
+            <div className="rounded-md bg-muted/40 px-2 py-1 text-xs font-medium text-muted-foreground">
+              {formatPopoutTime(snapshot.elapsedSeconds)}
+            </div>
+            {snapshot.limitNotice ? (
+              <p className="text-[0.7rem] font-medium text-amber-700 dark:text-amber-300">
+                {snapshot.limitNotice}
+              </p>
+            ) : null}
           </div>
         </header>
 
@@ -339,8 +346,10 @@ function getCoachPopoutStatusLabel(status: LiveCoachPopoutCallStatus) {
 }
 
 function formatPopoutTime(value: number) {
-  const minutes = String(Math.floor(value / 60)).padStart(2, "0")
+  const hours = Math.floor(value / 3600)
+  const minutes = String(Math.floor((value % 3600) / 60)).padStart(2, "0")
   const seconds = String(value % 60).padStart(2, "0")
+  if (hours > 0) return `${hours}:${minutes}:${seconds}`
 
   return `${minutes}:${seconds}`
 }

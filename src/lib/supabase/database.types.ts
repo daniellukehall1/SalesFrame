@@ -376,6 +376,8 @@ export type Database = {
           status: Database["public"]["Enums"]["call_status"]
           started_at: string | null
           ended_at: string | null
+          ended_reason: string
+          duration_limit_seconds: number
           duration_seconds: number | null
           recording_error: string | null
           recording_mime_type: string | null
@@ -402,6 +404,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["call_status"]
           started_at?: string | null
           ended_at?: string | null
+          ended_reason?: string
+          duration_limit_seconds?: number
           duration_seconds?: number | null
           recording_error?: string | null
           recording_mime_type?: string | null
@@ -428,6 +432,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["call_status"]
           started_at?: string | null
           ended_at?: string | null
+          ended_reason?: string
+          duration_limit_seconds?: number
           duration_seconds?: number | null
           recording_error?: string | null
           recording_mime_type?: string | null

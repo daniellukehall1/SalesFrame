@@ -197,6 +197,16 @@
   font-family: var(--font-body);
 }
 
+.salesframe-how-it-works-body {
+  display: -webkit-box;
+  height: 3rem;
+  min-height: 3rem;
+  max-height: 3rem;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .landing-hero-copy {
   font-size: clamp(24px, 7vw, 31px);
   font-weight: 400;

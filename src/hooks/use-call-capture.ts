@@ -24,7 +24,13 @@ import {
   updateTranscriptSegment,
   uploadCallRecording,
 } from "@/lib/supabase/salesframe-data"
-import type { CallAudioCaptureMode, RecordingLifecycleStatus, TranscriptSpeaker } from "@/lib/salesframe-core"
+import {
+  MAX_LIVE_CALL_SECONDS,
+  type CallAudioCaptureMode,
+  type CallEndedReason,
+  type RecordingLifecycleStatus,
+  type TranscriptSpeaker,
+} from "@/lib/salesframe-core"
 import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
 import {
   appendTranscriptDelta,
@@ -85,7 +91,16 @@ export type CallCaptureTranscriptLine = {
 type StartCallCaptureConfig = {
   abortSignal?: AbortSignal
   audioCaptureMode: CallAudioCaptureMode
+  audioInputDeviceId?: string
+  audioInputDeviceLabel?: string
+  audioOutputDeviceId?: string
+  audioOutputDeviceLabel?: string
   callId: string
+  preparedMeetingAudio?: {
+    level?: number
+    stream: MediaStream
+    surface?: string
+  }
   startedAt: string
   workspaceId: string
   onTranscript?: (line: CallCaptureTranscriptLine) => void
@@ -95,6 +110,7 @@ type StartCallCaptureConfig = {
 export type CallCaptureStopResult = {
   callId: string
   durationSeconds: number
+  endedReason: CallEndedReason
   endedAt: string
   recordingError: string | null
   recordingMimeType: string | null
@@ -103,6 +119,10 @@ export type CallCaptureStopResult = {
   recordingStatus: RecordingLifecycleStatus
   recordingStoragePath: string | null
   recordingUrl: string | null
+}
+
+type StopCallCaptureOptions = {
+  endedReason?: CallEndedReason
 }
 
 type SpeakerAttribution = {
@@ -235,7 +255,7 @@ export function useCallCapture() {
           source.stream.getAudioTracks().length > 0 && isAudibleVoiceLevel(source.level)
         )
         const mixedRoomReady = mixedSources.some((source) => source.stream.getAudioTracks().length > 0)
-        const warnings = basePreflight.warnings.filter((warning) => warning !== "Buyer audio looks silent. Check the shared audio source.")
+        const warnings = basePreflight.warnings.filter((warning) => warning !== "Shared audio looks silent. Check the shared audio source.")
 
         if (basePreflight.requiredCustomerAudio && sellerMicHot && !buyerAudioReady) {
           silentBuyerChecks += 1
@@ -244,7 +264,7 @@ export function useCallCapture() {
         }
 
         if (silentBuyerChecks >= 2) {
-          warnings.push("Buyer audio looks silent. Check the shared audio source.")
+          warnings.push("Shared audio looks silent. Check the shared audio source.")
         }
 
         setAudioPreflight((currentPreflight) => {
@@ -291,7 +311,13 @@ export function useCallCapture() {
 
       try {
         throwIfCallStartCancelled(config.abortSignal)
-        const { preflight, sources } = await runAudioPreflight(config.audioCaptureMode)
+        const { preflight, sources } = await runAudioPreflight(config.audioCaptureMode, {
+          inputDeviceId: config.audioInputDeviceId,
+          inputDeviceLabel: config.audioInputDeviceLabel,
+          outputDeviceId: config.audioOutputDeviceId,
+          outputDeviceLabel: config.audioOutputDeviceLabel,
+          preparedMeetingAudio: config.preparedMeetingAudio,
+        })
         sourceStreamsRef.current = sources.map((source) => source.stream)
         throwIfCallStartCancelled(config.abortSignal)
         setAudioPreflight(preflight)
@@ -301,12 +327,16 @@ export function useCallCapture() {
         await updateCall(config.callId, {
           audio_preflight: preflight,
           audio_source_summary: sources.map(summarizeAudioSource),
+          duration_limit_seconds: MAX_LIVE_CALL_SECONDS,
+          ended_reason: "seller_stopped",
         })
         throwIfCallStartCancelled(config.abortSignal)
 
         await updateCall(config.callId, {
           recording_error: null,
           recording_status: "recording",
+          duration_limit_seconds: MAX_LIVE_CALL_SECONDS,
+          ended_reason: "seller_stopped",
         }).catch(() => undefined)
 
         const recordingStream = createRecordingStream(sources)
@@ -599,6 +629,7 @@ export function useCallCapture() {
                 audio_source_summary: failedPreflight.sources,
               }
             : {}),
+          ended_reason: config.abortSignal?.aborted ? "start_cancelled" : "start_failed",
           status: "needs_attention",
         }).catch(() => undefined)
         throw caughtError
@@ -607,9 +638,10 @@ export function useCallCapture() {
     [cleanup, startLiveAudioHealthMonitoring]
   )
 
-  const stopCall = React.useCallback(async (): Promise<CallCaptureStopResult | null> => {
+  const stopCall = React.useCallback(async (options: StopCallCaptureOptions = {}): Promise<CallCaptureStopResult | null> => {
     if (stopInFlightRef.current) return null
     stopInFlightRef.current = true
+    const endedReason = options.endedReason ?? "seller_stopped"
 
     const config = activeConfigRef.current
     if (!config) {
@@ -654,7 +686,9 @@ export function useCallCapture() {
     try {
       await updateCall(config.callId, {
         duration_seconds: durationSeconds,
+        duration_limit_seconds: MAX_LIVE_CALL_SECONDS,
         ended_at: endedAt,
+        ended_reason: endedReason,
         status: "processing",
       })
     } catch (caughtError: unknown) {
@@ -733,6 +767,7 @@ export function useCallCapture() {
     return {
       callId: config.callId,
       durationSeconds,
+      endedReason,
       endedAt,
       recordingError,
       recordingMimeType,
@@ -767,6 +802,7 @@ export function useCallCapture() {
     if (targetCallId) {
       await updateCall(targetCallId, {
         ended_at: new Date().toISOString(),
+        ended_reason: "start_cancelled",
         status: "archived",
       }).catch(() => undefined)
     }
@@ -1498,10 +1534,10 @@ function getSpeakerRole(speaker: TranscriptSpeaker) {
 
 function getAudioSourceLabel(kind: AudioSourceKind) {
   if (kind === "seller_mic") return "Seller microphone"
-  if (kind === "meeting_audio") return "Meeting app/tab audio"
-  if (kind === "in_person_microphone") return "In-person microphone"
+  if (kind === "meeting_audio") return "Shared audio"
+  if (kind === "in_person_microphone") return "Room/call audio"
 
-  return "Mixed audio"
+  return "Room/call audio"
 }
 
 function stopRecorder(recorder: MediaRecorder | null, chunks: Blob[]) {

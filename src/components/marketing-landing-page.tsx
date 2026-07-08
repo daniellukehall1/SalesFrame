@@ -29,7 +29,7 @@ const desktopTypedIntro =
 
 const howItWorksSteps = [
   {
-    title: "Start with your selling world",
+    title: "Start with your world",
     body:
       "Set up your workspace, tell SalesFrame what you sell, and give the coach enough context to sound like it belongs in the room.",
     imageUrl: howItWorksStepOneImageUrl,
@@ -37,7 +37,7 @@ const howItWorksSteps = [
     note: "Start with the selling world your team already knows.",
   },
   {
-    title: "Add the accounts that matter",
+    title: "Add key accounts",
     body:
       "Create accounts one by one, or bring them in from a CSV. SalesFrame turns the workspace into a clean selling map.",
     imageUrl: howItWorksStepTwoImageUrl,
@@ -45,7 +45,7 @@ const howItWorksSteps = [
     note: "Less hunting around. More useful conversations.",
   },
   {
-    title: "Let AI enrich the account",
+    title: "Enrich the account",
     body:
       "When there’s a website, SalesFrame can research the account, find useful signals, and shape sharper discovery angles.",
     imageUrl: howItWorksStepThreeImageUrl,
@@ -53,7 +53,7 @@ const howItWorksSteps = [
     note: "The call feels prepared before anyone says hello.",
   },
   {
-    title: "Choose the playbooks you actually use",
+    title: "Choose your playbooks",
     body:
       "Choose MEDDICC, BANT, Sandler, SPICED, Challenger, and more. SalesFrame keeps one natural question in front.",
     imageUrl: howItWorksStepFourImageUrl,
@@ -61,15 +61,15 @@ const howItWorksSteps = [
     note: "Methodology stays quietly underneath.",
   },
   {
-    title: "Capture the conversation live",
+    title: "Capture calls live",
     body:
-      "SalesFrame listens as the call unfolds, keeps the transcript moving, and watches for the moments that change the next move.",
+      "SalesFrame listens as the call unfolds, keeps the transcript moving, and spots when the next move should change.",
     imageUrl: howItWorksStepFiveImageUrl,
     imageAlt: "Seller on a live customer video call while SalesFrame captures the conversation.",
     note: "The coach follows the call, not a rigid checklist.",
   },
   {
-    title: "Ask the better next question",
+    title: "Ask the next question",
     body:
       "The coach reads the account, opportunity, playbooks, and conversation flow, then gives the seller one timely question.",
     imageUrl: howItWorksStepSixImageUrl,
@@ -77,7 +77,7 @@ const howItWorksSteps = [
     note: "One better question can change the shape of the deal.",
   },
   {
-    title: "Leave the call with the work already shaped",
+    title: "Leave with next steps",
     body:
       "After the call, SalesFrame helps turn the conversation into notes, evidence, follow-up, and prep for the next meeting.",
     imageUrl: howItWorksStepSevenImageUrl,
@@ -231,7 +231,7 @@ function HowItWorksDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="grid h-[min(78svh,36rem)] max-h-[calc(100svh-1rem)] w-[min(calc(100vw-1.25rem),30rem)] grid-rows-[minmax(0,1fr)_auto] gap-0 overflow-hidden bg-white p-0 text-black max-sm:rounded-2xl max-sm:overflow-hidden sm:h-[40rem] sm:max-w-lg"
+        className="grid h-[min(72svh,31rem)] max-h-[calc(100svh-1rem)] w-[min(calc(100vw-1.25rem),30rem)] grid-rows-[minmax(0,1fr)_auto] gap-0 overflow-hidden bg-white p-0 text-black max-sm:rounded-2xl max-sm:overflow-hidden sm:h-[36rem] sm:max-w-lg"
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <DialogHeader className="sr-only">
@@ -242,7 +242,7 @@ function HowItWorksDialog({
         </DialogHeader>
 
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden p-3 sm:gap-4 sm:p-4">
-          <div className="h-36 shrink-0 overflow-hidden rounded-xl bg-black/[0.04] ring-1 ring-black/10 sm:h-48">
+          <div className="h-32 shrink-0 overflow-hidden rounded-xl bg-black/[0.04] ring-1 ring-black/10 sm:h-44">
             {activeStep.imageUrl ? (
               <img
                 src={activeStep.imageUrl}
@@ -263,10 +263,10 @@ function HowItWorksDialog({
               <p className="text-xs font-medium uppercase tracking-[0.18em] text-black/45">
                 Step {stepIndex + 1} of {howItWorksSteps.length}
               </p>
-              <h2 className="font-heading text-xl leading-tight tracking-tight text-black sm:text-[1.7rem]">
+              <h2 className="overflow-hidden text-ellipsis whitespace-nowrap font-heading text-xl leading-tight tracking-tight text-black sm:text-[1.7rem]">
                 {activeStep.title}
               </h2>
-              <p className="text-sm leading-6 text-black/70 sm:text-[0.95rem]">{activeStep.body}</p>
+              <p className="salesframe-how-it-works-body text-sm leading-6 text-black/70 sm:text-[0.95rem]">{activeStep.body}</p>
               <p className="rounded-lg bg-black/[0.04] p-2.5 text-sm leading-6 text-black/60 sm:p-3">
                 {activeStep.note}
               </p>

@@ -147,7 +147,23 @@ import {
   type CallCaptureStatus,
 } from "@/hooks/use-call-capture"
 import { useIsMobile } from "@/hooks/use-mobile"
-import type { AudioPreflightResult } from "@/lib/call-audio-preflight"
+import {
+  calculateAudioRms,
+  getMeetingAudioDisplayOptions,
+  getMicrophoneAudioConstraints,
+  type AudioPreflightResult,
+} from "@/lib/call-audio-preflight"
+import {
+  enumerateAudioDevices,
+  getDefaultAudioDeviceId,
+  playAudioOutputTest,
+  readPreferredAudioInputDeviceId,
+  readPreferredAudioOutputDeviceId,
+  selectAudioOutputDevice,
+  writePreferredAudioInputDeviceId,
+  writePreferredAudioOutputDeviceId,
+  type AudioDeviceOption,
+} from "@/lib/audio-device-setup"
 import { sectionCards, viewLabels } from "@/data/navigation-content"
 import { formatCurrencyAmount } from "@/lib/currency-utils"
 import { makeFailedRowsCsv, type CsvImportType } from "@/lib/csv-import"
@@ -305,9 +321,13 @@ import {
   defaultCallPlaybooks,
   defaultCustomerResearch,
   defaultSellerResearchProfile,
+  LIVE_CALL_FINAL_WARNING_SECONDS,
+  LIVE_CALL_WARNING_SECONDS,
+  MAX_LIVE_CALL_SECONDS,
   normalizeCurrencyCode,
   workspaceDataStateOptions,
   type AccountDraft,
+  type CallEndedReason,
   type CallSummary,
   type CallAudioCaptureMode,
   type CallPlaybook,
@@ -1977,6 +1997,19 @@ const authConnectionUnavailableMessage =
   "SalesFrame cannot reach sign-in right now. Try again in a moment."
 const callCaptureStartupTimeoutMs = 30000
 
+function getLiveCallRemainingSeconds(elapsedSeconds: number, durationLimitSeconds = MAX_LIVE_CALL_SECONDS) {
+  return Math.max(0, durationLimitSeconds - Math.max(0, elapsedSeconds))
+}
+
+function getLiveCallLimitNotice(elapsedSeconds: number, durationLimitSeconds = MAX_LIVE_CALL_SECONDS) {
+  const remainingSeconds = getLiveCallRemainingSeconds(elapsedSeconds, durationLimitSeconds)
+
+  if (remainingSeconds <= LIVE_CALL_FINAL_WARNING_SECONDS) return "Wrapping up soon"
+  if (remainingSeconds <= LIVE_CALL_WARNING_SECONDS) return `${Math.ceil(remainingSeconds / 60)} min left`
+
+  return ""
+}
+
 function App() {
   const supabase = React.useMemo(() => createOptionalSupabaseClient(), [])
   const [activeView, setActiveView] = React.useState("home")
@@ -2097,6 +2130,8 @@ function App() {
   const activeOpportunityIdRef = React.useRef(activeOpportunityId)
   const activeCallIdRef = React.useRef(activeCallId)
   const isCallLiveRef = React.useRef(isCallLive)
+  const callLimitAutoStopRef = React.useRef(false)
+  const stopActiveCallRef = React.useRef<((endedReason: CallEndedReason) => void) | null>(null)
   const speakerIdentitiesRef = React.useRef(speakerIdentities)
   const transcriptRef = React.useRef(transcript)
   const workspaceDataStateRef = React.useRef(workspaceDataState)
@@ -2750,13 +2785,24 @@ function App() {
 
   React.useEffect(() => {
     if (!isCallLive) return
+    const startedAtMs = Date.parse(activeCallStartedAt)
+    const refreshElapsed = () => {
+      if (Number.isFinite(startedAtMs)) {
+        setElapsed(Math.max(0, Math.round((Date.now() - startedAtMs) / 1000)))
+        return
+      }
+
+      setElapsed((value) => value + 1)
+    }
 
     const interval = window.setInterval(() => {
-      setElapsed((value) => value + 1)
+      refreshElapsed()
     }, 1000)
 
+    refreshElapsed()
+
     return () => window.clearInterval(interval)
-  }, [isCallLive])
+  }, [activeCallStartedAt, isCallLive])
 
   React.useEffect(() => {
     setManualCoachState({
@@ -3225,7 +3271,10 @@ function App() {
     }
   }
 
-  const handleRecordingChange = async (recording: boolean) => {
+  const handleRecordingChange = async (
+    recording: boolean,
+    options: { endedReason?: CallEndedReason } = {}
+  ) => {
     if (recording) {
       return
     }
@@ -3245,7 +3294,9 @@ function App() {
     try {
       setIsStoppingCall(true)
       setPostCallError("")
-      const stoppedCall = await callCapture.stopCall()
+      const stoppedCall = await callCapture.stopCall({
+        endedReason: options.endedReason ?? "seller_stopped",
+      })
       stoppedCallId = stoppedCall?.callId ?? stoppingCallId
       setPostCallFocusCallId(stoppedCallId)
       if (stoppedCall) {
@@ -3255,7 +3306,9 @@ function App() {
               ? {
                   ...call,
                   duration: formatTime(stoppedCall.durationSeconds),
+                  durationLimitSeconds: call.durationLimitSeconds || MAX_LIVE_CALL_SECONDS,
                   durationSeconds: stoppedCall.durationSeconds,
+                  endedReason: stoppedCall.endedReason,
                   recordingError: stoppedCall.recordingError ?? call.recordingError,
                   recordingMimeType: stoppedCall.recordingMimeType ?? call.recordingMimeType,
                   recordingReadyAt: stoppedCall.recordingReadyAt ?? call.recordingReadyAt,
@@ -3300,6 +3353,46 @@ function App() {
       setPostCallGenerating(false)
     }
   }
+
+  React.useEffect(() => {
+    stopActiveCallRef.current = (endedReason: CallEndedReason) => {
+      void handleRecordingChange(false, { endedReason })
+    }
+  })
+
+  React.useEffect(() => {
+    if (!isCallLive || !activeCallId || !activeCallStartedAt) {
+      callLimitAutoStopRef.current = false
+      return
+    }
+
+    const startedAtMs = Date.parse(activeCallStartedAt)
+    if (!Number.isFinite(startedAtMs)) return
+
+    const deadlineMs = startedAtMs + MAX_LIVE_CALL_SECONDS * 1000
+    const checkDeadline = () => {
+      if (Date.now() < deadlineMs) return
+      if (callLimitAutoStopRef.current) return
+
+      callLimitAutoStopRef.current = true
+      stopActiveCallRef.current?.("time_limit_reached")
+    }
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === "hidden") return
+      checkDeadline()
+    }
+    const interval = window.setInterval(checkDeadline, 1000)
+
+    checkDeadline()
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus)
+    window.addEventListener("focus", handleVisibilityOrFocus)
+
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus)
+      window.removeEventListener("focus", handleVisibilityOrFocus)
+    }
+  }, [activeCallId, activeCallStartedAt, isCallLive])
 
   const handleTranscriptSpeakerChange = async (segmentId: string, speaker: TranscriptSpeaker) => {
     if (!activeCallId || !segmentId) return
@@ -3614,6 +3707,8 @@ function App() {
         opportunity_id: opportunityId,
         title: `${payload.callType} call`,
         call_type: payload.callType,
+        duration_limit_seconds: MAX_LIVE_CALL_SECONDS,
+        ended_reason: "seller_stopped",
         status: "active",
         started_at: startedAt,
         retention_expires_at: createRetentionExpiry(),
@@ -3703,7 +3798,12 @@ function App() {
       const captureStartPromise = callCapture.startCall({
         abortSignal: captureAbortController.signal,
         audioCaptureMode: payload.audioCaptureMode,
+        audioInputDeviceId: payload.audioInputDeviceId,
+        audioInputDeviceLabel: payload.audioInputDeviceLabel,
+        audioOutputDeviceId: payload.audioOutputDeviceId,
+        audioOutputDeviceLabel: payload.audioOutputDeviceLabel,
         callId: call.id,
+        preparedMeetingAudio: payload.preparedMeetingAudio,
         startedAt,
         workspaceId: activeWorkspaceId,
         onTranscript: (line) =>
@@ -3775,6 +3875,7 @@ function App() {
       setTranscript([])
       setNotes([])
       setElapsed(0)
+      callLimitAutoStopRef.current = false
 
       if (payload.customerResearch.enabled) {
         void requestCustomerResearch({
@@ -3916,6 +4017,7 @@ function App() {
           try {
             await updateSupabaseCall(createdCallId, {
               ended_at: new Date().toISOString(),
+              ended_reason: "start_cancelled",
               status: "archived",
             })
           } catch {
@@ -4009,6 +4111,7 @@ function App() {
         try {
           await updateSupabaseCall(createdCallId, {
             ended_at: new Date().toISOString(),
+            ended_reason: captureStarted ? "seller_stopped" : "start_failed",
             status: captureStarted ? "needs_attention" : "archived",
           })
         } catch {
@@ -5425,6 +5528,7 @@ function App() {
               <CommandBar
                 account={activeAccount}
                 callType={callType}
+                durationLimitSeconds={MAX_LIVE_CALL_SECONDS}
                 elapsed={elapsed}
                 isRecording={canStopActiveCall}
                 isStopping={isStoppingCall || callCapture.status === "stopping"}
@@ -6687,6 +6791,7 @@ function GlobalSearch({
 function CommandBar({
   account,
   callType,
+  durationLimitSeconds,
   elapsed,
   isRecording,
   isStopping,
@@ -6699,6 +6804,7 @@ function CommandBar({
 }: {
   account: AccountNavItem
   callType: string
+  durationLimitSeconds: number
   elapsed: number
   isRecording: boolean
   isStopping: boolean
@@ -6709,6 +6815,9 @@ function CommandBar({
   onRecordingChange: (value: boolean) => void
   onViewChange: (value: string) => void
 }) {
+  const limitNotice = isRecording ? getLiveCallLimitNotice(elapsed, durationLimitSeconds) : ""
+  const isFinalLimitNotice = getLiveCallRemainingSeconds(elapsed, durationLimitSeconds) <= LIVE_CALL_FINAL_WARNING_SECONDS
+
   return (
     <div className="grid gap-3 rounded-lg bg-muted/30 px-3 py-2 lg:grid-cols-[1fr_auto] lg:items-center">
       <div className="min-w-0">
@@ -6733,12 +6842,22 @@ function CommandBar({
           </SelectContent>
         </Select>
         <CallPrepDialog opportunity={opportunity} opportunityDraft={opportunityDraft} onViewChange={onViewChange} />
-        <div
-          className="inline-flex h-9 min-w-0 items-center gap-2 rounded-lg border bg-background px-3 text-sm font-medium text-muted-foreground"
-          aria-label={`Elapsed call time ${formatTime(elapsed)}`}
-        >
-          <Clock3Icon />
-          <span>{formatTime(elapsed)}</span>
+        <div className="grid min-w-0 gap-1">
+          <div
+            className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-lg border bg-background px-2.5 text-sm font-medium text-muted-foreground"
+            aria-label={`Elapsed call time ${formatTime(elapsed)}`}
+          >
+            <Clock3Icon className="size-4" />
+            <span>{formatTime(elapsed)}</span>
+          </div>
+          {limitNotice ? (
+            <p className={cn(
+              "px-1 text-xs font-medium",
+              isFinalLimitNotice ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"
+            )}>
+              {limitNotice}
+            </p>
+          ) : null}
         </div>
         {isRecording ? (
           <Button
@@ -6952,6 +7071,156 @@ function StartCallPreparingView({
   )
 }
 
+type AudioSetupStatus = "idle" | "checking" | "listening" | "quiet" | "blocked" | "unsupported"
+
+function useMediaStreamLevel(stream: MediaStream | null) {
+  const [level, setLevel] = React.useState(0)
+
+  React.useEffect(() => {
+    if (!stream || stream.getAudioTracks().length === 0) {
+      setLevel(0)
+      return
+    }
+
+    const AudioContextCtor =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+
+    if (!AudioContextCtor) {
+      setLevel(0)
+      return
+    }
+
+    let active = true
+    let audioContext: AudioContext | null = null
+    let animationFrameId = 0
+
+    const startMeter = async () => {
+      audioContext = new AudioContextCtor()
+      if (audioContext.state === "suspended") {
+        await audioContext.resume().catch(() => undefined)
+      }
+      if (!active || !audioContext) return
+
+      const sourceNode = audioContext.createMediaStreamSource(stream)
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = 1024
+      const samples = new Uint8Array(analyser.fftSize)
+
+      sourceNode.connect(analyser)
+
+      const tick = () => {
+        if (!active) return
+
+        analyser.getByteTimeDomainData(samples)
+        setLevel(Number(calculateAudioRms(samples).toFixed(4)))
+        animationFrameId = window.requestAnimationFrame(tick)
+      }
+
+      tick()
+    }
+
+    void startMeter()
+
+    return () => {
+      active = false
+      if (animationFrameId) window.cancelAnimationFrame(animationFrameId)
+      void audioContext?.close().catch(() => undefined)
+    }
+  }, [stream])
+
+  return level
+}
+
+function AudioSetupMeter({
+  detail,
+  label,
+  level,
+  status,
+}: {
+  detail: string
+  label: string
+  level: number
+  status: AudioSetupStatus
+}) {
+  const meterValue = Math.max(3, Math.min(100, Math.round(level * 1600)))
+  const isActive = status === "listening"
+  const isBlocked = status === "blocked" || status === "unsupported"
+  const statusLabel: Record<AudioSetupStatus, string> = {
+    blocked: "Blocked",
+    checking: "Checking",
+    idle: "Not selected",
+    listening: "Listening",
+    quiet: "Quiet",
+    unsupported: "Unavailable",
+  }
+
+  return (
+    <div className="grid min-w-0 gap-1.5">
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
+        <p
+          className={cn(
+            "shrink-0 text-xs font-medium",
+            isActive && "text-emerald-700",
+            status === "quiet" && "text-amber-700",
+            isBlocked && "text-destructive"
+          )}
+        >
+          {statusLabel[status]}
+        </p>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn(
+            "h-full rounded-full transition-[width,background-color] duration-150",
+            isActive
+              ? "bg-emerald-500"
+              : status === "quiet"
+                ? "bg-amber-500"
+                : isBlocked
+                  ? "bg-destructive"
+                  : "bg-muted-foreground/30"
+          )}
+          style={{ width: `${meterValue}%` }}
+        />
+      </div>
+      <p className="truncate text-xs text-muted-foreground">{detail}</p>
+    </div>
+  )
+}
+
+function getAudioSetupStatus({
+  error,
+  isChecking,
+  level,
+  stream,
+  unsupported,
+}: {
+  error?: string
+  isChecking: boolean
+  level: number
+  stream: MediaStream | null
+  unsupported?: boolean
+}): AudioSetupStatus {
+  if (unsupported) return "unsupported"
+  if (error) return "blocked"
+  if (isChecking) return "checking"
+  if (!stream) return "idle"
+
+  return level >= 0.018 ? "listening" : "quiet"
+}
+
+function stopMediaStream(stream: MediaStream | null) {
+  stream?.getTracks().forEach((track) => track.stop())
+}
+
+function getAudioDeviceDisplayName(deviceId: string, devices: AudioDeviceOption[], fallback: string) {
+  const device = devices.find((item) => item.deviceId === deviceId)
+
+  return device?.label || fallback
+}
+
 function StartRecordingDialog({
   accounts,
   accountResearchById,
@@ -7030,11 +7299,33 @@ function StartRecordingDialog({
     React.useState<"idle" | "loading" | "success" | "error">("idle")
   const [customerContact, setCustomerContact] = React.useState("")
   const [customerRole, setCustomerRole] = React.useState("")
+  const [audioInputDevices, setAudioInputDevices] = React.useState<AudioDeviceOption[]>([])
+  const [audioOutputDevices, setAudioOutputDevices] = React.useState<AudioDeviceOption[]>([])
+  const [selectedAudioInputDeviceId, setSelectedAudioInputDeviceId] = React.useState(() =>
+    readPreferredAudioInputDeviceId(workspaceId)
+  )
+  const [selectedAudioOutputDeviceId, setSelectedAudioOutputDeviceId] = React.useState(() =>
+    readPreferredAudioOutputDeviceId(workspaceId)
+  )
+  const [audioOutputSupport, setAudioOutputSupport] = React.useState({
+    canSelectAudioOutput: false,
+    canSetAudioSink: false,
+  })
+  const [microphonePreviewStream, setMicrophonePreviewStream] = React.useState<MediaStream | null>(null)
+  const [microphonePreviewError, setMicrophonePreviewError] = React.useState("")
+  const [microphonePreviewChecking, setMicrophonePreviewChecking] = React.useState(false)
+  const [meetingAudioPreviewStream, setMeetingAudioPreviewStream] = React.useState<MediaStream | null>(null)
+  const [meetingAudioPreviewError, setMeetingAudioPreviewError] = React.useState("")
+  const [meetingAudioSurface, setMeetingAudioSurface] = React.useState<string | undefined>()
+  const [meetingAudioSelecting, setMeetingAudioSelecting] = React.useState(false)
+  const [speakerTestMessage, setSpeakerTestMessage] = React.useState("")
   const sellerDomainLookupSequenceRef = React.useRef(0)
   const sellerDomainLookupTimeoutRef = React.useRef<number | null>(null)
   const startProgressTimerRef = React.useRef<number | null>(null)
   const startProgressTargetRef = React.useRef(0)
   const startAbortControllerRef = React.useRef<AbortController | null>(null)
+  const microphonePreviewStreamRef = React.useRef<MediaStream | null>(null)
+  const meetingAudioPreviewStreamRef = React.useRef<MediaStream | null>(null)
 
   const selectedAccount = accounts.find((account) => account.id === accountId)
   const selectedOpportunity = opportunities.find((opportunity) => opportunity.id === opportunityId)
@@ -7054,6 +7345,33 @@ function StartRecordingDialog({
   const canStart = canContinueAccount && canContinueOpportunity && canContinueCall && canUseResearch && canUseOpenAi
   const canContinue = step === 1 ? canContinueAccount : step === 2 ? canContinueOpportunity : canContinueCall
   const selectedAudioSourceChoice = getAudioSourceChoice(audioCaptureMode)
+  const microphonePreviewLevel = useMediaStreamLevel(microphonePreviewStream)
+  const meetingAudioPreviewLevel = useMediaStreamLevel(meetingAudioPreviewStream)
+  const selectedAudioInputLabel = getAudioDeviceDisplayName(
+    selectedAudioInputDeviceId,
+    audioInputDevices,
+    "Default microphone"
+  )
+  const selectedAudioOutputLabel = getAudioDeviceDisplayName(
+    selectedAudioOutputDeviceId,
+    audioOutputDevices,
+    "System speaker"
+  )
+  const microphoneSetupStatus = getAudioSetupStatus({
+    error: microphonePreviewError,
+    isChecking: microphonePreviewChecking,
+    level: microphonePreviewLevel,
+    stream: microphonePreviewStream,
+    unsupported: typeof navigator !== "undefined" && !navigator.mediaDevices?.getUserMedia,
+  })
+  const sharedAudioSetupStatus = getAudioSetupStatus({
+    error: meetingAudioPreviewError,
+    isChecking: meetingAudioSelecting,
+    level: meetingAudioPreviewLevel,
+    stream: meetingAudioPreviewStream,
+    unsupported: typeof navigator !== "undefined" && !navigator.mediaDevices?.getDisplayMedia,
+  })
+  const supportsSpeakerCheck = audioOutputSupport.canSelectAudioOutput || audioOutputSupport.canSetAudioSink
   const accountSummary =
     accountMode === "new" ? accountName.trim() || "New account" : selectedAccount?.name ?? "Selected account"
   const opportunitySummary =
@@ -7124,6 +7442,127 @@ function StartRecordingDialog({
     },
   ]
 
+  const refreshAudioDevices = React.useCallback(async () => {
+    try {
+      const inventory = await enumerateAudioDevices()
+
+      setAudioInputDevices(inventory.audioInputs)
+      setAudioOutputDevices(inventory.audioOutputs)
+      setAudioOutputSupport({
+        canSelectAudioOutput: inventory.canSelectAudioOutput,
+        canSetAudioSink: inventory.canSetAudioSink,
+      })
+
+      if (
+        selectedAudioInputDeviceId !== getDefaultAudioDeviceId() &&
+        inventory.audioInputs.length > 0 &&
+        !inventory.audioInputs.some((device) => device.deviceId === selectedAudioInputDeviceId)
+      ) {
+        setSelectedAudioInputDeviceId(getDefaultAudioDeviceId())
+      }
+      if (
+        selectedAudioOutputDeviceId !== getDefaultAudioDeviceId() &&
+        inventory.audioOutputs.length > 0 &&
+        !inventory.audioOutputs.some((device) => device.deviceId === selectedAudioOutputDeviceId)
+      ) {
+        setSelectedAudioOutputDeviceId(getDefaultAudioDeviceId())
+      }
+    } catch {
+      setAudioInputDevices([])
+      setAudioOutputDevices([])
+    }
+  }, [selectedAudioInputDeviceId, selectedAudioOutputDeviceId])
+
+  const clearMicrophonePreview = React.useCallback(() => {
+    stopMediaStream(microphonePreviewStreamRef.current)
+    microphonePreviewStreamRef.current = null
+    setMicrophonePreviewStream(null)
+    setMicrophonePreviewChecking(false)
+  }, [])
+
+  const clearMeetingAudioPreview = React.useCallback((options: { stop?: boolean } = {}) => {
+    if (options.stop ?? true) {
+      stopMediaStream(meetingAudioPreviewStreamRef.current)
+    }
+    meetingAudioPreviewStreamRef.current = null
+    setMeetingAudioPreviewStream(null)
+    setMeetingAudioSurface(undefined)
+    setMeetingAudioSelecting(false)
+  }, [])
+
+  const handleAudioInputDeviceChange = (deviceId: string) => {
+    setSelectedAudioInputDeviceId(deviceId)
+    writePreferredAudioInputDeviceId(workspaceId, deviceId)
+    setMicrophonePreviewError("")
+  }
+
+  const handleAudioOutputDeviceChange = (deviceId: string) => {
+    setSelectedAudioOutputDeviceId(deviceId)
+    writePreferredAudioOutputDeviceId(workspaceId, deviceId)
+    setSpeakerTestMessage("")
+  }
+
+  const handleChooseMeetingAudio = async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setMeetingAudioPreviewError("This browser cannot share meeting audio. Use One channel or try a current desktop browser.")
+      return
+    }
+
+    setMeetingAudioSelecting(true)
+    setMeetingAudioPreviewError("")
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia(getMeetingAudioDisplayOptions())
+      const surface = stream.getVideoTracks()[0]?.getSettings?.().displaySurface
+
+      if (stream.getAudioTracks().length === 0) {
+        stopMediaStream(stream)
+        setMeetingAudioPreviewError("That share did not include audio. Choose a tab or screen with Share audio/System audio turned on.")
+        return
+      }
+
+      clearMeetingAudioPreview()
+      meetingAudioPreviewStreamRef.current = stream
+      setMeetingAudioPreviewStream(stream)
+      setMeetingAudioSurface(surface)
+    } catch (error: unknown) {
+      setMeetingAudioPreviewError(
+        getUserFacingErrorMessage(error, "Shared audio needs another connection attempt. Try the browser picker again.")
+      )
+    } finally {
+      setMeetingAudioSelecting(false)
+    }
+  }
+
+  const handleChooseAudioOutput = async () => {
+    setSpeakerTestMessage("")
+
+    try {
+      const selectedOutput = await selectAudioOutputDevice(selectedAudioOutputDeviceId)
+      if (!selectedOutput) {
+        setSpeakerTestMessage("This browser does not let SalesFrame choose the speaker. Pick the output in your meeting app or system settings.")
+        return
+      }
+
+      setSelectedAudioOutputDeviceId(selectedOutput.deviceId)
+      writePreferredAudioOutputDeviceId(workspaceId, selectedOutput.deviceId)
+      await refreshAudioDevices()
+    } catch (error: unknown) {
+      setSpeakerTestMessage(getUserFacingErrorMessage(error, "Speaker selection needs another try."))
+    }
+  }
+
+  const handlePlaySpeakerTest = async () => {
+    setSpeakerTestMessage("Playing a quiet test tone...")
+
+    try {
+      await playAudioOutputTest(selectedAudioOutputDeviceId)
+      setSpeakerTestMessage("If you heard the tone, make sure the selected microphone can hear the buyer too.")
+    } catch (error: unknown) {
+      setSpeakerTestMessage(getUserFacingErrorMessage(error, "Speaker test needs another try."))
+    }
+  }
+
   const applyResearchDefaults = (nextAccountId: string) => {
     const accountResearch = accountResearchById[nextAccountId]
 
@@ -7141,12 +7580,16 @@ function StartRecordingDialog({
     const nextPreferences = readCaptureSettings(workspaceId)
 
     setCapturePreferences(nextPreferences)
+    setSelectedAudioInputDeviceId(readPreferredAudioInputDeviceId(workspaceId))
+    setSelectedAudioOutputDeviceId(readPreferredAudioOutputDeviceId(workspaceId))
     setAudioCaptureMode((currentMode) =>
       isAudioCaptureModeEnabled(nextPreferences, currentMode)
         ? currentMode
         : getPreferredAudioCaptureMode(nextPreferences)
     )
-  }, [workspaceId])
+    clearMicrophonePreview()
+    clearMeetingAudioPreview()
+  }, [clearMeetingAudioPreview, clearMicrophonePreview, workspaceId])
 
   React.useEffect(() => {
     return () => {
@@ -7157,8 +7600,94 @@ function StartRecordingDialog({
         window.clearInterval(startProgressTimerRef.current)
       }
       startAbortControllerRef.current?.abort()
+      clearMicrophonePreview()
+      clearMeetingAudioPreview()
     }
-  }, [])
+  }, [clearMeetingAudioPreview, clearMicrophonePreview])
+
+  React.useEffect(() => {
+    if (!open || step !== 3) return
+
+    void refreshAudioDevices()
+  }, [open, refreshAudioDevices, step])
+
+  React.useEffect(() => {
+    if (!open || step !== 3 || startSubmitting) {
+      clearMicrophonePreview()
+      return
+    }
+
+    let cancelled = false
+    let previewStream: MediaStream | null = null
+
+    const startMicrophonePreview = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setMicrophonePreviewError("This browser cannot access the microphone.")
+        return
+      }
+
+      setMicrophonePreviewChecking(true)
+      setMicrophonePreviewError("")
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: getMicrophoneAudioConstraints({
+            deviceId: selectedAudioInputDeviceId,
+            hasMeetingAudio: selectedAudioSourceChoice === "two_channels",
+            mode: audioCaptureMode,
+          }),
+        })
+
+        if (cancelled) {
+          stopMediaStream(stream)
+          return
+        }
+
+        previewStream = stream
+        stopMediaStream(microphonePreviewStreamRef.current)
+        microphonePreviewStreamRef.current = stream
+        setMicrophonePreviewStream(stream)
+        await refreshAudioDevices()
+      } catch (error: unknown) {
+        if (cancelled) return
+
+        setMicrophonePreviewError(
+          getUserFacingErrorMessage(error, "SalesFrame cannot access that microphone. Choose another input or check browser permissions.")
+        )
+        stopMediaStream(microphonePreviewStreamRef.current)
+        microphonePreviewStreamRef.current = null
+        setMicrophonePreviewStream(null)
+      } finally {
+        if (!cancelled) setMicrophonePreviewChecking(false)
+      }
+    }
+
+    void startMicrophonePreview()
+
+    return () => {
+      cancelled = true
+      stopMediaStream(previewStream)
+      if (microphonePreviewStreamRef.current === previewStream) {
+        microphonePreviewStreamRef.current = null
+        setMicrophonePreviewStream(null)
+      }
+    }
+  }, [
+    audioCaptureMode,
+    clearMicrophonePreview,
+    open,
+    refreshAudioDevices,
+    selectedAudioInputDeviceId,
+    selectedAudioSourceChoice,
+    startSubmitting,
+    step,
+  ])
+
+  React.useEffect(() => {
+    if (selectedAudioSourceChoice !== "two_channels") {
+      clearMeetingAudioPreview()
+    }
+  }, [clearMeetingAudioPreview, selectedAudioSourceChoice])
 
   const clearStartProgressTimer = () => {
     if (startProgressTimerRef.current) {
@@ -7238,9 +7767,14 @@ function StartRecordingDialog({
       resetStartProgress()
       setResearchProfileMessage("")
       setResearchProfileStatus("idle")
+      setMicrophonePreviewError("")
+      setMeetingAudioPreviewError("")
+      setSpeakerTestMessage("")
       applyResearchDefaults(nextAccountId)
     } else {
       resetStartProgress()
+      clearMicrophonePreview()
+      clearMeetingAudioPreview()
     }
   }
 
@@ -7375,6 +7909,8 @@ function StartRecordingDialog({
     resetStartProgress()
     setStartSubmitting(false)
     setStartError("")
+    clearMicrophonePreview()
+    clearMeetingAudioPreview()
     setOpen(false)
     setStep(1)
   }
@@ -7459,6 +7995,22 @@ function StartRecordingDialog({
     if (!canStart || startSubmitting) return
 
     const startAbortController = new AbortController()
+    const preparedMeetingAudioStream =
+      selectedAudioSourceChoice === "two_channels" ? meetingAudioPreviewStreamRef.current : null
+    const preparedMeetingAudio = preparedMeetingAudioStream
+      ? {
+          level: meetingAudioPreviewLevel,
+          stream: preparedMeetingAudioStream,
+          surface: meetingAudioSurface,
+        }
+      : undefined
+    let startSucceeded = false
+
+    clearMicrophonePreview()
+    if (preparedMeetingAudioStream) {
+      clearMeetingAudioPreview({ stop: false })
+    }
+
     startAbortControllerRef.current = startAbortController
     setStartError("")
     setStartSubmitting(true)
@@ -7473,6 +8025,11 @@ function StartRecordingDialog({
         accountIndustry,
         accountCurrency,
         audioCaptureMode,
+        audioInputDeviceId: selectedAudioInputDeviceId,
+        audioInputDeviceLabel: selectedAudioInputLabel,
+        audioOutputDeviceId: selectedAudioOutputDeviceId,
+        audioOutputDeviceLabel: selectedAudioOutputLabel,
+        preparedMeetingAudio,
         opportunityMode,
         opportunityId,
         opportunityName,
@@ -7506,6 +8063,7 @@ function StartRecordingDialog({
           },
         })
         setStartError(getStartCallErrorMessage(result.message))
+        stopMediaStream(preparedMeetingAudio?.stream ?? null)
         return
       }
 
@@ -7514,6 +8072,7 @@ function StartRecordingDialog({
       startProgressTargetRef.current = 100
       setStartProgress(100)
       await new Promise((resolve) => window.setTimeout(resolve, 250))
+      startSucceeded = true
       setOpen(false)
       setStep(1)
     } catch (caughtError: unknown) {
@@ -7531,9 +8090,13 @@ function StartRecordingDialog({
         },
       })
       setStartError(getStartCallErrorMessage(caughtError))
+      stopMediaStream(preparedMeetingAudio?.stream ?? null)
     } finally {
       if (startAbortControllerRef.current === startAbortController) {
         startAbortControllerRef.current = null
+      }
+      if (!startSucceeded && startAbortController.signal.aborted) {
+        stopMediaStream(preparedMeetingAudio?.stream ?? null)
       }
       if (!startAbortController.signal.aborted) {
         setStartSubmitting(false)
@@ -7770,90 +8333,264 @@ function StartRecordingDialog({
               ) : null}
 
               {step === 3 ? (
-                <div className="grid min-w-0 gap-3">
-                  <div className="flex items-center gap-2">
-                    <PhoneCallIcon className="size-4 text-muted-foreground" />
-                    <p className="text-sm font-medium">Call setup</p>
+                <div className="grid min-w-0 gap-4">
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <PhoneCallIcon className="size-4 text-muted-foreground" />
+                      <p className="text-sm font-medium">Call setup</p>
+                    </div>
+                    <p className="text-xs leading-snug text-muted-foreground">
+                      {accountSummary} · {opportunitySummary}
+                    </p>
                   </div>
-                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,240px)] sm:gap-3">
-                    <div className="grid min-w-0 grid-cols-2 gap-2 rounded-lg bg-muted/40 p-2.5 sm:grid-cols-1 sm:gap-3 sm:p-3">
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground">Account</p>
-                        <p className="mt-1 truncate text-sm font-medium">{accountSummary}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground">Opportunity</p>
-                        <p className="mt-1 truncate text-sm font-medium">{opportunitySummary}</p>
-                      </div>
-                      <div className="hidden sm:block">
-                        <p className="text-xs font-medium text-muted-foreground">Guidance</p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          The live cockpit will only ask for fields required by the selected playbooks.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="grid min-w-0 content-start gap-3 sm:gap-4">
-                      <div className="grid min-w-0 gap-2">
-                        <Label htmlFor="recording-call-type">Call type</Label>
-                        <Select value={callType} onValueChange={setCallType}>
-                          <SelectTrigger id="recording-call-type" className="w-full min-w-0 [&>span]:truncate">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {["Discovery", "Cold", "Inbound", "Outbound", "Demo", "Renewal", "Negotiation"].map(
-                              (item) => (
-                                <SelectItem key={item} value={item}>
-                                  {item}
-                                </SelectItem>
-                              )
-                            )}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="grid min-w-0 gap-2">
-                        <Label htmlFor="recording-audio-source">Audio source</Label>
-                        <Select
-                          value={selectedAudioSourceChoice}
-                          onValueChange={(value) => {
-                            const nextChoice = value as AudioSourceChoice
 
-                            if (nextChoice === "meeting_bot") return
-                            setAudioCaptureMode(getAudioCaptureModeForChoice(nextChoice, capturePreferences))
-                          }}
-                        >
-                          <SelectTrigger id="recording-audio-source" className="w-full min-w-0 [&>span]:truncate">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="one_channel">One channel</SelectItem>
-                            <SelectItem value="two_channels" disabled={!capturePreferences.browserTab}>
-                              Two channels
-                            </SelectItem>
-                            <SelectItem value="meeting_bot" disabled>
-                              Meeting bot
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs leading-snug text-muted-foreground">
-                          {selectedAudioSourceChoice === "two_channels"
-                            ? "Use this when you can share meeting/system audio and your microphone separately. Best for Zoom, Teams, or Meet on desktop."
-                            : "Use this when SalesFrame hears the room or call through this device microphone. Best for in-person, phone speaker, or mobile."}
-                        </p>
-                        {!capturePreferences.browserTab || !capturePreferences.inPersonMic ? (
-                          <p className="text-xs text-muted-foreground">
-                            Capture choices follow this workspace's Settings. One channel is always available.
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="grid min-w-0 gap-2">
-                        <Label htmlFor="recording-playbooks">Playbooks</Label>
-                        <PlaybookMultiSelect
-                          id="recording-playbooks"
-                          value={selectedPlaybooks}
-                          onChange={setSelectedPlaybooks}
-                        />
-                      </div>
+                  <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_minmax(0,1.4fr)]">
+                    <div className="grid min-w-0 gap-2">
+                      <Label htmlFor="recording-call-type">Call type</Label>
+                      <Select value={callType} onValueChange={setCallType}>
+                        <SelectTrigger id="recording-call-type" className="w-full min-w-0 [&>span]:truncate">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {["Discovery", "Cold", "Inbound", "Outbound", "Demo", "Renewal", "Negotiation"].map(
+                            (item) => (
+                              <SelectItem key={item} value={item}>
+                                {item}
+                              </SelectItem>
+                            )
+                          )}
+                        </SelectContent>
+                      </Select>
                     </div>
+                    <div className="grid min-w-0 gap-2">
+                      <Label htmlFor="recording-audio-source">Audio source</Label>
+                      <Select
+                        value={selectedAudioSourceChoice}
+                        onValueChange={(value) => {
+                          const nextChoice = value as AudioSourceChoice
+
+                          if (nextChoice === "meeting_bot") return
+                          setAudioCaptureMode(getAudioCaptureModeForChoice(nextChoice, capturePreferences))
+                          setMeetingAudioPreviewError("")
+                          setSpeakerTestMessage("")
+                        }}
+                      >
+                        <SelectTrigger id="recording-audio-source" className="w-full min-w-0 [&>span]:truncate">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="one_channel">One channel</SelectItem>
+                          <SelectItem value="two_channels" disabled={!capturePreferences.browserTab}>
+                            Two channels
+                          </SelectItem>
+                          <SelectItem value="meeting_bot" disabled>
+                            Meeting bot
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid min-w-0 gap-2">
+                      <Label htmlFor="recording-playbooks">Playbooks</Label>
+                      <PlaybookMultiSelect
+                        id="recording-playbooks"
+                        value={selectedPlaybooks}
+                        onChange={setSelectedPlaybooks}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid min-w-0 gap-3 rounded-lg border bg-background p-3">
+                    <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">Audio check</p>
+                        <p className="text-xs leading-snug text-muted-foreground">
+                          Choose what SalesFrame listens to and use the meters as a signal check.
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground sm:text-right">
+                        Quiet meters do not block the call.
+                      </p>
+                    </div>
+
+                    {selectedAudioSourceChoice === "two_channels" ? (
+                      <div className="grid min-w-0 gap-3 md:grid-cols-2">
+                        <div className="grid min-w-0 gap-2.5 rounded-lg bg-muted/30 p-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+                              <Mic2Icon className="size-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <Label htmlFor="recording-audio-input">Seller microphone</Label>
+                              <p className="text-xs text-muted-foreground">Labelled Seller</p>
+                            </div>
+                          </div>
+                          <Select value={selectedAudioInputDeviceId} onValueChange={handleAudioInputDeviceChange}>
+                            <SelectTrigger id="recording-audio-input" className="w-full min-w-0 [&>span]:truncate">
+                              <SelectValue placeholder="Choose microphone" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {audioInputDevices.length > 0 ? (
+                                audioInputDevices.map((device) => (
+                                  <SelectItem key={device.deviceId} value={device.deviceId}>
+                                    {device.label}
+                                  </SelectItem>
+                                ))
+                              ) : (
+                                <SelectItem value={getDefaultAudioDeviceId()}>
+                                  Default microphone
+                                </SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                          <AudioSetupMeter
+                            detail={selectedAudioInputLabel}
+                            label="Seller mic"
+                            level={microphonePreviewLevel}
+                            status={microphoneSetupStatus}
+                          />
+                          {microphonePreviewError ? (
+                            <p className="text-xs leading-snug text-destructive">{microphonePreviewError}</p>
+                          ) : null}
+                        </div>
+
+                        <div className="grid min-w-0 gap-3 rounded-lg bg-muted/30 p-3">
+                          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+                                <AudioLinesIcon className="size-4" />
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium">Shared meeting audio</p>
+                                <p className="text-xs text-muted-foreground">Labelled Customer</p>
+                              </div>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="shrink-0 gap-2"
+                              disabled={meetingAudioSelecting}
+                              onClick={handleChooseMeetingAudio}
+                            >
+                              <AudioLinesIcon />
+                              {meetingAudioPreviewStream ? "Change share" : "Choose share"}
+                            </Button>
+                          </div>
+                          <AudioSetupMeter
+                            detail={meetingAudioSurface ? `Shared ${meetingAudioSurface}` : "Choose a tab, window, or screen with audio"}
+                            label="Shared audio"
+                            level={meetingAudioPreviewLevel}
+                            status={sharedAudioSetupStatus}
+                          />
+                          {meetingAudioPreviewError ? (
+                            <p className="text-xs leading-snug text-destructive">{meetingAudioPreviewError}</p>
+                          ) : (
+                            <p className="text-xs leading-snug text-muted-foreground">
+                              Quiet shared audio will not block the call. Your mic is Seller; shared app, tab, or system audio is Customer.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
+                        <div className="grid min-w-0 gap-2.5 rounded-lg bg-muted/30 p-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+                              <Mic2Icon className="size-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <Label htmlFor="recording-audio-input">Microphone input</Label>
+                              <p className="text-xs text-muted-foreground">Room or call audio</p>
+                            </div>
+                          </div>
+                          <Select value={selectedAudioInputDeviceId} onValueChange={handleAudioInputDeviceChange}>
+                            <SelectTrigger id="recording-audio-input" className="w-full min-w-0 [&>span]:truncate">
+                              <SelectValue placeholder="Choose microphone" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {audioInputDevices.length > 0 ? (
+                                audioInputDevices.map((device) => (
+                                  <SelectItem key={device.deviceId} value={device.deviceId}>
+                                    {device.label}
+                                  </SelectItem>
+                                ))
+                              ) : (
+                                <SelectItem value={getDefaultAudioDeviceId()}>
+                                  Default microphone
+                                </SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                          <AudioSetupMeter
+                            detail={selectedAudioInputLabel}
+                            label="Room/call audio"
+                            level={microphonePreviewLevel}
+                            status={microphoneSetupStatus}
+                          />
+                          {microphonePreviewError ? (
+                            <p className="text-xs leading-snug text-destructive">{microphonePreviewError}</p>
+                          ) : null}
+                        </div>
+
+                        <div className="grid min-w-0 gap-2.5 rounded-lg bg-muted/30 p-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+                              <RadioIcon className="size-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">Speaker/output check</p>
+                              <p className="text-xs leading-snug text-muted-foreground">
+                                One-channel mode can only transcribe the buyer if this microphone can hear them.
+                              </p>
+                            </div>
+                          </div>
+                          {supportsSpeakerCheck ? (
+                            <div className="grid min-w-0 gap-2">
+                              {audioOutputSupport.canSetAudioSink && audioOutputDevices.length > 0 ? (
+                                <Select value={selectedAudioOutputDeviceId} onValueChange={handleAudioOutputDeviceChange}>
+                                  <SelectTrigger id="recording-audio-output" className="w-full min-w-0 [&>span]:truncate">
+                                    <SelectValue placeholder="Choose speaker" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {audioOutputDevices.map((device) => (
+                                      <SelectItem key={device.deviceId} value={device.deviceId}>
+                                        {device.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : null}
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                {audioOutputSupport.canSelectAudioOutput ? (
+                                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={handleChooseAudioOutput}>
+                                    <AudioLinesIcon />
+                                    Choose speaker
+                                  </Button>
+                                ) : null}
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="gap-2"
+                                  disabled={!audioOutputSupport.canSetAudioSink && selectedAudioOutputDeviceId !== getDefaultAudioDeviceId()}
+                                  onClick={handlePlaySpeakerTest}
+                                >
+                                  <RadioIcon />
+                                  Test speaker
+                                </Button>
+                              </div>
+                              <p className="text-xs leading-snug text-muted-foreground">
+                                {speakerTestMessage || `Current output: ${selectedAudioOutputLabel}. Use speakers or phone speaker if you want SalesFrame to hear both sides.`}
+                              </p>
+                            </div>
+                          ) : (
+                            <p className="text-xs leading-snug text-muted-foreground">
+                              Choose the speaker in your meeting app or system settings. Headphones can stop one-channel mode from hearing the buyer.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : null}
@@ -11556,6 +12293,8 @@ function WorkspaceView({
   const coachPopoutQuestionIsAsked = displayedCoachQuestion
     ? manualCoach.askedQuestionIds.includes(displayedCoachQuestion.id)
     : false
+  const coachPopoutLimitNotice =
+    activeCallId && isRecording ? getLiveCallLimitNotice(elapsed, MAX_LIVE_CALL_SECONDS) : ""
   const coachPopoutSnapshot = React.useMemo<LiveCoachPopoutSnapshot>(() => ({
     type: "snapshot",
     version: liveCoachPopoutVersion,
@@ -11566,7 +12305,9 @@ function WorkspaceView({
     opportunityName: opportunity.name || "Opportunity",
     callStatus: coachPopoutCallStatus,
     coachStatus: liveCoachStatus,
+    durationLimitSeconds: MAX_LIVE_CALL_SECONDS,
     elapsedSeconds: elapsed,
+    limitNotice: coachPopoutLimitNotice,
     question: displayedCoachQuestion
       ? {
           ...displayedCoachQuestion,
@@ -11591,6 +12332,7 @@ function WorkspaceView({
     coachPopoutQuestionIsAsked,
     displayedCoachQuestion,
     elapsed,
+    coachPopoutLimitNotice,
     liveCoachError,
     liveCoachStatus,
     opportunity.name,
@@ -13514,6 +14256,12 @@ function LiveRail({
     (line) => `${getTranscriptSpeakerDisplayName(line)} ${getTranscriptSpeakerLabel(line)} ${line.time} ${line.text}`
   )
   const hasSearch = normalizeSearchText(searchQuery).length > 0
+  const transcriptScrollRef = React.useRef<HTMLDivElement | null>(null)
+  const transcriptEndRef = React.useRef<HTMLDivElement | null>(null)
+  const shouldAutoScrollTranscriptRef = React.useRef(true)
+  const transcriptScrollSignature = visibleTranscript
+    .map((line) => `${line.clientId ?? line.id}:${line.text.length}:${line.isPartial ? "partial" : "final"}`)
+    .join("|")
   const isCaptureActive =
     isRecording || ["requesting-permission", "connecting", "recording", "paused", "stopping"].includes(captureStatus)
   const displayCaptureStatus: CallCaptureStatus =
@@ -13542,6 +14290,24 @@ function LiveRail({
       : displayCaptureStatus === "stopping"
         ? "Stopping call"
         : "Stop call"
+
+  const handleTranscriptScroll = React.useCallback(() => {
+    const container = transcriptScrollRef.current
+    if (!container) return
+
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    shouldAutoScrollTranscriptRef.current = distanceFromBottom <= 96
+  }, [])
+
+  React.useEffect(() => {
+    if (hasSearch || !shouldAutoScrollTranscriptRef.current) return
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      transcriptEndRef.current?.scrollIntoView({ block: "end" })
+    })
+
+    return () => window.cancelAnimationFrame(animationFrame)
+  }, [hasSearch, transcriptScrollSignature])
   const captureActivityLabel =
     displayCaptureStatus === "requesting-permission"
       ? "Waiting for audio permission"
@@ -13666,7 +14432,12 @@ function LiveRail({
                 />
               ) : null}
             </TabsContent>
-            <TabsContent value="transcript" className="m-0 max-h-[390px] overflow-y-auto pr-1">
+            <TabsContent
+              ref={transcriptScrollRef}
+              value="transcript"
+              className="m-0 max-h-[390px] overflow-y-auto pr-1"
+              onScroll={handleTranscriptScroll}
+            >
               <SpeakerIdentityPanel
                 identities={speakerIdentities}
                 onSpeakerIdentityChange={onSpeakerIdentityChange}
@@ -13719,6 +14490,7 @@ function LiveRail({
                   message={hasSearch ? "No transcript lines match this search." : "The transcript will appear here as people speak."}
                 />
               ) : null}
+              <div ref={transcriptEndRef} aria-hidden="true" />
             </TabsContent>
           </Tabs>
         </CardContent>
@@ -13951,26 +14723,26 @@ function getAudioHealthIndicators({
         : isStarting
           ? { label: "Seller mic", tone: "building", value: "Checking" }
           : { label: "Seller mic", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
-  const buyerAudioSilent = audioPreflight?.warnings.some((warning) =>
-    warning.includes("Buyer audio looks silent") || warning.includes("meter is quiet")
+  const sharedAudioSilent = audioPreflight?.warnings.some((warning) =>
+    warning.includes("Shared audio looks silent") || warning.includes("meter is quiet")
   ) ?? false
   const customerAudio: CaptureSignalIndicator = audioPreflight
     ? audioPreflight.requiredCustomerAudio
       ? audioPreflight.customerAudioReady
-        ? buyerAudioSilent
-          ? { label: "Buyer audio", tone: "warning", value: "Silent" }
-          : { label: "Buyer audio", tone: isLive ? "live" : "building", value: isLive ? "Two channels" : "Connected" }
+        ? sharedAudioSilent
+          ? { label: "Shared audio", tone: "warning", value: "Quiet" }
+          : { label: "Shared audio", tone: isLive ? "live" : "building", value: isLive ? "Two channels" : "Connected" }
         : {
-            label: "Buyer audio",
+            label: "Shared audio",
             tone: needsAttention || isLive ? "error" : "warning",
             value: "Not detected",
           }
       : audioPreflight.mixedRoomReady
-        ? { label: "Buyer audio", tone: isLive ? "warning" : "building", value: isLive ? "Inferred" : "One channel" }
-        : { label: "Buyer audio", tone: "muted", value: "One channel" }
+        ? { label: "Room/call audio", tone: isLive ? "warning" : "building", value: isLive ? "Inferred" : "One channel" }
+        : { label: "Room/call audio", tone: "muted", value: "One channel" }
     : isStarting
-      ? { label: "Buyer audio", tone: "building", value: "Checking" }
-      : { label: "Buyer audio", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
+      ? { label: "Room/call audio", tone: "building", value: "Checking" }
+      : { label: "Room/call audio", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
   const liveTranscript: CaptureSignalIndicator = guidance
     ? { label: "Live transcript", tone: "live", value: isLive ? "Deepgram live" : "Ready" }
     : isLive
@@ -14461,9 +15233,20 @@ function PostCallPanel({
       .map((item) => item.replace(/^[-*]\s*/, "").trim())
       .filter(Boolean) ?? []
   const hasTranscriptLines = transcript.some((line) => line.text.trim())
+  const completedCall = replayCall ?? transcriptCall
+  const didReachCallLimit = completedCall?.endedReason === "time_limit_reached"
 
   return (
     <div className="grid gap-4">
+      {didReachCallLimit ? (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
+              SalesFrame ended this call after 2 hours to keep transcription controlled. Transcript and audio were saved.
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
       {replayCall ? (
         <CallReplayCard
           call={replayCall}
@@ -18138,8 +18921,11 @@ function ContextTile({
 }
 
 function formatTime(value: number) {
-  const minutes = String(Math.floor(value / 60)).padStart(2, "0")
+  const hours = Math.floor(value / 3600)
+  const minutes = String(Math.floor((value % 3600) / 60)).padStart(2, "0")
   const seconds = String(value % 60).padStart(2, "0")
+  if (hours > 0) return `${hours}:${minutes}:${seconds}`
+
   return `${minutes}:${seconds}`
 }
 

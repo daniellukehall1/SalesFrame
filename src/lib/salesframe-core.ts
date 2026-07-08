@@ -25,6 +25,25 @@ export const recordingLifecycleStatuses = ["none", "recording", "uploading", "pr
 
 export type RecordingLifecycleStatus = (typeof recordingLifecycleStatuses)[number]
 
+export const MAX_LIVE_CALL_SECONDS = 2 * 60 * 60
+export const LIVE_CALL_WARNING_SECONDS = 10 * 60
+export const LIVE_CALL_FINAL_WARNING_SECONDS = 60
+
+export const callEndedReasons = [
+  "seller_stopped",
+  "time_limit_reached",
+  "start_cancelled",
+  "start_failed",
+] as const
+
+export type CallEndedReason = (typeof callEndedReasons)[number]
+
+export function normalizeCallEndedReason(value: string | null | undefined): CallEndedReason {
+  return callEndedReasons.includes(value as CallEndedReason)
+    ? (value as CallEndedReason)
+    : "seller_stopped"
+}
+
 export const currencyOptions = [
   "AUD",
   "USD",
@@ -127,7 +146,9 @@ export type CallSummary = {
   title: string
   date: string
   duration: string
+  durationLimitSeconds: number
   durationSeconds: number
+  endedReason: CallEndedReason
   recordingError: string | null
   recordingMimeType: string | null
   recordingReadyAt: string | null
@@ -339,6 +360,15 @@ export type StartRecordingPayload = {
   accountIndustry: string
   accountCurrency: CurrencyCode
   audioCaptureMode: CallAudioCaptureMode
+  audioInputDeviceId?: string
+  audioInputDeviceLabel?: string
+  audioOutputDeviceId?: string
+  audioOutputDeviceLabel?: string
+  preparedMeetingAudio?: {
+    level?: number
+    stream: MediaStream
+    surface?: string
+  }
   opportunityMode: "existing" | "new"
   opportunityId: string
   opportunityName: string

@@ -49,7 +49,9 @@ export type LiveCoachPopoutSnapshot = {
   opportunityName: string
   callStatus: LiveCoachPopoutCallStatus
   coachStatus: string
+  durationLimitSeconds: number
   elapsedSeconds: number
+  limitNotice: string
   question: LiveCoachPopoutQuestion | null
   canActOnQuestion: boolean
   canEndCall: boolean
@@ -138,7 +140,9 @@ export function createDisconnectedLiveCoachPopoutSnapshot(
     opportunityName: "Live coach",
     callStatus: "disconnected",
     coachStatus: "idle",
+    durationLimitSeconds: 0,
     elapsedSeconds: 0,
+    limitNotice: "",
     question: null,
     canActOnQuestion: false,
     canEndCall: false,
@@ -160,9 +164,13 @@ export function isLiveCoachPopoutSnapshot(value: unknown): value is LiveCoachPop
     typeof candidate.opportunityName === "string" &&
     isLiveCoachPopoutCallStatus(candidate.callStatus) &&
     typeof candidate.coachStatus === "string" &&
+    typeof candidate.durationLimitSeconds === "number" &&
+    Number.isFinite(candidate.durationLimitSeconds) &&
+    candidate.durationLimitSeconds >= 0 &&
     typeof candidate.elapsedSeconds === "number" &&
     Number.isFinite(candidate.elapsedSeconds) &&
     candidate.elapsedSeconds >= 0 &&
+    typeof candidate.limitNotice === "string" &&
     typeof candidate.canActOnQuestion === "boolean" &&
     typeof candidate.canEndCall === "boolean" &&
     typeof candidate.message === "string" &&

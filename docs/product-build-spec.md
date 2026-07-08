@@ -129,9 +129,12 @@ Live transcription must feel like a clean human conversation, not raw subtitle f
   - Duplicate final events within the same source/time window are suppressed.
   - Adjacent same-speaker turns are merged when they occur inside the turn-continuity window.
 - Seller-facing audio setup uses `One channel`, `Two channels`, and a disabled `Meeting bot` option. Internally, V1 keeps `microphone`, `in_person_microphone`, and `meeting_audio` for compatibility; new one-channel selections prefer `in_person_microphone`, while `microphone` remains a legacy fallback.
+- Start Call audio setup must show the selected microphone input and a live meter before the call starts. The selected microphone is reused for preflight, recording, and Deepgram transcription rather than falling back to the browser default.
+- One-channel setup shows `Room/call audio` plus a speaker/output check where the browser supports it. Output selection is only a routing/test aid; one-channel transcription still depends on the selected microphone physically hearing the buyer.
 - `Two channels` maps to `meeting_audio` plus `seller_mic` and is the preferred desktop capture path:
   - Seller mic is the likely seller stream.
   - Meeting/tab audio is the likely customer-side stream.
+  - The seller chooses the microphone input in the modal, then selects shared meeting audio through the browser share picker. Shared audio is labelled as `Shared audio` until transcript turns prove customer speech is flowing.
   - Meeting/tab audio is captured with audio processing disabled where the browser supports it so the customer-side stream is not altered before transcription.
   - The separate seller microphone uses echo cancellation and noise suppression where supported because customer-side audio is already captured separately.
   - One-channel microphone capture stays editable and confidence-aware.
