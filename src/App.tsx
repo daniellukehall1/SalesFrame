@@ -156,6 +156,7 @@ import {
 import {
   enumerateAudioDevices,
   getDefaultAudioDeviceId,
+  getPreferredAudioInputDeviceId,
   getSharedAudioBrowserGuidance,
   getSharedAudioNoTrackMessage,
   getSharedAudioUnsupportedMessage,
@@ -7143,43 +7144,19 @@ function AudioSetupMeter({
   status: AudioSetupStatus
 }) {
   const meterValue = getAudioMeterPercent(level)
-  const isActive = status === "listening"
   const isBlocked = status === "blocked" || status === "unsupported"
-  const statusLabel: Record<AudioSetupStatus, string> = {
-    blocked: "Blocked",
-    checking: "Checking",
-    idle: "Not selected",
-    listening: "Listening",
-    quiet: "Quiet",
-    unsupported: "Unavailable",
-  }
 
   return (
     <div className="grid min-w-0 gap-1.5">
-      <div className="flex min-w-0 items-center justify-between gap-3">
+      <div className="min-w-0">
         <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
-        <p
-          className={cn(
-            "shrink-0 text-xs font-medium",
-            isActive && "text-emerald-700",
-            status === "quiet" && "text-amber-700",
-            isBlocked && "text-destructive"
-          )}
-        >
-          {statusLabel[status]}
-        </p>
+        <span className="sr-only">{status}</span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-muted">
         <div
           className={cn(
             "h-full rounded-full transition-[width,background-color] duration-100 ease-out",
-            isActive
-              ? "bg-emerald-500"
-              : status === "quiet"
-                ? "bg-amber-500"
-                : isBlocked
-                  ? "bg-destructive"
-                  : "bg-muted-foreground/30"
+            isBlocked ? "bg-destructive" : status === "idle" || status === "checking" ? "bg-muted-foreground/30" : "bg-foreground"
           )}
           aria-hidden="true"
           style={{ width: `${meterValue}%` }}
@@ -7446,15 +7423,12 @@ function StartRecordingDialog({
   const refreshAudioDevices = React.useCallback(async () => {
     try {
       const inventory = await enumerateAudioDevices()
+      const preferredInputDeviceId = getPreferredAudioInputDeviceId(selectedAudioInputDeviceId, inventory.audioInputs)
 
       setAudioInputDevices(inventory.audioInputs)
 
-      if (
-        selectedAudioInputDeviceId !== getDefaultAudioDeviceId() &&
-        inventory.audioInputs.length > 0 &&
-        !inventory.audioInputs.some((device) => device.deviceId === selectedAudioInputDeviceId)
-      ) {
-        setSelectedAudioInputDeviceId(getDefaultAudioDeviceId())
+      if (preferredInputDeviceId !== selectedAudioInputDeviceId) {
+        setSelectedAudioInputDeviceId(preferredInputDeviceId)
       }
     } catch {
       setAudioInputDevices([])

@@ -26,6 +26,22 @@ export function getDefaultAudioDeviceId() {
   return defaultDeviceId
 }
 
+export function getPreferredAudioInputDeviceId(currentDeviceId: string | undefined, devices: AudioDeviceOption[]) {
+  if (
+    currentDeviceId &&
+    currentDeviceId !== defaultDeviceId &&
+    devices.some((device) => device.deviceId === currentDeviceId)
+  ) {
+    return currentDeviceId
+  }
+
+  const builtInMicrophone =
+    devices.find((device) => device.deviceId !== defaultDeviceId && isLikelyBuiltInMicrophoneLabel(device.label)) ??
+    devices.find((device) => isLikelyBuiltInMicrophoneLabel(device.label))
+
+  return builtInMicrophone?.deviceId ?? devices.find((device) => device.isDefault)?.deviceId ?? devices[0]?.deviceId ?? defaultDeviceId
+}
+
 export function isLikelySafariBrowser() {
   if (typeof navigator === "undefined") return false
 
@@ -175,6 +191,16 @@ function buildDeviceOptions(
       } satisfies AudioDeviceOption
     })
     .filter((device): device is AudioDeviceOption => Boolean(device))
+}
+
+function isLikelyBuiltInMicrophoneLabel(label: string) {
+  const normalizedLabel = label.toLowerCase()
+
+  return (
+    /macbook.*microphone/.test(normalizedLabel) ||
+    /built[\s-]?in.*microphone/.test(normalizedLabel) ||
+    /internal.*microphone/.test(normalizedLabel)
+  )
 }
 
 function getAudioInputStorageKey(workspaceId: string) {
