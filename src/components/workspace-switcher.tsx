@@ -3,7 +3,6 @@
 import * as React from "react"
 import {
   AudioLinesIcon,
-  Building2Icon,
   CheckIcon,
   ChevronsUpDownIcon,
   CircleAlertIcon,
@@ -14,6 +13,7 @@ import {
   Trash2Icon,
 } from "lucide-react"
 
+import { WorkspaceIconPicker } from "@/components/workspace-icon-picker"
 import { Button } from "@/components/ui/button"
 import {
   ContextMenu,
@@ -63,22 +63,26 @@ import {
   type CurrencyCode,
 } from "@/lib/salesframe-core"
 import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
+import {
+  normalizeWorkspaceIconId,
+  WorkspaceIconGlyph,
+  type WorkspaceIconId,
+} from "@/lib/workspace-icons"
 
 export type WorkspaceNavItem = {
   id: string
   name: string
   description: string
   defaultCurrency: CurrencyCode
+  workspaceIcon: WorkspaceIconId
   onboardingCompletedAt?: string | null
   role: string
 }
 
-export type WorkspaceSavePayload = Pick<WorkspaceNavItem, "name" | "description" | "defaultCurrency">
+export type WorkspaceSavePayload = Pick<WorkspaceNavItem, "name" | "description" | "defaultCurrency" | "workspaceIcon">
 
 function WorkspaceLogo({ workspace }: { workspace: WorkspaceNavItem }) {
-  const Icon = workspace.name.toLowerCase() === "salesframe" ? AudioLinesIcon : Building2Icon
-
-  return <Icon aria-hidden="true" className="size-4" />
+  return <WorkspaceIconGlyph iconId={workspace.workspaceIcon} className="size-4" />
 }
 
 function SalesFrameLogo() {
@@ -203,7 +207,10 @@ export function WorkspaceSwitcher({
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">SalesFrame</span>
-                  <span className="truncate text-xs">{activeWorkspace.name}</span>
+                  <span className="flex min-w-0 items-center gap-1 truncate text-xs">
+                    <WorkspaceIconGlyph iconId={activeWorkspace.workspaceIcon} className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{activeWorkspace.name}</span>
+                  </span>
                 </div>
                 <ChevronsUpDownIcon className="ml-auto" />
               </SidebarMenuButton>
@@ -322,6 +329,7 @@ function WorkspaceFormDialog({
   const [name, setName] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [defaultCurrency, setDefaultCurrency] = React.useState<CurrencyCode>(defaultCurrencyCode)
+  const [workspaceIcon, setWorkspaceIcon] = React.useState<WorkspaceIconId>("building-2")
   const [savedDraft, setSavedDraft] = React.useState<WorkspaceSavePayload | null>(null)
 
   React.useEffect(() => {
@@ -331,11 +339,13 @@ function WorkspaceFormDialog({
       name: workspace?.name ?? "",
       description: workspace?.description ?? "Seller workspace",
       defaultCurrency: normalizeCurrencyCode(workspace?.defaultCurrency),
+      workspaceIcon: normalizeWorkspaceIconId(workspace?.workspaceIcon),
     }
 
     setName(nextDraft.name)
     setDescription(nextDraft.description)
     setDefaultCurrency(nextDraft.defaultCurrency)
+    setWorkspaceIcon(nextDraft.workspaceIcon)
     setSavedDraft(nextDraft)
   }, [open, workspace])
 
@@ -343,11 +353,13 @@ function WorkspaceFormDialog({
     name: name.trim(),
     description: description.trim() || "Seller workspace",
     defaultCurrency,
-  }), [defaultCurrency, description, name])
+    workspaceIcon: normalizeWorkspaceIconId(workspaceIcon),
+  }), [defaultCurrency, description, name, workspaceIcon])
   const hasChanges = savedDraft
     ? currentDraft.name !== savedDraft.name.trim() ||
       currentDraft.description !== (savedDraft.description.trim() || "Seller workspace") ||
-      currentDraft.defaultCurrency !== savedDraft.defaultCurrency
+      currentDraft.defaultCurrency !== savedDraft.defaultCurrency ||
+      currentDraft.workspaceIcon !== savedDraft.workspaceIcon
     : false
   const canSave = name.trim().length > 0 && hasChanges
 
@@ -372,6 +384,7 @@ function WorkspaceFormDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
+          <WorkspaceIconPicker value={workspaceIcon} onChange={setWorkspaceIcon} />
           <div className="grid gap-2">
             <Label htmlFor="workspace-name">Workspace name</Label>
             <Input
@@ -415,7 +428,7 @@ function WorkspaceFormDialog({
           onCancel={() => onOpenChange(false)}
           primaryAction={
             <Button className="gap-2" disabled={!canSave || isSaving} onClick={handleSubmit}>
-              <Building2Icon />
+              <WorkspaceIconGlyph iconId={workspaceIcon} />
               {isSaving ? "Saving..." : "Save workspace"}
             </Button>
           }

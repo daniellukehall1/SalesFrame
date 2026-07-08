@@ -55,6 +55,7 @@ import type { LoginFormValues } from "@/components/login-form"
 import { type AccountNavItem } from "@/components/nav-projects"
 import type { SignupFormValues } from "@/components/signup-form"
 import type { WorkspaceNavItem, WorkspaceSavePayload } from "@/components/workspace-switcher"
+import { WorkspaceIconPicker } from "@/components/workspace-icon-picker"
 import { buildAccountLogoMetadata } from "@/lib/account-logo"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -290,6 +291,11 @@ import {
   normalizeComparableText,
   normalizeSellerDomain,
 } from "@/lib/research-profile"
+import {
+  defaultWorkspaceIconId,
+  normalizeWorkspaceIconId,
+  type WorkspaceIconId,
+} from "@/lib/workspace-icons"
 import {
   callPlaybookDescriptions,
   callPlaybookOptions,
@@ -2517,6 +2523,7 @@ function App() {
             name: "SalesFrame",
             description: "Seller workspace",
             default_currency: defaultCurrencyCode,
+            workspace_icon: defaultWorkspaceIconId,
           })
 
           workspaceRows = [createdWorkspace]
@@ -5055,6 +5062,7 @@ function App() {
       name: "New workspace",
       description: "Seller workspace",
       defaultCurrency: activeWorkspace?.defaultCurrency ?? defaultCurrencyCode,
+      workspaceIcon: defaultWorkspaceIconId,
       onboardingCompletedAt: null,
       role: "Owner",
     })
@@ -5069,6 +5077,7 @@ function App() {
       name: payload.name,
       description: payload.description,
       default_currency: normalizeCurrencyCode(payload.defaultCurrency),
+      workspace_icon: normalizeWorkspaceIconId(payload.workspaceIcon),
     })
     const navItem = mapWorkspaceRowToNavItem(updatedWorkspace)
 
@@ -5085,6 +5094,7 @@ function App() {
       name: `${workspace.name} Copy`,
       description: workspace.description || "Seller workspace",
       default_currency: workspace.defaultCurrency,
+      workspace_icon: normalizeWorkspaceIconId(workspace.workspaceIcon),
     })
     const navItem = mapWorkspaceRowToNavItem(duplicatedWorkspace)
 
@@ -5115,12 +5125,14 @@ function App() {
     profile,
     workspaceCurrency,
     workspaceDescription,
+    workspaceIcon,
     workspaceName,
   }: {
     apiKey: string
     profile: SellerResearchProfile
     workspaceCurrency: CurrencyCode
     workspaceDescription: string
+    workspaceIcon: WorkspaceIconId
     workspaceName: string
   }) => {
     ensureAuthenticatedAppRoute()
@@ -5138,6 +5150,7 @@ function App() {
         name: workspaceName.trim(),
         description: workspaceDescription.trim() || "Seller workspace",
         default_currency: normalizeCurrencyCode(workspaceCurrency),
+        workspace_icon: normalizeWorkspaceIconId(workspaceIcon),
       })
 
       createdWorkspaceNavItem = mapWorkspaceRowToNavItem(createdWorkspace)
@@ -5153,6 +5166,7 @@ function App() {
         name: workspaceName.trim(),
         description: workspaceDescription.trim() || "Seller workspace",
         default_currency: normalizeCurrencyCode(workspaceCurrency),
+        workspace_icon: normalizeWorkspaceIconId(workspaceIcon),
       })
     } else if (!targetWorkspaceId) {
       return
@@ -5171,6 +5185,7 @@ function App() {
         name: workspaceName.trim(),
         description: workspaceDescription.trim() || "Seller workspace",
         default_currency: normalizeCurrencyCode(workspaceCurrency),
+        workspace_icon: normalizeWorkspaceIconId(workspaceIcon),
       })
     }
 
@@ -5841,6 +5856,7 @@ function WorkspaceOnboardingDialog({
     profile: SellerResearchProfile
     workspaceCurrency: CurrencyCode
     workspaceDescription: string
+    workspaceIcon: WorkspaceIconId
     workspaceName: string
   }) => Promise<void>
   onOpenChange: (open: boolean) => void
@@ -5849,6 +5865,7 @@ function WorkspaceOnboardingDialog({
   const [workspaceName, setWorkspaceName] = React.useState(workspace.name)
   const [workspaceDescription, setWorkspaceDescription] = React.useState(workspace.description)
   const [workspaceCurrency, setWorkspaceCurrency] = React.useState<CurrencyCode>(workspace.defaultCurrency)
+  const [workspaceIcon, setWorkspaceIcon] = React.useState<WorkspaceIconId>(normalizeWorkspaceIconId(workspace.workspaceIcon))
   const [sellerCompany, setSellerCompany] = React.useState(sellerResearchProfile.sellerCompany)
   const [sellerDomain, setSellerDomain] = React.useState(sellerResearchProfile.sellerDomain)
   const [productContext, setProductContext] = React.useState(sellerResearchProfile.productContext)
@@ -5895,6 +5912,7 @@ function WorkspaceOnboardingDialog({
     setWorkspaceName(workspace.name)
     setWorkspaceDescription(workspace.description)
     setWorkspaceCurrency(workspace.defaultCurrency)
+    setWorkspaceIcon(normalizeWorkspaceIconId(workspace.workspaceIcon))
     setSellerCompany(sellerResearchProfile.sellerCompany)
     setSellerDomain(sellerResearchProfile.sellerDomain)
     setProductContext(sellerResearchProfile.productContext)
@@ -5927,6 +5945,7 @@ function WorkspaceOnboardingDialog({
         workspaceName,
         workspaceDescription,
         workspaceCurrency,
+        workspaceIcon,
         profile: {
           sellerCompany: sellerCompany.trim(),
           sellerDomain: normalizeSellerDomain(sellerDomain),
@@ -5987,6 +6006,13 @@ function WorkspaceOnboardingDialog({
                 Name the workspace sellers will use for its accounts, opportunities, calls, and settings.
               </p>
             </div>
+            <WorkspaceIconPicker
+              value={workspaceIcon}
+              onChange={(nextIcon) => {
+                setWorkspaceIcon(nextIcon)
+                setStatusMessage("")
+              }}
+            />
             <div className="grid gap-3 md:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="onboarding-workspace-name">Workspace name</Label>

@@ -26,6 +26,7 @@ import {
   type TranscriptSpeaker,
 } from "@/lib/salesframe-core"
 import { formatPlaybooks, normalizePlaybooks } from "@/lib/playbook-utils"
+import { normalizeWorkspaceIconId } from "@/lib/workspace-icons"
 import type {
   AccountRow,
   CallNoteRow,
@@ -49,6 +50,7 @@ export function mapWorkspaceRowToNavItem(row: WorkspaceRow): WorkspaceNavItem {
     name: row.name,
     description: row.description ?? "Seller workspace",
     defaultCurrency: normalizeCurrencyCode(row.default_currency),
+    workspaceIcon: normalizeWorkspaceIconId(row.workspace_icon),
     onboardingCompletedAt: row.onboarding_completed_at,
     role: "Owner",
   }

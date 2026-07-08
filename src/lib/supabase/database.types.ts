@@ -57,6 +57,7 @@ export type Database = {
           name: string
           description: string
           default_currency: string
+          workspace_icon: string
           owner_user_id: string
           onboarding_completed_at: string | null
           created_at: string
@@ -67,6 +68,7 @@ export type Database = {
           name: string
           description?: string
           default_currency?: string
+          workspace_icon?: string
           owner_user_id?: string
           onboarding_completed_at?: string | null
           created_at?: string
@@ -77,6 +79,7 @@ export type Database = {
           name?: string
           description?: string
           default_currency?: string
+          workspace_icon?: string
           owner_user_id?: string
           onboarding_completed_at?: string | null
           created_at?: string

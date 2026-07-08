@@ -240,11 +240,56 @@ test("account and opportunity record forms only show fields backed by saved data
   assert.doesNotMatch(app, /onAccountDraftChange\("owner"/)
   assert.doesNotMatch(app, /onOpportunityDraftChange\("owner"/)
   assert.doesNotMatch(adapters, /ownerName/)
-  assert.match(workspaceSwitcher, /export type WorkspaceSavePayload = Pick<WorkspaceNavItem, "name" \| "description" \| "defaultCurrency">/)
+  assert.match(workspaceSwitcher, /export type WorkspaceSavePayload = Pick<WorkspaceNavItem, "name" \| "description" \| "defaultCurrency" \| "workspaceIcon">/)
   assert.doesNotMatch(workspaceFormDialog, /workspace-role/)
   assert.doesNotMatch(workspaceFormDialog, /setRole/)
   assert.doesNotMatch(workspaceFormDialog, /role: role/)
   assert.doesNotMatch(workspaceFormDialog, /Your role/)
+})
+
+test("workspace icons are selected, saved, and rendered from one approved catalog", async () => {
+  const app = await read("src/App.tsx")
+  const workspaceSwitcher = await read("src/components/workspace-switcher.tsx")
+  const workspaceIconPicker = await read("src/components/workspace-icon-picker.tsx")
+  const workspaceIcons = await read("src/lib/workspace-icons.tsx")
+  const adapters = await read("src/lib/supabase/salesframe-adapters.tsx")
+  const data = await read("src/lib/supabase/salesframe-data.ts")
+  const migration = await read("supabase/migrations/202607080001_workspace_icons.sql")
+
+  const iconIds = [...workspaceIcons.matchAll(/id: "([^"]+)"/g)].map((match) => match[1])
+
+  assert.equal(iconIds.length, 16)
+  assert.deepEqual(iconIds, [
+    "building-2",
+    "briefcase-business",
+    "globe-2",
+    "landmark",
+    "rocket",
+    "target",
+    "chart-no-axes-combined",
+    "handshake",
+    "network",
+    "factory",
+    "store",
+    "school",
+    "hospital",
+    "banknote",
+    "shield-check",
+    "sparkles",
+  ])
+  assert.match(workspaceIconPicker, /role="radiogroup"/)
+  assert.match(workspaceIconPicker, /role="radio"/)
+  assert.match(workspaceIconPicker, /variant=\{isSelected \? "default" : "outline"\}/)
+  assert.match(workspaceSwitcher, /workspaceIcon: WorkspaceIconId/)
+  assert.match(workspaceSwitcher, /<WorkspaceIconPicker value=\{workspaceIcon\} onChange=\{setWorkspaceIcon\} \/>/)
+  assert.match(workspaceSwitcher, /<WorkspaceIconGlyph iconId=\{activeWorkspace\.workspaceIcon\}/)
+  assert.match(app, /workspace_icon: normalizeWorkspaceIconId\(payload\.workspaceIcon\)/)
+  assert.match(app, /workspace_icon: normalizeWorkspaceIconId\(workspace\.workspaceIcon\)/)
+  assert.match(app, /<WorkspaceIconPicker[\s\S]*value=\{workspaceIcon\}/)
+  assert.match(adapters, /workspaceIcon: normalizeWorkspaceIconId\(row\.workspace_icon\)/)
+  assert.match(data, /workspace_icon: values\.workspace_icon \?\? "building-2"/)
+  assert.match(migration, /workspace_icon text not null default 'building-2'/)
+  assert.match(migration, /workspaces_workspace_icon_check/)
 })
 
 test("record mutation dialogs use the shared modal action footer", async () => {
@@ -3141,7 +3186,7 @@ test("media and transient status states stay calm for assistive technology", asy
   assert.doesNotMatch(app, /<audio[\s\S]*aria-hidden="true"[\s\S]*ref=\{audioRef\}/)
   assert.ok((app.match(/<AudioLinesIcon aria-hidden="true" className="size-5" \/>/g) ?? []).length >= 3)
   assert.ok((authPage.match(/<AudioLinesIcon aria-hidden="true" className="size-4" \/>/g) ?? []).length >= 2)
-  assert.match(workspaceSwitcher, /<Icon aria-hidden="true" className="size-4" \/>/)
+  assert.match(workspaceSwitcher, /<WorkspaceIconGlyph iconId=\{workspace\.workspaceIcon\} className="size-4" \/>/)
   assert.match(workspaceSwitcher, /<AudioLinesIcon aria-hidden="true" className="size-4" \/>/)
   assert.match(workspaceSwitcher, /className="text-sm text-destructive" aria-live="assertive" role="alert"[\s\S]*\{statusMessage\}/)
   assert.match(app, /coachError \? \([\s\S]*role="alert"[\s\S]*\{coachError\}/)

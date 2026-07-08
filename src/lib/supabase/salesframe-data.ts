@@ -144,7 +144,7 @@ export async function listWorkspaces(client?: SalesFrameClient) {
 
 export async function createWorkspace(
   values: Pick<TablesInsert<"workspaces">, "name"> &
-    Partial<Pick<TablesInsert<"workspaces">, "description" | "default_currency">>,
+    Partial<Pick<TablesInsert<"workspaces">, "description" | "default_currency" | "workspace_icon">>,
   client?: SalesFrameClient
 ) {
   const supabase = getSupabase(client)
@@ -163,6 +163,7 @@ export async function createWorkspace(
       description: values.description ?? "Seller workspace",
       name: values.name,
       owner_user_id: user.id,
+      workspace_icon: values.workspace_icon ?? "building-2",
     })
     .select("*")
     .single()
@@ -172,7 +173,7 @@ export async function createWorkspace(
 
 export async function updateWorkspace(
   workspaceId: string,
-  values: Pick<TablesUpdate<"workspaces">, "name" | "description" | "default_currency">,
+  values: Pick<TablesUpdate<"workspaces">, "name" | "description" | "default_currency" | "workspace_icon">,
   client?: SalesFrameClient
 ) {
   const response = await getSupabase(client)
