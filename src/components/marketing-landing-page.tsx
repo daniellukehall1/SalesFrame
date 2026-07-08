@@ -12,7 +12,13 @@ import {
 
 const heroVideoUrl = "/media/salesframe-hero.mp4"
 const heroFallbackImageUrl = "/media/salesframe-hero-poster.png"
-const howItWorksStepOneImageUrl = "/media/salesframe-how-it-works-step-1.jpg"
+const howItWorksStepOneImageUrl = "/media/salesframe-how-it-works-step-1.webp"
+const howItWorksStepTwoImageUrl = "/media/salesframe-how-it-works-step-2.webp"
+const howItWorksStepThreeImageUrl = "/media/salesframe-how-it-works-step-3.webp"
+const howItWorksStepFourImageUrl = "/media/salesframe-how-it-works-step-4.webp"
+const howItWorksStepFiveImageUrl = "/media/salesframe-how-it-works-step-5.webp"
+const howItWorksStepSixImageUrl = "/media/salesframe-how-it-works-step-6.webp"
+const howItWorksStepSevenImageUrl = "/media/salesframe-how-it-works-step-7.webp"
 const contactEmail = "hello@salesframe.ai"
 const scrubSensitivity = 0.8
 const videoReadinessTimeoutMs = 3500
@@ -34,36 +40,48 @@ const howItWorksSteps = [
     title: "Add the accounts that matter",
     body:
       "Create accounts one by one, or bring them in from a CSV. SalesFrame turns the workspace into a clean selling map.",
+    imageUrl: howItWorksStepTwoImageUrl,
+    imageAlt: "SalesFrame setup workspace modal showing the import accounts and import opportunities options.",
     note: "Less hunting around. More useful conversations.",
   },
   {
     title: "Let AI enrich the account",
     body:
       "When there’s a website, SalesFrame can research the account, find useful signals, and shape sharper discovery angles.",
+    imageUrl: howItWorksStepThreeImageUrl,
+    imageAlt: "SalesFrame create account research step with customer research switched on.",
     note: "The call feels prepared before anyone says hello.",
   },
   {
     title: "Choose the playbooks you actually use",
     body:
-      "MEDDICC, BANT, Sandler, SPICED, Challenger, and more. SalesFrame keeps the methodology discipline in the background.",
-    note: "Human conversation up front. Methodology quietly underneath.",
+      "Choose MEDDICC, BANT, Sandler, SPICED, Challenger, and more. SalesFrame keeps one natural question in front.",
+    imageUrl: howItWorksStepFourImageUrl,
+    imageAlt: "SalesFrame opportunity methodology page with selected sales playbooks.",
+    note: "Methodology stays quietly underneath.",
   },
   {
     title: "Capture the conversation live",
     body:
       "SalesFrame listens as the call unfolds, keeps the transcript moving, and watches for the moments that change the next move.",
+    imageUrl: howItWorksStepFiveImageUrl,
+    imageAlt: "Seller on a live customer video call while SalesFrame captures the conversation.",
     note: "The coach follows the call, not a rigid checklist.",
   },
   {
     title: "Ask the better next question",
     body:
       "The coach reads the account, opportunity, playbooks, and conversation flow, then gives the seller one timely question.",
+    imageUrl: howItWorksStepSixImageUrl,
+    imageAlt: "SalesFrame live call cockpit showing the next best question for the seller.",
     note: "One better question can change the shape of the deal.",
   },
   {
     title: "Leave the call with the work already shaped",
     body:
       "After the call, SalesFrame helps turn the conversation into notes, evidence, follow-up, and prep for the next meeting.",
+    imageUrl: howItWorksStepSevenImageUrl,
+    imageAlt: "Two sales professionals shaking hands after a productive customer conversation.",
     note: "The call ends. The next move is already clearer.",
   },
 ]
