@@ -551,6 +551,7 @@ test("live guidance uses account and opportunity record context without exposing
   const app = await read("src/App.tsx")
   const core = await read("src/lib/salesframe-core.ts")
   const liveGuidanceFunction = await read("netlify/functions/live-guidance.ts")
+  const liveQuestionFunction = await read("netlify/functions/live-question.ts")
 
   assert.match(liveGuidanceFunction, /type RecordContext/)
   assert.match(liveGuidanceFunction, /function buildRecordContext/)
@@ -567,6 +568,11 @@ test("live guidance uses account and opportunity record context without exposing
   assert.match(liveGuidanceFunction, /Selected playbooks and intent clusters decide what must be learned/)
   assert.match(liveGuidanceFunction, /account and opportunity record fields only shape wording, sequencing, and timing/i)
   assert.match(liveGuidanceFunction, /Do not mark a framework field complete from account or opportunity record context alone/)
+  assert.match(liveQuestionFunction, /function compactRecordContext/)
+  assert.match(liveQuestionFunction, /recordContext/)
+  assert.match(liveQuestionFunction, /selectedContext: \{[\s\S]*recordContext,/)
+  assert.match(liveQuestionFunction, /Selected playbooks and intent clusters decide what must be learned/)
+  assert.match(liveQuestionFunction, /Do not mark methodology fields complete from record context alone/)
   const accountGuidanceContextByDraftField = {
     accountName: "name",
     website: "website",
@@ -604,15 +610,20 @@ test("live guidance uses account and opportunity record context without exposing
 
   for (const contextField of Object.values(accountGuidanceContextByDraftField)) {
     assert.match(liveGuidanceFunction, new RegExp(`\\b${contextField}:`))
+    assert.match(liveQuestionFunction, new RegExp(`\\b${contextField === "region" ? "location" : contextField}:`))
   }
   for (const contextField of Object.values(opportunityGuidanceContextByDraftField)) {
     if (contextField === "selected-playbooks") {
       assert.match(liveGuidanceFunction, /playbooks: selectedPlaybooks/)
       assert.match(liveGuidanceFunction, /playbookFields: playbookFieldResponse\.data/)
       assert.match(liveGuidanceFunction, /intentClusters/)
+      assert.match(liveQuestionFunction, /selectedPlaybookRows\.map/)
+      assert.match(liveQuestionFunction, /playbookFieldResponse\.data/)
+      assert.match(liveQuestionFunction, /intentClusters/)
       continue
     }
     assert.match(liveGuidanceFunction, new RegExp(`\\b${contextField}:`))
+    assert.match(liveQuestionFunction, new RegExp(`\\b${contextField}:`))
   }
   assert.match(liveGuidanceFunction, /name: getRecordText\(account, "name"\)/)
   assert.match(liveGuidanceFunction, /website: accountProfileContext\.website/)
@@ -642,6 +653,8 @@ test("live guidance uses account and opportunity record context without exposing
   assert.match(liveGuidanceFunction, /intentClusters/)
   assert.match(liveGuidanceFunction, /opportunityEvidence/)
   assert.doesNotMatch(liveGuidanceFunction, /records: \{[\s\S]*account,[\s\S]*opportunity,[\s\S]*call/)
+  assert.match(liveQuestionFunction, /opportunityEvidence/)
+  assert.doesNotMatch(liveQuestionFunction, /records: \{[\s\S]*account,[\s\S]*opportunity,[\s\S]*call/)
 
   assert.match(core, /LiveContextUsed/)
   assert.match(core, /contextUsed\?: LiveContextUsed\[\]/)
@@ -2765,8 +2778,9 @@ test("mobile viewport uses safe areas, scrollable tabs, and reachable call actio
   )
   assert.match(
     startCallDialog,
-    /className="grid min-w-0 gap-3 md:grid-cols-\[minmax\(0,1fr\)_minmax\(0,0\.85fr\)\]"[\s\S]*Microphone input[\s\S]*Speaker\/output check/
+    /\) : \(\s*<div className="grid min-w-0 gap-3">[\s\S]*Microphone input[\s\S]*Room\/call audio[\s\S]*One-channel mode can only transcribe the buyer if this microphone can hear them clearly\./
   )
+  assert.doesNotMatch(startCallDialog, /Speaker\/output check/)
   assert.match(startCallDialog, /step === 4 \? \(\s*<div className="grid min-w-0 max-w-full gap-4 overflow-x-hidden">/)
   assert.doesNotMatch(startCallDialog, /className="grid min-w-0 gap-4 rounded-lg border p-3 sm:p-4"/)
   assert.match(app, /<SelectTrigger id="recording-account-mode" className="w-full min-w-0">/)
@@ -3495,7 +3509,7 @@ test("workspace, account, and call setup require an OpenAI key", async () => {
   assert.match(app, /step === 2 \? \(\s*<div className="grid gap-4">/)
   assert.match(app, /step === 3 \? \(\s*<div className="grid gap-3">/)
   assert.match(app, /step === 4 \? \(\s*<div className="grid min-w-0 max-w-full gap-4 overflow-x-hidden">/)
-  assert.match(app, /field-sizing-fixed min-h-20 min-w-0 max-w-full resize-none overflow-x-hidden whitespace-pre-wrap break-words/)
+  assert.match(app, /id="product-context"[\s\S]*field-sizing-fixed min-h-28 min-w-0 max-w-full resize-none overflow-x-hidden whitespace-pre-wrap break-words/)
   assert.doesNotMatch(app, /step === 1 \? \(\s*<div className="grid gap-4 rounded-lg border p-4">/)
   assert.doesNotMatch(app, /step === 2 \? \(\s*<div className="grid gap-4 rounded-lg border p-4">/)
   assert.doesNotMatch(app, /step === 3 \? \(\s*<div className="grid gap-3 rounded-lg border p-4">/)
@@ -3583,12 +3597,23 @@ test("call capture persists transcript, notes, and recordings", async () => {
   assert.match(app, /Microphone input/)
   assert.match(app, /Seller microphone/)
   assert.match(app, /Room\/call audio/)
-  assert.match(app, /Speaker\/output check/)
-  assert.match(app, /One-channel mode can only transcribe the buyer if this microphone can hear them\./)
+  assert.match(app, /One-channel mode can only transcribe the buyer if this microphone can hear them clearly\./)
+  assert.doesNotMatch(app, /Speaker\/output check/)
+  assert.doesNotMatch(app, /Choose speaker/)
+  assert.doesNotMatch(app, /Test speaker/)
   assert.match(app, /Shared meeting audio/)
+  assert.match(app, /const sharedAudioBrowserGuidance = getSharedAudioBrowserGuidance\(\)/)
+  assert.match(app, /className="w-full justify-center gap-2 sm:w-fit sm:justify-start"/)
   assert.match(app, /Your mic is Seller; shared app, tab, or system audio is Customer\./)
   assert.match(app, /Choose share/)
-  assert.match(app, /Quiet shared audio will not block the call/)
+  assert.doesNotMatch(app, /Quiet meters do not block the call/)
+  assert.doesNotMatch(app, /Quiet shared audio will not block the call/)
+  assert.match(app, /function getAudioMeterPercent\(level: number\)/)
+  assert.match(app, /20 \* Math\.log10\(Math\.max\(normalizedLevel, 0\.00001\)\)/)
+  assert.doesNotMatch(app, /Math\.round\(level \* 1600\)/)
+  assert.match(audioPreflight, /if \(isLikelySafariBrowser\(\)\) return options/)
+  assert.match(await read("src/lib/audio-device-setup.ts"), /Safari shared the screen without audio/)
+  assert.match(await read("src/lib/audio-device-setup.ts"), /getSharedAudioBrowserGuidance/)
   assert.doesNotMatch(app, /<SelectItem value="microphone">Microphone only<\/SelectItem>/)
   assert.doesNotMatch(app, /In-person meeting \/ phone mic/)
   assert.doesNotMatch(app, /Meeting audio \+ microphone/)

@@ -1,4 +1,9 @@
-import { resolveConstrainedAudioDeviceId } from "@/lib/audio-device-setup"
+import {
+  getSharedAudioNoTrackMessage,
+  getSharedAudioUnsupportedMessage,
+  isLikelySafariBrowser,
+  resolveConstrainedAudioDeviceId,
+} from "@/lib/audio-device-setup"
 import type { CallAudioCaptureMode, TranscriptSpeaker } from "@/lib/salesframe-core"
 
 export type AudioSourceKind = "meeting_audio" | "seller_mic" | "mixed_audio" | "in_person_microphone"
@@ -247,9 +252,7 @@ async function requestAudioSources(
       })
     } else {
       if (!("getDisplayMedia" in mediaDevices)) {
-        throw new Error(
-          "Native app audio is not available through this browser. Use browser-based Zoom/Teams/Meet, one-channel mode, or install SalesFrame Audio Connector."
-        )
+        throw new Error(getSharedAudioUnsupportedMessage())
       }
 
       try {
@@ -270,13 +273,14 @@ async function requestAudioSources(
           })
         } else {
           displayStream.getTracks().forEach((track) => track.stop())
-          throw new Error(
-            "SalesFrame cannot hear buyer audio from that share. Choose a browser tab or Entire Screen with Share audio/System audio turned on, or switch to one-channel mode."
-          )
+          throw new Error(getSharedAudioNoTrackMessage())
         }
       } catch (caughtError: unknown) {
         stopCapturedSources(sources)
-        if (caughtError instanceof Error && caughtError.message.includes("SalesFrame cannot hear buyer audio")) {
+        if (
+          caughtError instanceof Error &&
+          [getSharedAudioNoTrackMessage(), getSharedAudioUnsupportedMessage()].includes(caughtError.message)
+        ) {
           throw caughtError
         }
         if (isDisplayCapturePermissionError(caughtError)) {
@@ -361,7 +365,7 @@ function isDisplayCapturePermissionError(error: unknown) {
 }
 
 export function getMeetingAudioDisplayOptions(): DisplayMediaStreamOptions {
-  return {
+  const options: DisplayMediaStreamOptions = {
     audio: getSupportedAudioConstraints({
       autoGainControl: false,
       channelCount: 1,
@@ -371,6 +375,12 @@ export function getMeetingAudioDisplayOptions(): DisplayMediaStreamOptions {
       sampleSize: 16,
     }),
     video: true,
+  }
+
+  if (isLikelySafariBrowser()) return options
+
+  return {
+    ...options,
     monitorTypeSurfaces: "include",
     preferCurrentTab: false,
     selfBrowserSurface: "exclude",

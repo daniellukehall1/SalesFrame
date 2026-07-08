@@ -26,6 +26,38 @@ export function getDefaultAudioDeviceId() {
   return defaultDeviceId
 }
 
+export function isLikelySafariBrowser() {
+  if (typeof navigator === "undefined") return false
+
+  const userAgent = navigator.userAgent
+
+  return /^((?!chrome|android|crios|fxios|edg|opr).)*safari/i.test(userAgent)
+}
+
+export function getSharedAudioNoTrackMessage() {
+  if (isLikelySafariBrowser()) {
+    return "Safari shared the screen without audio. On macOS, use Chrome or Edge for Two channels, or switch to One channel."
+  }
+
+  return "That share did not include audio. Choose a tab or screen with Share audio/System audio turned on, or switch to One channel."
+}
+
+export function getSharedAudioUnsupportedMessage() {
+  if (isLikelySafariBrowser()) {
+    return "Safari cannot provide shared meeting audio here. Use Chrome or Edge for Two channels, or switch to One channel."
+  }
+
+  return "This browser cannot share meeting audio. Use One channel or try a current desktop browser."
+}
+
+export function getSharedAudioBrowserGuidance() {
+  if (isLikelySafariBrowser()) {
+    return "Safari may share the picture without system audio on macOS. If no shared-audio meter appears, use Chrome or Edge for Two channels, or use One channel."
+  }
+
+  return "Share a meeting tab, window, or screen with audio enabled. SalesFrame can only use audio the browser provides."
+}
+
 export function resolveConstrainedAudioDeviceId(deviceId?: string) {
   const normalizedDeviceId = deviceId?.trim()
 

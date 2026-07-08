@@ -156,12 +156,11 @@ import {
 import {
   enumerateAudioDevices,
   getDefaultAudioDeviceId,
-  playAudioOutputTest,
+  getSharedAudioBrowserGuidance,
+  getSharedAudioNoTrackMessage,
+  getSharedAudioUnsupportedMessage,
   readPreferredAudioInputDeviceId,
-  readPreferredAudioOutputDeviceId,
-  selectAudioOutputDevice,
   writePreferredAudioInputDeviceId,
-  writePreferredAudioOutputDeviceId,
   type AudioDeviceOption,
 } from "@/lib/audio-device-setup"
 import { sectionCards, viewLabels } from "@/data/navigation-content"
@@ -7143,7 +7142,7 @@ function AudioSetupMeter({
   level: number
   status: AudioSetupStatus
 }) {
-  const meterValue = Math.max(3, Math.min(100, Math.round(level * 1600)))
+  const meterValue = getAudioMeterPercent(level)
   const isActive = status === "listening"
   const isBlocked = status === "blocked" || status === "unsupported"
   const statusLabel: Record<AudioSetupStatus, string> = {
@@ -7173,7 +7172,7 @@ function AudioSetupMeter({
       <div className="h-2 overflow-hidden rounded-full bg-muted">
         <div
           className={cn(
-            "h-full rounded-full transition-[width,background-color] duration-150",
+            "h-full rounded-full transition-[width,background-color] duration-100 ease-out",
             isActive
               ? "bg-emerald-500"
               : status === "quiet"
@@ -7182,12 +7181,28 @@ function AudioSetupMeter({
                   ? "bg-destructive"
                   : "bg-muted-foreground/30"
           )}
+          aria-hidden="true"
           style={{ width: `${meterValue}%` }}
         />
       </div>
-      <p className="truncate text-xs text-muted-foreground">{detail}</p>
+      <p className="truncate text-xs text-muted-foreground" title={`${detail} · input level ${meterValue}%`}>
+        {detail}
+      </p>
     </div>
   )
+}
+
+function getAudioMeterPercent(level: number) {
+  const normalizedLevel = Math.max(0, Math.min(1, level))
+
+  if (normalizedLevel <= 0.003) return 0
+
+  const decibels = 20 * Math.log10(Math.max(normalizedLevel, 0.00001))
+  const minDecibels = -52
+  const maxDecibels = -14
+  const scaled = ((decibels - minDecibels) / (maxDecibels - minDecibels)) * 100
+
+  return Math.max(4, Math.min(100, Math.round(scaled)))
 }
 
 function getAudioSetupStatus({
@@ -7300,17 +7315,9 @@ function StartRecordingDialog({
   const [customerContact, setCustomerContact] = React.useState("")
   const [customerRole, setCustomerRole] = React.useState("")
   const [audioInputDevices, setAudioInputDevices] = React.useState<AudioDeviceOption[]>([])
-  const [audioOutputDevices, setAudioOutputDevices] = React.useState<AudioDeviceOption[]>([])
   const [selectedAudioInputDeviceId, setSelectedAudioInputDeviceId] = React.useState(() =>
     readPreferredAudioInputDeviceId(workspaceId)
   )
-  const [selectedAudioOutputDeviceId, setSelectedAudioOutputDeviceId] = React.useState(() =>
-    readPreferredAudioOutputDeviceId(workspaceId)
-  )
-  const [audioOutputSupport, setAudioOutputSupport] = React.useState({
-    canSelectAudioOutput: false,
-    canSetAudioSink: false,
-  })
   const [microphonePreviewStream, setMicrophonePreviewStream] = React.useState<MediaStream | null>(null)
   const [microphonePreviewError, setMicrophonePreviewError] = React.useState("")
   const [microphonePreviewChecking, setMicrophonePreviewChecking] = React.useState(false)
@@ -7318,7 +7325,6 @@ function StartRecordingDialog({
   const [meetingAudioPreviewError, setMeetingAudioPreviewError] = React.useState("")
   const [meetingAudioSurface, setMeetingAudioSurface] = React.useState<string | undefined>()
   const [meetingAudioSelecting, setMeetingAudioSelecting] = React.useState(false)
-  const [speakerTestMessage, setSpeakerTestMessage] = React.useState("")
   const sellerDomainLookupSequenceRef = React.useRef(0)
   const sellerDomainLookupTimeoutRef = React.useRef<number | null>(null)
   const startProgressTimerRef = React.useRef<number | null>(null)
@@ -7352,11 +7358,6 @@ function StartRecordingDialog({
     audioInputDevices,
     "Default microphone"
   )
-  const selectedAudioOutputLabel = getAudioDeviceDisplayName(
-    selectedAudioOutputDeviceId,
-    audioOutputDevices,
-    "System speaker"
-  )
   const microphoneSetupStatus = getAudioSetupStatus({
     error: microphonePreviewError,
     isChecking: microphonePreviewChecking,
@@ -7371,7 +7372,7 @@ function StartRecordingDialog({
     stream: meetingAudioPreviewStream,
     unsupported: typeof navigator !== "undefined" && !navigator.mediaDevices?.getDisplayMedia,
   })
-  const supportsSpeakerCheck = audioOutputSupport.canSelectAudioOutput || audioOutputSupport.canSetAudioSink
+  const sharedAudioBrowserGuidance = getSharedAudioBrowserGuidance()
   const accountSummary =
     accountMode === "new" ? accountName.trim() || "New account" : selectedAccount?.name ?? "Selected account"
   const opportunitySummary =
@@ -7447,11 +7448,6 @@ function StartRecordingDialog({
       const inventory = await enumerateAudioDevices()
 
       setAudioInputDevices(inventory.audioInputs)
-      setAudioOutputDevices(inventory.audioOutputs)
-      setAudioOutputSupport({
-        canSelectAudioOutput: inventory.canSelectAudioOutput,
-        canSetAudioSink: inventory.canSetAudioSink,
-      })
 
       if (
         selectedAudioInputDeviceId !== getDefaultAudioDeviceId() &&
@@ -7460,18 +7456,10 @@ function StartRecordingDialog({
       ) {
         setSelectedAudioInputDeviceId(getDefaultAudioDeviceId())
       }
-      if (
-        selectedAudioOutputDeviceId !== getDefaultAudioDeviceId() &&
-        inventory.audioOutputs.length > 0 &&
-        !inventory.audioOutputs.some((device) => device.deviceId === selectedAudioOutputDeviceId)
-      ) {
-        setSelectedAudioOutputDeviceId(getDefaultAudioDeviceId())
-      }
     } catch {
       setAudioInputDevices([])
-      setAudioOutputDevices([])
     }
-  }, [selectedAudioInputDeviceId, selectedAudioOutputDeviceId])
+  }, [selectedAudioInputDeviceId])
 
   const clearMicrophonePreview = React.useCallback(() => {
     stopMediaStream(microphonePreviewStreamRef.current)
@@ -7496,15 +7484,9 @@ function StartRecordingDialog({
     setMicrophonePreviewError("")
   }
 
-  const handleAudioOutputDeviceChange = (deviceId: string) => {
-    setSelectedAudioOutputDeviceId(deviceId)
-    writePreferredAudioOutputDeviceId(workspaceId, deviceId)
-    setSpeakerTestMessage("")
-  }
-
   const handleChooseMeetingAudio = async () => {
     if (!navigator.mediaDevices?.getDisplayMedia) {
-      setMeetingAudioPreviewError("This browser cannot share meeting audio. Use One channel or try a current desktop browser.")
+      setMeetingAudioPreviewError(getSharedAudioUnsupportedMessage())
       return
     }
 
@@ -7517,7 +7499,7 @@ function StartRecordingDialog({
 
       if (stream.getAudioTracks().length === 0) {
         stopMediaStream(stream)
-        setMeetingAudioPreviewError("That share did not include audio. Choose a tab or screen with Share audio/System audio turned on.")
+        setMeetingAudioPreviewError(getSharedAudioNoTrackMessage())
         return
       }
 
@@ -7531,35 +7513,6 @@ function StartRecordingDialog({
       )
     } finally {
       setMeetingAudioSelecting(false)
-    }
-  }
-
-  const handleChooseAudioOutput = async () => {
-    setSpeakerTestMessage("")
-
-    try {
-      const selectedOutput = await selectAudioOutputDevice(selectedAudioOutputDeviceId)
-      if (!selectedOutput) {
-        setSpeakerTestMessage("This browser does not let SalesFrame choose the speaker. Pick the output in your meeting app or system settings.")
-        return
-      }
-
-      setSelectedAudioOutputDeviceId(selectedOutput.deviceId)
-      writePreferredAudioOutputDeviceId(workspaceId, selectedOutput.deviceId)
-      await refreshAudioDevices()
-    } catch (error: unknown) {
-      setSpeakerTestMessage(getUserFacingErrorMessage(error, "Speaker selection needs another try."))
-    }
-  }
-
-  const handlePlaySpeakerTest = async () => {
-    setSpeakerTestMessage("Playing a quiet test tone...")
-
-    try {
-      await playAudioOutputTest(selectedAudioOutputDeviceId)
-      setSpeakerTestMessage("If you heard the tone, make sure the selected microphone can hear the buyer too.")
-    } catch (error: unknown) {
-      setSpeakerTestMessage(getUserFacingErrorMessage(error, "Speaker test needs another try."))
     }
   }
 
@@ -7581,7 +7534,6 @@ function StartRecordingDialog({
 
     setCapturePreferences(nextPreferences)
     setSelectedAudioInputDeviceId(readPreferredAudioInputDeviceId(workspaceId))
-    setSelectedAudioOutputDeviceId(readPreferredAudioOutputDeviceId(workspaceId))
     setAudioCaptureMode((currentMode) =>
       isAudioCaptureModeEnabled(nextPreferences, currentMode)
         ? currentMode
@@ -7769,7 +7721,6 @@ function StartRecordingDialog({
       setResearchProfileStatus("idle")
       setMicrophonePreviewError("")
       setMeetingAudioPreviewError("")
-      setSpeakerTestMessage("")
       applyResearchDefaults(nextAccountId)
     } else {
       resetStartProgress()
@@ -8027,8 +7978,6 @@ function StartRecordingDialog({
         audioCaptureMode,
         audioInputDeviceId: selectedAudioInputDeviceId,
         audioInputDeviceLabel: selectedAudioInputLabel,
-        audioOutputDeviceId: selectedAudioOutputDeviceId,
-        audioOutputDeviceLabel: selectedAudioOutputLabel,
         preparedMeetingAudio,
         opportunityMode,
         opportunityId,
@@ -8372,7 +8321,6 @@ function StartRecordingDialog({
                           if (nextChoice === "meeting_bot") return
                           setAudioCaptureMode(getAudioCaptureModeForChoice(nextChoice, capturePreferences))
                           setMeetingAudioPreviewError("")
-                          setSpeakerTestMessage("")
                         }}
                       >
                         <SelectTrigger id="recording-audio-source" className="w-full min-w-0 [&>span]:truncate">
@@ -8400,16 +8348,13 @@ function StartRecordingDialog({
                   </div>
 
                   <div className="grid min-w-0 gap-3 rounded-lg border bg-background p-3">
-                    <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="grid min-w-0 gap-1">
                       <div className="min-w-0">
                         <p className="text-sm font-medium">Audio check</p>
                         <p className="text-xs leading-snug text-muted-foreground">
                           Choose what SalesFrame listens to and use the meters as a signal check.
                         </p>
                       </div>
-                      <p className="text-xs text-muted-foreground sm:text-right">
-                        Quiet meters do not block the call.
-                      </p>
                     </div>
 
                     {selectedAudioSourceChoice === "two_channels" ? (
@@ -8453,28 +8398,32 @@ function StartRecordingDialog({
                           ) : null}
                         </div>
 
-                        <div className="grid min-w-0 gap-3 rounded-lg bg-muted/30 p-3">
-                          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
-                                <AudioLinesIcon className="size-4" />
-                              </span>
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium">Shared meeting audio</p>
-                                <p className="text-xs text-muted-foreground">Labelled Customer</p>
-                              </div>
+                        <div className="grid min-w-0 gap-2.5 rounded-lg bg-muted/30 p-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+                              <AudioLinesIcon className="size-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">Shared meeting audio</p>
+                              <p className="text-xs text-muted-foreground">Labelled Customer</p>
                             </div>
+                          </div>
+                          <div className="grid min-w-0 gap-2">
                             <Button
                               type="button"
                               variant="outline"
                               size="sm"
-                              className="shrink-0 gap-2"
+                              className="w-full justify-center gap-2 sm:w-fit sm:justify-start"
                               disabled={meetingAudioSelecting}
                               onClick={handleChooseMeetingAudio}
                             >
                               <AudioLinesIcon />
                               {meetingAudioPreviewStream ? "Change share" : "Choose share"}
                             </Button>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/40" />
+                              <p className="text-xs leading-snug text-muted-foreground">{sharedAudioBrowserGuidance}</p>
+                            </div>
                           </div>
                           <AudioSetupMeter
                             detail={meetingAudioSurface ? `Shared ${meetingAudioSurface}` : "Choose a tab, window, or screen with audio"}
@@ -8486,13 +8435,13 @@ function StartRecordingDialog({
                             <p className="text-xs leading-snug text-destructive">{meetingAudioPreviewError}</p>
                           ) : (
                             <p className="text-xs leading-snug text-muted-foreground">
-                              Quiet shared audio will not block the call. Your mic is Seller; shared app, tab, or system audio is Customer.
+                              Your mic is Seller; shared app, tab, or system audio is Customer.
                             </p>
                           )}
                         </div>
                       </div>
                     ) : (
-                      <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
+                      <div className="grid min-w-0 gap-3">
                         <div className="grid min-w-0 gap-2.5 rounded-lg bg-muted/30 p-3">
                           <div className="flex min-w-0 items-center gap-2">
                             <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
@@ -8529,63 +8478,9 @@ function StartRecordingDialog({
                           />
                           {microphonePreviewError ? (
                             <p className="text-xs leading-snug text-destructive">{microphonePreviewError}</p>
-                          ) : null}
-                        </div>
-
-                        <div className="grid min-w-0 gap-2.5 rounded-lg bg-muted/30 p-3">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
-                              <RadioIcon className="size-4" />
-                            </span>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium">Speaker/output check</p>
-                              <p className="text-xs leading-snug text-muted-foreground">
-                                One-channel mode can only transcribe the buyer if this microphone can hear them.
-                              </p>
-                            </div>
-                          </div>
-                          {supportsSpeakerCheck ? (
-                            <div className="grid min-w-0 gap-2">
-                              {audioOutputSupport.canSetAudioSink && audioOutputDevices.length > 0 ? (
-                                <Select value={selectedAudioOutputDeviceId} onValueChange={handleAudioOutputDeviceChange}>
-                                  <SelectTrigger id="recording-audio-output" className="w-full min-w-0 [&>span]:truncate">
-                                    <SelectValue placeholder="Choose speaker" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {audioOutputDevices.map((device) => (
-                                      <SelectItem key={device.deviceId} value={device.deviceId}>
-                                        {device.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              ) : null}
-                              <div className="grid gap-2 sm:grid-cols-2">
-                                {audioOutputSupport.canSelectAudioOutput ? (
-                                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={handleChooseAudioOutput}>
-                                    <AudioLinesIcon />
-                                    Choose speaker
-                                  </Button>
-                                ) : null}
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="gap-2"
-                                  disabled={!audioOutputSupport.canSetAudioSink && selectedAudioOutputDeviceId !== getDefaultAudioDeviceId()}
-                                  onClick={handlePlaySpeakerTest}
-                                >
-                                  <RadioIcon />
-                                  Test speaker
-                                </Button>
-                              </div>
-                              <p className="text-xs leading-snug text-muted-foreground">
-                                {speakerTestMessage || `Current output: ${selectedAudioOutputLabel}. Use speakers or phone speaker if you want SalesFrame to hear both sides.`}
-                              </p>
-                            </div>
                           ) : (
                             <p className="text-xs leading-snug text-muted-foreground">
-                              Choose the speaker in your meeting app or system settings. Headphones can stop one-channel mode from hearing the buyer.
+                              One-channel mode can only transcribe the buyer if this microphone can hear them clearly. Switch to Two channels when shared audio is available.
                             </p>
                           )}
                         </div>
@@ -8699,7 +8594,7 @@ function StartRecordingDialog({
                           id="product-context"
                           value={productContext}
                           disabled={!customerResearchEnabled || researchProfileStatus === "loading"}
-                          className="field-sizing-fixed min-h-20 min-w-0 max-w-full resize-none overflow-x-hidden whitespace-pre-wrap break-words"
+                          className="field-sizing-fixed min-h-28 min-w-0 max-w-full resize-none overflow-x-hidden whitespace-pre-wrap break-words"
                           wrap="soft"
                           placeholder={
                             researchProfileStatus === "loading"
