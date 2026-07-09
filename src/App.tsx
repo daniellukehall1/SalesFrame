@@ -8362,7 +8362,12 @@ function StartRecordingDialog({
     const activeLabel = visibleSteps[activeStep - 1]?.label ?? currentRecordingStepLabel
 
     return (
-      <>
+      <div
+        className={cn(
+          "relative z-10 min-w-0 bg-background pb-2",
+          isPreparing ? "max-sm:min-h-[10.5rem]" : "max-sm:min-h-28"
+        )}
+      >
         <p className="sr-only" aria-live="polite">
           Step {activeStep} of {visibleSteps.length}: {activeLabel}
         </p>
@@ -8416,7 +8421,7 @@ function StartRecordingDialog({
             )
           })}
         </ol>
-      </>
+      </div>
     )
   }
   const startCallContent = (
@@ -8980,7 +8985,7 @@ function StartRecordingDialog({
       <Drawer open={open} onOpenChange={handleOpenChange} showSwipeHandle>
         <DrawerTrigger asChild>{startCallTrigger}</DrawerTrigger>
         <DrawerContent className="grid max-h-[92svh] min-h-[min(640px,92svh)] min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] overflow-hidden px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-0 text-left data-[vaul-drawer-direction=bottom]:max-h-[92svh] [&_[data-slot=button]]:min-h-11 [&_[data-slot=button]]:px-4 [&_[data-slot=input]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11">
-          <DrawerHeader className="px-0 pb-0 pt-3 text-left group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
+          <DrawerHeader className="relative z-10 bg-background px-0 pb-0 pt-3 text-left group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
             <DrawerTitle>Start call</DrawerTitle>
             <DrawerDescription>{startCallDescription}</DrawerDescription>
           </DrawerHeader>
