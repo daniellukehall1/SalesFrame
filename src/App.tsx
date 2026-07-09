@@ -6743,7 +6743,7 @@ function AppHeader({
                     </BreadcrumbPage>
                   ) : (
                     <BreadcrumbLink
-                      className="max-w-[11rem] cursor-pointer truncate sm:max-w-[15rem]"
+                      className="-ml-2 inline-flex min-h-11 max-w-[11rem] cursor-pointer items-center rounded-sm px-2 sm:ml-0 sm:min-h-0 sm:max-w-[15rem] sm:px-0"
                       onClick={item.onSelect}
                     >
                       {item.label}
@@ -7026,7 +7026,7 @@ function GlobalSearch({
       <button
         key={`${mode}-${result.type}-${result.id}`}
         type="button"
-        className="grid grid-cols-[28px_1fr_auto] items-center gap-3 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-accent"
+        className="grid min-h-11 grid-cols-[28px_1fr_auto] items-center gap-3 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-accent"
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => handleSelect(result)}
       >
@@ -10960,7 +10960,7 @@ function PlaybookMultiSelect({
                 type="button"
                 role="option"
                 aria-selected={isSelected}
-                className="grid w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="grid min-h-11 w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => togglePlaybook(playbook)}
               >
                 <span
