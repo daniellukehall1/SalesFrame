@@ -10914,7 +10914,7 @@ function PlaybookMultiSelect({
           id={id}
           type="button"
           variant="outline"
-          className="h-auto min-h-9 w-full min-w-0 justify-between gap-2 px-3 py-2 text-left font-normal"
+          className="h-auto min-h-11 w-full min-w-0 justify-between gap-2 px-3 py-2 text-left font-normal md:min-h-9"
           aria-expanded={open}
           aria-haspopup="listbox"
           aria-label={`Selected playbooks: ${selectedPlaybookLabel}`}
@@ -15982,7 +15982,7 @@ function OpportunitiesView({
                   <div className="min-w-0">
                     <button
                       type="button"
-                      className="block text-left font-medium leading-snug underline-offset-4 outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex min-h-11 items-center text-left font-medium leading-snug underline-offset-4 outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring md:min-h-0"
                       aria-label={`Open ${opportunity.name}`}
                       onClick={(event) => {
                         event.stopPropagation()
@@ -16033,7 +16033,7 @@ function OpportunitiesView({
                           type="button"
                           size="sm"
                           variant="outline"
-                          className="min-w-[104px] justify-center gap-1.5"
+                          className="h-11 min-w-[104px] justify-center gap-1.5 md:h-7"
                           aria-label={`Actions for ${opportunity.name}`}
                         >
                           Actions
@@ -16394,7 +16394,7 @@ function CallsView({
                           type="button"
                           size="sm"
                           variant="outline"
-                          className="min-w-[104px] justify-center gap-1.5"
+                          className="h-11 min-w-[104px] justify-center gap-1.5 md:h-7"
                           aria-label={`Actions for ${call.title}`}
                         >
                           Actions
