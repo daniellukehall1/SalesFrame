@@ -273,7 +273,7 @@ function HowItWorksDialog({
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center justify-center gap-1.5" aria-label={`Step ${stepIndex + 1} of ${howItWorksSteps.length}`}>
+          <div className="flex shrink-0 items-center justify-center gap-1 sm:gap-1.5" aria-label={`Step ${stepIndex + 1} of ${howItWorksSteps.length}`}>
             {howItWorksSteps.map((step, index) => (
               <button
                 key={step.title}
@@ -281,7 +281,7 @@ function HowItWorksDialog({
                 aria-label={`Show ${step.title}`}
                 aria-current={index === stepIndex ? "step" : undefined}
                 tabIndex={-1}
-                className="group grid size-11 place-items-center rounded-md transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 sm:size-8"
+                className="group grid size-11 shrink-0 place-items-center rounded-md transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 sm:size-8"
                 onClick={() => setStepIndex(index)}
               >
                 <span
@@ -332,7 +332,7 @@ const landingContactButtonClass =
   "landing-action-button landing-contact-button gap-2 border-white/80 bg-white/10 text-white shadow-sm backdrop-blur-sm hover:border-white hover:bg-white hover:text-black focus-visible:border-white focus-visible:ring-white/30 sm:gap-3"
 
 const landingTextButtonClass =
-  "rounded-sm outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-black/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+  "inline-flex min-h-11 items-center rounded-sm outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-black/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent sm:min-h-0"
 
 export function MarketingLandingPage({
   onLogin,
