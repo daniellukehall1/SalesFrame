@@ -410,6 +410,42 @@ Before/after impact: Before, provider setup could hang without an app-owned cuto
 Files changed: `.env.example`, `netlify/functions/_shared/http.ts`, `netlify/functions/_shared/openai.ts`, `netlify/functions/_shared/deepgram.ts`, `tests/functions/security-contract.test.mjs`
 Verification evidence: targeted provider-timeout security contracts and full release gate passed.
 
+### QA-030
+
+Severity: Medium
+Area: Environment readiness / configuration disclosure
+Description: `/api/system/env` required authentication but was not scoped to a workspace owner and had no endpoint-specific rate limit.
+Root cause: The endpoint was originally treated as a simple deployment readiness check and only guarded by `requireUser`, even though it reports global platform configuration status.
+User/business impact: Any signed-in user could probe whether server-side platform integrations were configured. It did not reveal secret values, but launch-grade SaaS posture should keep operational readiness details limited to owners.
+Fix applied: Required a `workspaceId`, authorized the workspace with the active session token, required workspace owner role, added a per-user/workspace rate limit, and updated deployment docs to use the scoped URL.
+Before/after impact: Before, any authenticated user could call the global readiness endpoint. After, only an owner of the referenced workspace can inspect readiness state, and repeated checks are throttled.
+Files changed: `netlify/functions/env-check.ts`, `tests/functions/security-contract.test.mjs`, `docs/netlify-env-setup.md`, `docs/product-build-spec.md`
+Verification evidence: targeted environment-readiness function contract passed.
+
+### QA-031
+
+Severity: Medium
+Area: Supabase RLS / live coach memory
+Description: The live intent ledger and opportunity stakeholder policies were protected by call/opportunity access helpers, but still contained a direct plain `is_workspace_member` workspace check.
+Root cause: The live coach memory tables were introduced before the later workspace-session hardening pass, and the broad session migration did not explicitly recreate those policies.
+User/business impact: The final policy was indirectly session-aware through access helper functions, but the policy text was ambiguous and easier to weaken in a future helper change. Live coaching memory and stakeholder evidence should explicitly require an active SalesFrame workspace session.
+Fix applied: Added a follow-up Supabase migration that recreates `call_intent_ledger` and `opportunity_stakeholders` policies with `is_workspace_member_with_active_session(...)` while preserving call/opportunity/account consistency checks.
+Before/after impact: Before, live coach memory policies mixed direct membership with active-session helper checks. After, they explicitly require active workspace session at the table policy boundary.
+Files changed: `supabase/migrations/202607090003_require_active_session_for_live_intent_memory.sql`, `tests/e2e/app-production-contract.test.mjs`
+Verification evidence: targeted live-intent-ledger and workspace-session contracts passed.
+
+### QA-032
+
+Severity: Medium
+Area: Supabase Storage RLS / call artifacts
+Description: The `call-artifacts` private storage bucket still used the original workspace-folder-only RLS policies.
+Root cause: A later migration tightened `call-recordings` to require a call ID in the object path and authorized call access, but did not apply the same shape to `call-artifacts`.
+User/business impact: Future transcript, VTT, notes, or post-call artifact files could be stored with weaker path validation than recordings. Even if the bucket is not heavily used today, it is explicitly intended for sensitive call artifacts.
+Fix applied: Added a follow-up storage migration that requires active workspace session, workspace/call path consistency, and authorized call access for read, upload, update, and delete on `call-artifacts`.
+Before/after impact: Before, call artifacts were protected by workspace folder membership only. After, artifacts must live under a valid `workspaceId/callId/...` path and the requester must be able to access that call with an active session.
+Files changed: `supabase/migrations/202607090004_tighten_call_artifact_storage_rls.sql`, `tests/functions/security-contract.test.mjs`
+Verification evidence: targeted call-recording/artifact storage contract passed.
+
 ## 11. Fixes Applied
 
 - Added visible Start Call preparation step count in `src/App.tsx`.
@@ -428,6 +464,9 @@ Verification evidence: targeted provider-timeout security contracts and full rel
 - Removed the remaining open-new-tab signed recording path from opportunity recording history and made previous call audio download-only.
 - Added a follow-up Supabase migration so `user_ai_settings` requires an active workspace session, matching the intended session-timeout security boundary.
 - Added explicit OpenAI and Deepgram upstream timeouts so provider stalls fail closed with classified recovery errors instead of broad platform timeouts.
+- Restricted the environment readiness endpoint to authenticated workspace owners and added endpoint-specific rate limiting.
+- Added an explicit active-session RLS migration for live coach intent ledger and stakeholder memory tables.
+- Tightened call-artifact storage RLS so future transcript/artifact files require active session and call-level path authorization.
 - Hardened playbook workspace reads by replacing raw combined filter strings with explicit system and workspace equality queries.
 - Replaced a raw `live-question` memory persistence warning with bounded safe logging.
 - Updated security contracts to assert session-aware authorization helper calls after workspace session enforcement.

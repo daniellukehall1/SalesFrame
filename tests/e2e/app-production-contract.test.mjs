@@ -522,6 +522,7 @@ test("call cockpit refreshes AI guidance from live transcript flow", async () =>
 
 test("live coach persists an intent ledger before selecting the next question", async () => {
   const migration = await read("supabase/migrations/202607070001_live_intent_ledger.sql")
+  const sessionMigration = await read("supabase/migrations/202607090003_require_active_session_for_live_intent_memory.sql")
   const liveQuestionFunction = await read("netlify/functions/live-question.ts")
   const core = await read("src/lib/salesframe-core.ts")
   const data = await read("src/lib/supabase/salesframe-data.ts")
@@ -536,6 +537,10 @@ test("live coach persists an intent ledger before selecting the next question", 
   assert.match(migration, /public\.can_access_opportunity\(public\.opportunity_stakeholders\.opportunity_id\)/)
   assert.match(migration, /call_record\.workspace_id = public\.call_intent_ledger\.workspace_id/)
   assert.match(migration, /account_record\.workspace_id = public\.opportunity_stakeholders\.workspace_id/)
+  assert.match(sessionMigration, /on public\.call_intent_ledger for all/)
+  assert.match(sessionMigration, /public\.is_workspace_member_with_active_session\(public\.call_intent_ledger\.workspace_id\)/)
+  assert.match(sessionMigration, /on public\.opportunity_stakeholders for all/)
+  assert.match(sessionMigration, /public\.is_workspace_member_with_active_session\(public\.opportunity_stakeholders\.workspace_id\)/)
   assert.match(liveQuestionFunction, /persistLiveQuestionMemory/)
   assert.match(liveQuestionFunction, /upsert\(combinedLedgerUpdates, \{ onConflict: "call_id,intent_cluster_id" \}\)/)
   assert.match(liveQuestionFunction, /upsert\(stakeholderUpdates, \{ onConflict: "opportunity_id,normalized_name" \}\)/)
@@ -4918,6 +4923,7 @@ test("workspace session timeout is server enforced with calm client warnings", a
   const sessionPolicy = await read("netlify/functions/session-policy.ts")
   const migration = await read("supabase/migrations/202607090001_workspace_session_timeout.sql")
   const aiSettingsSessionMigration = await read("supabase/migrations/202607090002_require_active_session_for_ai_settings.sql")
+  const liveIntentMemorySessionMigration = await read("supabase/migrations/202607090003_require_active_session_for_live_intent_memory.sql")
   const viteConfig = await read("vite.config.ts")
 
   assert.match(migration, /create table if not exists public\.workspace_session_policies/)
@@ -4934,6 +4940,10 @@ test("workspace session timeout is server enforced with calm client warnings", a
   assert.match(aiSettingsSessionMigration, /on public\.user_ai_settings for all/)
   assert.match(aiSettingsSessionMigration, /user_id = auth\.uid\(\)/)
   assert.match(aiSettingsSessionMigration, /public\.is_workspace_member_with_active_session\(workspace_id\)/)
+  assert.match(liveIntentMemorySessionMigration, /on public\.call_intent_ledger for all/)
+  assert.match(liveIntentMemorySessionMigration, /on public\.opportunity_stakeholders for all/)
+  assert.match(liveIntentMemorySessionMigration, /public\.is_workspace_member_with_active_session\(public\.call_intent_ledger\.workspace_id\)/)
+  assert.match(liveIntentMemorySessionMigration, /public\.is_workspace_member_with_active_session\(public\.opportunity_stakeholders\.workspace_id\)/)
 
   assert.match(workspaceSession, /DEFAULT_IDLE_TIMEOUT_SECONDS = 3600/)
   assert.match(workspaceSession, /DEFAULT_WARNING_AFTER_SECONDS = 2700/)

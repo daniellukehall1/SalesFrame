@@ -437,6 +437,11 @@ test("environment readiness endpoint requires an authenticated user", async () =
   const envCheck = await read("netlify/functions/env-check.ts")
 
   assert.match(envCheck, /requireUser\(request\)/)
+  assert.match(envCheck, /workspaceId is required/)
+  assert.match(envCheck, /authorizeWorkspace\(user\.id, workspaceId, supabase, \{ token \}\)/)
+  assert.match(envCheck, /requireWorkspaceOwner\(supabase, user\.id, workspaceId\)/)
+  assert.match(envCheck, /assertRateLimit/)
+  assert.match(envCheck, /methodNotAllowed/)
   assert.match(envCheck, /dataResponse/)
 })
 
@@ -564,9 +569,10 @@ test("elite live-call migration stores audio preflight and transcript reconcilia
   assert.match(types, /guidance_latency_ms: number \| null/)
 })
 
-test("call recording storage policies require workspace and call access", async () => {
+test("call recording and artifact storage policies require active workspace and call access", async () => {
   const initialStorageMigration = await read("supabase/migrations/202606270002_storage_buckets.sql")
   const tightenedStorageMigration = await read("supabase/migrations/202607070002_tighten_call_recording_storage_rls.sql")
+  const tightenedArtifactMigration = await read("supabase/migrations/202607090004_tighten_call_artifact_storage_rls.sql")
   const data = await read("src/lib/supabase/salesframe-data.ts")
 
   assert.match(initialStorageMigration, /workspace_id_from_storage_path/)
@@ -587,6 +593,16 @@ test("call recording storage policies require workspace and call access", async 
   }
 
   assert.match(tightenedStorageMigration, /bucket_id = 'call-recordings'[\s\S]*public\.is_workspace_member\(public\.workspace_id_from_storage_path\(name\)\)[\s\S]*public\.storage_path_matches_call_workspace\(name\)[\s\S]*public\.can_access_call\(public\.call_id_from_storage_path\(name\)\)/)
+  for (const policy of [
+    "Workspace members can read call artifacts",
+    "Workspace members can upload call artifacts",
+    "Workspace members can update call artifacts",
+    "Workspace members can delete call artifacts",
+  ]) {
+    assert.match(tightenedArtifactMigration, new RegExp(policy))
+  }
+
+  assert.match(tightenedArtifactMigration, /bucket_id = 'call-artifacts'[\s\S]*public\.is_workspace_member_with_active_session\(public\.workspace_id_from_storage_path\(name\)\)[\s\S]*public\.storage_path_matches_call_workspace\(name\)[\s\S]*public\.can_access_call\(public\.call_id_from_storage_path\(name\)\)/)
   assert.match(data, /return `\$\{workspaceId\}\/\$\{callId\}\/\$\{sanitizedFileName \|\| "recording\.webm"\}`/)
 })
 

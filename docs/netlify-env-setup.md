@@ -95,10 +95,10 @@ Running the Vite dev server directly is still useful for UI work, but it does no
 
 ## Verification
 
-After Netlify variables are set, open:
+After Netlify variables are set, sign in as a workspace owner and open:
 
 ```text
-/api/system/env
+/api/system/env?workspaceId=<workspace-id>
 ```
 
 Expected response:
@@ -109,6 +109,8 @@ Expected response:
   "missing": []
 }
 ```
+
+This endpoint is owner-scoped and rate-limited. It reports missing configuration without exposing secret values.
 
 For call transcription specifically, sign in and let Start Call run the live transcript check, or call the authenticated health endpoint:
 

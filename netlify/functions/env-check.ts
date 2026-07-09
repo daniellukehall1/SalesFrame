@@ -9,8 +9,10 @@ import {
   requiredFrontendEnvNames,
   requiredServerEnvNames,
 } from "./_shared/env"
-import { dataResponse, errorResponse } from "./_shared/http"
-import { requireUser } from "./_shared/supabase"
+import { badRequest, dataResponse, errorResponse, methodNotAllowed } from "./_shared/http"
+import { assertRateLimit } from "./_shared/rate-limit"
+import { authorizeWorkspace, requireUser } from "./_shared/supabase"
+import { requireWorkspaceOwner } from "./_shared/workspace-session"
 
 function getEnvStatus(name: string) {
   return {
@@ -19,9 +21,24 @@ function getEnvStatus(name: string) {
   }
 }
 
-export default async (request: Request, _context: Context) => {
+export default async (request: Request, context: Context) => {
   try {
-    await requireUser(request)
+    if (request.method !== "GET") throw methodNotAllowed()
+
+    const { supabase, token, user } = await requireUser(request)
+    const requestUrl = new URL(request.url)
+    const workspaceId = requestUrl.searchParams.get("workspaceId")?.trim()
+
+    if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
+
+    await authorizeWorkspace(user.id, workspaceId, supabase, { token })
+    await requireWorkspaceOwner(supabase, user.id, workspaceId)
+    assertRateLimit({
+      key: `${user.id}:${workspaceId}`,
+      limit: 20,
+      name: "environment readiness",
+      windowMs: 60 * 1000,
+    })
 
     const required = requiredEnvNames.map(getEnvStatus)
     const optional = optionalEnvNames.map(getEnvStatus)
@@ -41,7 +58,11 @@ export default async (request: Request, _context: Context) => {
       },
     })
   } catch (error) {
-    return errorResponse(error)
+    return errorResponse(error, undefined, {
+      context,
+      functionName: "env-check",
+      request,
+    })
   }
 }
 

@@ -913,7 +913,7 @@ Database-backed search should preserve the same behaviour while moving larger da
   - `/api/openai/speaker-attribution` labels final transcript segments as Seller, Customer, Customer 2, or Customer 3 using source stream hints, turn-taking, and recent transcript context.
   - `/api/openai/customer-research` generates and stores customer research using fixed trusted source guidance.
   - `/api/openai/post-call-outputs` first performs a post-call speaker correction pass, then generates and stores follow-up email, next-call plan, missing info, opportunity/account updates, and next-call brief.
-- Function environment variables are documented in `.env.example` and `docs/netlify-env-setup.md`. Netlify must set `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_KEY_ENCRYPTION_SECRET`; `/api/system/env` reports missing configuration without exposing secret values.
+- Function environment variables are documented in `.env.example` and `docs/netlify-env-setup.md`. Netlify must set `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_KEY_ENCRYPTION_SECRET`; `/api/system/env?workspaceId=<workspace-id>` reports missing configuration without exposing secret values and is restricted to authenticated workspace owners.
 - The hosted Supabase migrations were applied and verified via the IPv4 transaction pooler connection on 2026-06-27.
 - Workspace onboarding migration `202606270004_workspace_onboarding.sql` adds `workspaces.onboarding_completed_at` so first-run setup can be tracked per workspace.
 - The app currently uses shadcn-style components and lucide-react icons.
