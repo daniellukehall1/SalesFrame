@@ -86,7 +86,7 @@ export function AuthPage({
             <Button
               variant="ghost"
               size="sm"
-              className="h-10 gap-2 px-2 sm:h-8"
+              className="h-11 gap-2 px-2 sm:h-8"
               aria-label="Back to home"
               onClick={onBackHome}
             >
@@ -108,7 +108,7 @@ export function AuthPage({
             <Button
               variant="ghost"
               size="icon-sm"
-              className="size-10 md:size-7"
+              className="size-11 md:size-7"
               aria-label="Toggle theme"
               onClick={() => onDarkModeChange(!darkMode)}
             >

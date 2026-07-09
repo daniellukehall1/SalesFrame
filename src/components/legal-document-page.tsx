@@ -30,14 +30,14 @@ export function LegalDocumentPage({
     <main className="h-svh overflow-y-auto bg-background px-4 py-8 text-foreground">
       <div className="mx-auto grid w-full max-w-3xl gap-4">
         <div className="flex items-center justify-between gap-3">
-          <Button variant="outline" className="h-10 gap-2 px-3 md:h-8" onClick={onBack}>
+          <Button variant="outline" className="h-11 gap-2 px-3 md:h-8" onClick={onBack}>
             <ArrowLeftIcon />
             Back to SalesFrame
           </Button>
           <Button
             variant="ghost"
             size="icon-sm"
-            className="size-10 md:size-7"
+            className="size-11 md:size-7"
             aria-label="Toggle theme"
             onClick={() => onDarkModeChange(!darkMode)}
           >

@@ -6252,7 +6252,7 @@ function AuthLoadingView({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="size-10 md:size-7"
+                className="size-11 md:size-7"
                 aria-label="Toggle theme"
                 onClick={() => onDarkModeChange(!darkMode)}
               >
@@ -6782,7 +6782,7 @@ function AppHeader({
         <Button
           variant="ghost"
           size="icon"
-          className="size-10 md:size-8"
+          className="size-11 md:size-8"
           aria-label="Toggle theme"
           onClick={() => onDarkModeChange(!darkMode)}
         >
@@ -7047,7 +7047,7 @@ function GlobalSearch({
       <Button
         variant="ghost"
         size="icon"
-        className="size-10 lg:hidden"
+        className="size-11 lg:hidden"
         aria-label="Search workspace"
         onClick={() => setMobileOpen(true)}
       >
@@ -11099,7 +11099,7 @@ function HomeDashboard({
             </CardDescription>
           </div>
           <CardAction>
-            <Button variant="outline" size="sm" className="h-10 w-full gap-2 sm:w-auto md:h-7" onClick={onOpenOpportunities}>
+            <Button variant="outline" size="sm" className="h-11 w-full gap-2 sm:w-auto md:h-7" onClick={onOpenOpportunities}>
               <ChartNoAxesColumnIncreasingIcon />
               View all
             </Button>
@@ -11149,7 +11149,7 @@ function HomeDashboard({
             </CardDescription>
           </div>
           <CardAction>
-            <Button variant="outline" size="sm" className="h-10 w-full gap-2 sm:w-auto md:h-7" onClick={onOpenOpportunities}>
+            <Button variant="outline" size="sm" className="h-11 w-full gap-2 sm:w-auto md:h-7" onClick={onOpenOpportunities}>
               <Table2Icon />
               View all
             </Button>
@@ -11162,7 +11162,7 @@ function HomeDashboard({
               <Input
                 aria-label="Search account, opportunity, stakeholder, or gap"
                 value={focusQuery}
-                className="h-10 pl-9 md:h-8"
+                className="h-11 pl-9 md:h-8"
                 placeholder="Search account, opportunity, stakeholder, or gap"
                 onChange={(event) => setFocusQuery(event.currentTarget.value)}
               />
@@ -11171,7 +11171,7 @@ function HomeDashboard({
               value={focusCoverageFilter}
               onValueChange={(value) => setFocusCoverageFilter(value as OpportunityCoverageFilter)}
             >
-              <SelectTrigger className="min-h-10 w-full md:min-h-8" aria-label="Filter opportunities by coverage">
+              <SelectTrigger className="min-h-11 w-full md:min-h-8" aria-label="Filter opportunities by coverage">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -11183,7 +11183,7 @@ function HomeDashboard({
               </SelectContent>
             </Select>
             <Select value={focusSort} onValueChange={(value) => setFocusSort(value as OpportunitySort)}>
-              <SelectTrigger className="min-h-10 w-full md:min-h-8" aria-label="Sort opportunity focus">
+              <SelectTrigger className="min-h-11 w-full md:min-h-8" aria-label="Sort opportunity focus">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -11197,7 +11197,7 @@ function HomeDashboard({
             {hasFocusFilters ? (
               <Button
                 variant="outline"
-                className="h-10 gap-2 md:h-8"
+                className="h-11 gap-2 md:h-8"
                 onClick={() => {
                   setFocusQuery("")
                   setFocusCoverageFilter("all")
@@ -11359,7 +11359,7 @@ function DashboardMetric({ label, value }: { label: string; value: string }) {
 
 function OpenButton({ onClick, label = "Open" }: { onClick: () => void; label?: string }) {
   return (
-    <Button size="sm" variant="outline" className="h-10 min-w-[72px] md:h-7" onClick={onClick}>
+    <Button size="sm" variant="outline" className="h-11 min-w-[72px] md:h-7" onClick={onClick}>
       {label}
     </Button>
   )

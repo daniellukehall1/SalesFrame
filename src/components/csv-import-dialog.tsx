@@ -446,7 +446,7 @@ export function CsvImportDialog({
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      className="size-10 md:size-7"
+                      className="size-11 md:size-7"
                       aria-label="Remove selected CSV"
                       onClick={clearSelectedFile}
                     >

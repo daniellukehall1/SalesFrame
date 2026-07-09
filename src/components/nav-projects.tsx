@@ -193,7 +193,7 @@ export function NavProjects({
               type="button"
               aria-expanded={allAccountsExpanded}
               aria-label={allAccountsExpanded ? "Collapse all account opportunities" : "Expand all account opportunities"}
-              className="inline-flex h-7 items-center rounded-md px-2 text-[11px] font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+              className="inline-flex h-11 items-center rounded-md px-2 text-[11px] font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden md:h-7"
               onClick={handleToggleAllAccounts}
             >
               {allAccountsExpanded ? "Collapse all" : "Expand all"}
@@ -202,7 +202,7 @@ export function NavProjects({
           <button
             type="button"
             aria-label="Create account"
-            className="flex size-7 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+            className="flex size-11 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden md:size-7"
             onClick={() => {
               onCreateAccount()
               closeMobileNavigation()
@@ -285,7 +285,7 @@ export function NavProjects({
                         <ContextMenuTrigger asChild>
                           <SidebarMenuSubButton
                             size="sm"
-                            className="h-6 cursor-pointer text-muted-foreground data-[size=sm]:text-[11px] data-active:text-sidebar-accent-foreground [&>svg]:size-3 [&>svg]:text-muted-foreground"
+                            className="h-11 cursor-pointer text-muted-foreground data-[size=sm]:text-[11px] data-active:text-sidebar-accent-foreground md:h-6 [&>svg]:size-3 [&>svg]:text-muted-foreground"
                             isActive={opportunity.id === activeOpportunityId}
                             onClick={() => {
                               onOpportunitySelect(opportunity.id)
