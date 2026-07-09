@@ -36,6 +36,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import type { CurrencyCode } from "@/lib/salesframe-core"
+import { cn } from "@/lib/utils"
 
 export type AccountNavItem = {
   id: string
@@ -185,18 +186,22 @@ export function NavProjects({
 
   return (
     <SidebarGroup>
-      <SidebarGroupLabel className="justify-between gap-2 pr-1">
-        <span>Accounts</span>
-        <span className="flex items-center gap-1">
+      <SidebarGroupLabel className="justify-between gap-1 pr-0">
+        <span className="min-w-0 truncate">Accounts</span>
+        <span className="flex shrink-0 items-center gap-1">
           {expandableAccountIds.length ? (
             <button
               type="button"
               aria-expanded={allAccountsExpanded}
               aria-label={allAccountsExpanded ? "Collapse all account opportunities" : "Expand all account opportunities"}
-              className="inline-flex h-11 items-center rounded-md px-2 text-[11px] font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden md:h-7"
+              className="inline-flex size-11 items-center justify-center rounded-md text-[11px] font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden md:h-7 md:w-auto md:px-2"
               onClick={handleToggleAllAccounts}
             >
-              {allAccountsExpanded ? "Collapse all" : "Expand all"}
+              <ChevronRightIcon
+                className={cn("size-4 transition-transform duration-200 md:hidden", allAccountsExpanded && "rotate-90")}
+                aria-hidden="true"
+              />
+              <span className="hidden md:inline">{allAccountsExpanded ? "Collapse all" : "Expand all"}</span>
             </button>
           ) : null}
           <button

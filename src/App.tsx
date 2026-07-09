@@ -7629,6 +7629,7 @@ function StartRecordingDialog({
   const startAbortControllerRef = React.useRef<AbortController | null>(null)
   const microphonePreviewStreamRef = React.useRef<MediaStream | null>(null)
   const meetingAudioPreviewStreamRef = React.useRef<MediaStream | null>(null)
+  const startCallBodyScrollRef = React.useRef<HTMLDivElement | null>(null)
 
   const selectedAccount = accounts.find((account) => account.id === accountId)
   const selectedOpportunity = opportunities.find((opportunity) => opportunity.id === opportunityId)
@@ -7856,6 +7857,22 @@ function StartRecordingDialog({
 
     void refreshAudioDevices()
   }, [open, refreshAudioDevices, step])
+
+  React.useEffect(() => {
+    if (!open) return
+
+    const frameId = window.requestAnimationFrame(() => {
+      const bodyScrollElement = startCallBodyScrollRef.current
+      bodyScrollElement?.scrollTo({ left: 0, top: 0, behavior: "auto" })
+
+      if (isMobile) {
+        const drawerContent = bodyScrollElement?.closest('[data-slot="drawer-content"]') as HTMLElement | null
+        drawerContent?.scrollTo({ left: 0, top: 0, behavior: "auto" })
+      }
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
+  }, [isMobile, open, startSubmitting, step])
 
   React.useEffect(() => {
     if (!open || step !== 3 || startSubmitting) {
@@ -8429,7 +8446,7 @@ function StartRecordingDialog({
         {startSubmitting ? (
           <>
             {renderStartCallSteps(true)}
-            <div className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 max-sm:pr-0">
+            <div ref={startCallBodyScrollRef} className="min-h-0 overflow-y-auto overflow-x-hidden pr-1 max-sm:pr-0">
               <StartCallPreparingView
                 activeIndex={startPhaseIndex}
                 detail={startPreparationDetail}
@@ -8452,7 +8469,7 @@ function StartRecordingDialog({
           <>
             {renderStartCallSteps(false)}
 
-            <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain pr-1 max-sm:pr-0">
+            <div ref={startCallBodyScrollRef} className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain pr-1 max-sm:pr-0">
               {step === 1 ? (
                 <div className="grid min-w-0 gap-4">
                   <div className="flex items-center gap-2">
