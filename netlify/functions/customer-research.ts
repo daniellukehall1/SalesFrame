@@ -145,12 +145,12 @@ export default async (request: Request, _context: Context) => {
     const payload = await readJson<CustomerResearchPayload>(request)
     if (!payload.accountId) throw badRequest("accountId is required.", "account_id_required")
 
-    const { supabase, user } = await requireUser(request)
-    const authorizedAccount = await authorizeAccount(user.id, payload.accountId)
+    const { supabase, token, user } = await requireUser(request)
+    const authorizedAccount = await authorizeAccount(user.id, payload.accountId, supabase, { token })
     const authorizedOpportunity = payload.opportunityId
-      ? await authorizeOpportunity(user.id, payload.opportunityId)
+      ? await authorizeOpportunity(user.id, payload.opportunityId, supabase, { token })
       : null
-    const authorizedCall = payload.callId ? await authorizeCall(user.id, payload.callId) : null
+    const authorizedCall = payload.callId ? await authorizeCall(user.id, payload.callId, supabase, { token }) : null
 
     if (authorizedOpportunity && authorizedOpportunity.account_id !== payload.accountId) {
       throw forbidden("Opportunity does not belong to this account.")

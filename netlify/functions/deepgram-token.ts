@@ -17,8 +17,8 @@ export default async (request: Request, _context: Context) => {
     const payload = await request.json().catch(() => ({})) as DeepgramTokenPayload
     if (!payload.callId) throw badRequest("callId is required.", "call_id_required")
 
-    const { user } = await requireUser(request)
-    const call = await authorizeCall(user.id, payload.callId)
+    const { token: authToken, user } = await requireUser(request)
+    const call = await authorizeCall(user.id, payload.callId, undefined, { token: authToken })
     assertRateLimit({
       key: `${user.id}:${call.id}:${payload.sourceKind ?? "source"}`,
       limit: 40,
@@ -27,7 +27,7 @@ export default async (request: Request, _context: Context) => {
     })
 
     const config = getDeepgramFluxConfig()
-    const token = await createDeepgramTemporaryToken({
+    const deepgramToken = await createDeepgramTemporaryToken({
       callId: call.id,
       sourceKind: payload.sourceKind ?? "source",
       userId: user.id,
@@ -36,9 +36,9 @@ export default async (request: Request, _context: Context) => {
     const websocketUrl = websocketUrls[0]
 
     return dataResponse({
-      accessToken: token.accessToken,
+      accessToken: deepgramToken.accessToken,
       config,
-      expiresIn: token.expiresIn,
+      expiresIn: deepgramToken.expiresIn,
       websocketUrl,
       websocketUrls,
     })

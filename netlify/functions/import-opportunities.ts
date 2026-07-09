@@ -54,12 +54,12 @@ export default async (request: Request, context: Context) => {
   try {
     if (request.method !== "POST") throw methodNotAllowed()
 
-    const { supabase, user } = await requireUser(request)
+    const { supabase, token, user } = await requireUser(request)
     const payload = await readJson<ImportOpportunitiesPayload>(request)
     const workspaceId = payload.workspaceId?.trim()
     if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
 
-    await authorizeWorkspace(user.id, workspaceId, supabase)
+    await authorizeWorkspace(user.id, workspaceId, supabase, { token })
     assertRateLimit({
       key: `${user.id}:${workspaceId}`,
       limit: 12,

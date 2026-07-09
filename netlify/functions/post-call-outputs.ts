@@ -376,8 +376,8 @@ export default async (request: Request, _context: Context) => {
     const payload = await readJson<PostCallPayload>(request)
     if (!payload.callId) throw badRequest("callId is required.", "call_id_required")
 
-    const { supabase, user } = await requireUser(request)
-    const authorizedCall = await authorizeCall(user.id, payload.callId)
+    const { supabase, token, user } = await requireUser(request)
+    const authorizedCall = await authorizeCall(user.id, payload.callId, supabase, { token })
     assertRateLimit({
       key: `${user.id}:${authorizedCall.id}`,
       limit: 10,

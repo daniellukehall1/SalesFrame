@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient, type User } from "@supabase/supabase
 import type { Database } from "../../../src/lib/supabase/database.types"
 import { getEnv, requireEnv } from "./env"
 import { forbidden, notFound, unauthorized } from "./http"
+import { requireActiveWorkspaceSession } from "./workspace-session"
 
 let adminClient: SupabaseClient<Database> | null = null
 
@@ -76,7 +77,8 @@ export async function requireUser(request: Request): Promise<AuthedRequestContex
 export async function authorizeWorkspace(
   userId: string,
   workspaceId: string,
-  supabase: SupabaseClient<Database> = getSupabaseAdmin()
+  supabase: SupabaseClient<Database> = getSupabaseAdmin(),
+  options: { activeCallId?: string | null; requireActiveSession?: boolean; token?: string } = {}
 ) {
   const { data, error } = await supabase
     .from("workspace_members")
@@ -87,12 +89,23 @@ export async function authorizeWorkspace(
 
   if (error) throw new Error(error.message)
   if (!data) throw forbidden()
+
+  if (options.requireActiveSession === false) return
+
+  await requireActiveWorkspaceSession({
+    activeCallId: options.activeCallId ?? null,
+    supabase,
+    token: options.token,
+    userId,
+    workspaceId,
+  })
 }
 
 export async function authorizeAccount(
   userId: string,
   accountId: string,
-  supabase: SupabaseClient<Database> = getSupabaseAdmin()
+  supabase: SupabaseClient<Database> = getSupabaseAdmin(),
+  options: { activeCallId?: string | null; requireActiveSession?: boolean; token?: string } = {}
 ) {
   const { data: account, error } = await supabase
     .from("accounts")
@@ -103,7 +116,7 @@ export async function authorizeAccount(
   if (error) throw new Error(error.message)
   if (!account) throw notFound("Account was not found.")
 
-  await authorizeWorkspace(userId, account.workspace_id, supabase)
+  await authorizeWorkspace(userId, account.workspace_id, supabase, options)
 
   return account
 }
@@ -111,7 +124,8 @@ export async function authorizeAccount(
 export async function authorizeOpportunity(
   userId: string,
   opportunityId: string,
-  supabase: SupabaseClient<Database> = getSupabaseAdmin()
+  supabase: SupabaseClient<Database> = getSupabaseAdmin(),
+  options: { activeCallId?: string | null; requireActiveSession?: boolean; token?: string } = {}
 ) {
   const { data: opportunity, error } = await supabase
     .from("opportunities")
@@ -122,7 +136,7 @@ export async function authorizeOpportunity(
   if (error) throw new Error(error.message)
   if (!opportunity) throw notFound("Opportunity was not found.")
 
-  await authorizeWorkspace(userId, opportunity.workspace_id, supabase)
+  await authorizeWorkspace(userId, opportunity.workspace_id, supabase, options)
 
   return opportunity
 }
@@ -130,7 +144,8 @@ export async function authorizeOpportunity(
 export async function authorizeCall(
   userId: string,
   callId: string,
-  supabase: SupabaseClient<Database> = getSupabaseAdmin()
+  supabase: SupabaseClient<Database> = getSupabaseAdmin(),
+  options: { activeCallId?: string | null; requireActiveSession?: boolean; token?: string } = {}
 ) {
   const { data: call, error } = await supabase
     .from("calls")
@@ -141,7 +156,10 @@ export async function authorizeCall(
   if (error) throw new Error(error.message)
   if (!call) throw notFound("Call was not found.")
 
-  await authorizeWorkspace(userId, call.workspace_id, supabase)
+  await authorizeWorkspace(userId, call.workspace_id, supabase, {
+    ...options,
+    activeCallId: options.activeCallId ?? call.id,
+  })
 
   return call
 }

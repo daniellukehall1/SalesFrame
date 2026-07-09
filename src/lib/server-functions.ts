@@ -107,6 +107,44 @@ export type BulkImportStatusResponse = {
   runs: BulkImportRunStatus[]
 }
 
+export type WorkspaceSessionActivityType =
+  | "app_load"
+  | "workspace_load"
+  | "workspace_switch"
+  | "route_change"
+  | "user_activity"
+  | "data_save"
+  | "file_upload"
+  | "live_call_heartbeat"
+  | "start_call_check"
+  | "stay_signed_in"
+
+export type WorkspaceSessionPolicy = {
+  absolute_timeout_seconds: number
+  created_at: string
+  idle_timeout_seconds: number | null
+  updated_at: string
+  updated_by: string | null
+  warning_after_seconds: number
+  workspace_id: string
+}
+
+export type WorkspaceSessionStatusResponse = {
+  absoluteDeadline: string
+  expiresAt: string
+  idleDeadline: string | null
+  lastActivityAt: string
+  now: string
+  policy: {
+    absoluteTimeoutSeconds: number
+    idleTimeoutSeconds: number | null
+    warningAfterSeconds: number
+  }
+  startedAt: string
+  state: "active" | "warning" | "expired"
+  warningAt: string | null
+}
+
 type FunctionRequestOptions = {
   body?: unknown
   method?: "DELETE" | "GET" | "POST"
@@ -455,5 +493,39 @@ export function retryFailedBulkEnrichment(workspaceId: string) {
   return callFunction<BulkImportStatusResponse>("/api/import/enrichment-status", {
     method: "POST",
     body: { action: "retry_failed", workspaceId },
+  })
+}
+
+export function recordWorkspaceSessionActivity(body: {
+  activeCallId?: string | null
+  activityType?: WorkspaceSessionActivityType
+  workspaceId: string
+}) {
+  return callFunction<WorkspaceSessionStatusResponse>("/api/session/activity", {
+    method: "POST",
+    body,
+    timeoutMs: 6000,
+  })
+}
+
+export function getWorkspaceSessionStatus(workspaceId: string) {
+  return callFunction<WorkspaceSessionStatusResponse>(
+    `/api/session/status?workspaceId=${encodeURIComponent(workspaceId)}`,
+    { timeoutMs: 6000 }
+  )
+}
+
+export function getWorkspaceSessionPolicy(workspaceId: string) {
+  return callFunction<WorkspaceSessionPolicy>(
+    `/api/session/policy?workspaceId=${encodeURIComponent(workspaceId)}`,
+    { timeoutMs: 6000 }
+  )
+}
+
+export function saveWorkspaceSessionPolicy(workspaceId: string, idleTimeoutSeconds: number | null) {
+  return callFunction<WorkspaceSessionPolicy>("/api/session/policy", {
+    method: "POST",
+    body: { idleTimeoutSeconds, workspaceId },
+    timeoutMs: 6000,
   })
 }

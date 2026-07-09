@@ -469,17 +469,19 @@ export async function runAccountEnrichmentForAccount({
   accountId,
   rateLimit = true,
   supabase,
+  token,
   userId,
 }: {
   accountId: string
   rateLimit?: boolean
   supabase: SupabaseClient<Database>
+  token?: string
   userId: string
 }) {
   let accountForFailedRun: { id: string; workspace_id: string; name?: string | null; website?: string | null } | null = null
 
   try {
-    const authorizedAccount = await authorizeAccount(userId, accountId, supabase)
+    const authorizedAccount = await authorizeAccount(userId, accountId, supabase, { token })
     const { data: account, error: accountError } = await supabase
       .from("accounts")
       .select("*")
@@ -665,12 +667,13 @@ export default async function handler(request: Request, _context: Context) {
     const payload = await readJson<AccountEnrichmentPayload>(request)
     if (!payload.accountId) throw badRequest("accountId is required.", "account_id_required")
 
-    const { supabase, user } = await requireUser(request)
+    const { supabase, token, user } = await requireUser(request)
 
     return dataResponse(
       await runAccountEnrichmentForAccount({
         accountId: payload.accountId,
         supabase,
+        token,
         userId: user.id,
       })
     )

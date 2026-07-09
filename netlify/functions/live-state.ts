@@ -199,10 +199,10 @@ export default async (request: Request, _context: Context) => {
     if (!payload.accountId) throw badRequest("accountId is required.", "account_id_required")
     if (!payload.opportunityId) throw badRequest("opportunityId is required.", "opportunity_id_required")
 
-    const { supabase, user } = await requireUser(request)
-    const call = await authorizeCall(user.id, payload.callId)
-    const account = await authorizeAccount(user.id, payload.accountId)
-    const opportunity = await authorizeOpportunity(user.id, payload.opportunityId)
+    const { supabase, token, user } = await requireUser(request)
+    const call = await authorizeCall(user.id, payload.callId, supabase, { token })
+    const account = await authorizeAccount(user.id, payload.accountId, supabase, { token })
+    const opportunity = await authorizeOpportunity(user.id, payload.opportunityId, supabase, { token })
 
     if (call.account_id !== account.id) throw forbidden("Call does not belong to this account.")
     if (call.opportunity_id !== opportunity.id) throw forbidden("Call does not belong to this opportunity.")

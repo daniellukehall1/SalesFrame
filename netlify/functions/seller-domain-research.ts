@@ -83,11 +83,13 @@ function assertSellerDomainResearchResult(value: unknown): SellerDomainResearchR
 async function getApiKey({
   apiKey,
   supabase,
+  token,
   userId,
   workspaceId,
 }: {
   apiKey?: string
   supabase: Awaited<ReturnType<typeof requireUser>>["supabase"]
+  token?: string
   userId: string
   workspaceId?: string
 }) {
@@ -98,7 +100,7 @@ async function getApiKey({
     throw badRequest("workspaceId is required when using a saved OpenAI key.", "workspace_id_required")
   }
 
-  await authorizeWorkspace(userId, workspaceId)
+  await authorizeWorkspace(userId, workspaceId, supabase, { token })
 
   try {
     return await getDecryptedOpenAiKey(supabase, userId, workspaceId)
@@ -123,10 +125,11 @@ export default async (request: Request, _context: Context) => {
       throw badRequest("Enter a valid company domain.", "seller_domain_required")
     }
 
-    const { supabase, user } = await requireUser(request)
+    const { supabase, token, user } = await requireUser(request)
     const apiKey = await getApiKey({
       apiKey: payload.apiKey,
       supabase,
+      token,
       userId: user.id,
       workspaceId: payload.workspaceId,
     })

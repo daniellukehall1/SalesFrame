@@ -112,6 +112,85 @@ export type Database = {
           updated_at?: string
         }
       >
+      workspace_session_policies: TableDefinition<
+        {
+          workspace_id: string
+          idle_timeout_seconds: number | null
+          warning_after_seconds: number
+          absolute_timeout_seconds: number
+          updated_by: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          workspace_id: string
+          idle_timeout_seconds?: number | null
+          warning_after_seconds?: number
+          absolute_timeout_seconds?: number
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          workspace_id?: string
+          idle_timeout_seconds?: number | null
+          warning_after_seconds?: number
+          absolute_timeout_seconds?: number
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      workspace_session_activity: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          user_id: string
+          session_key: string
+          started_at: string
+          last_activity_at: string
+          last_heartbeat_at: string
+          active_call_id: string | null
+          active_call_started_at: string | null
+          expires_at: string
+          expired_at: string | null
+          expired_reason: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          user_id: string
+          session_key: string
+          started_at?: string
+          last_activity_at?: string
+          last_heartbeat_at?: string
+          active_call_id?: string | null
+          active_call_started_at?: string | null
+          expires_at: string
+          expired_at?: string | null
+          expired_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          user_id?: string
+          session_key?: string
+          started_at?: string
+          last_activity_at?: string
+          last_heartbeat_at?: string
+          active_call_id?: string | null
+          active_call_started_at?: string | null
+          expires_at?: string
+          expired_at?: string | null
+          expired_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
       accounts: TableDefinition<
         {
           id: string
@@ -1324,6 +1403,18 @@ export type Database = {
     Views: Record<string, never>
     Functions: {
       is_workspace_member: {
+        Args: { target_workspace_id: string }
+        Returns: boolean
+      }
+      current_salesframe_session_key: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      is_workspace_session_active: {
+        Args: { target_workspace_id: string }
+        Returns: boolean
+      }
+      is_workspace_member_with_active_session: {
         Args: { target_workspace_id: string }
         Returns: boolean
       }

@@ -12,14 +12,14 @@ type SaveKeyPayload = {
 
 export default async (request: Request, context: Context) => {
   try {
-    const { supabase, user } = await requireUser(request)
+    const { supabase, token, user } = await requireUser(request)
     const requestUrl = new URL(request.url)
     const queryWorkspaceId = requestUrl.searchParams.get("workspaceId") ?? undefined
 
     if (request.method === "GET") {
       const workspaceId = queryWorkspaceId
       if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
-      await authorizeWorkspace(user.id, workspaceId, supabase)
+      await authorizeWorkspace(user.id, workspaceId, supabase, { token })
 
       return dataResponse(await getOpenAiKeyStatus(supabase, user.id, workspaceId))
     }
@@ -28,7 +28,7 @@ export default async (request: Request, context: Context) => {
       const payload = await readJson<SaveKeyPayload>(request)
       const workspaceId = payload.workspaceId ?? queryWorkspaceId
       if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
-      await authorizeWorkspace(user.id, workspaceId, supabase)
+      await authorizeWorkspace(user.id, workspaceId, supabase, { token })
 
       const status = await saveOpenAiKey({
         apiKey: payload.apiKey ?? "",
@@ -49,7 +49,7 @@ export default async (request: Request, context: Context) => {
     if (request.method === "DELETE") {
       const workspaceId = queryWorkspaceId
       if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
-      await authorizeWorkspace(user.id, workspaceId, supabase)
+      await authorizeWorkspace(user.id, workspaceId, supabase, { token })
       await removeOpenAiKey(supabase, user.id, workspaceId)
 
       return dataResponse({ connected: false })

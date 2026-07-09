@@ -141,6 +141,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { PlaybookIcon } from "@/data/playbook-icons"
 import { playbooks } from "@/data/playbook-reference-data"
 import type { LegalPageId } from "@/data/legal-documents"
+import { calculateAudioMeterPercent, smoothAudioMeterLevel } from "@/lib/audio-level-meter"
 import {
   useCallCapture,
   type CallCapturePermissionState,
@@ -179,6 +180,9 @@ import {
   deleteOpenAiKey,
   getBulkImportStatus,
   getOpenAiKeyStatus,
+  getWorkspaceSessionPolicy,
+  getWorkspaceSessionStatus,
+  recordWorkspaceSessionActivity,
   retryFailedBulkEnrichment,
   requestAccountEnrichment,
   requestCustomerResearch,
@@ -188,8 +192,11 @@ import {
   requestPostCallOutputs,
   requestSellerDomainResearch,
   saveOpenAiKey,
+  saveWorkspaceSessionPolicy,
   type BulkImportStatusResponse,
   type OpenAiKeyStatus,
+  type WorkspaceSessionPolicy,
+  type WorkspaceSessionStatusResponse,
 } from "@/lib/server-functions"
 import {
   getPlaybookIdsForSelection,
@@ -455,6 +462,19 @@ const timezoneOptions = [
   { value: "America/Denver", label: "America/Denver" },
   { value: "America/Los_Angeles", label: "America/Los_Angeles" },
 ] as const
+
+const workspaceSessionTimeoutOptions = [
+  { label: "1 hour", value: "3600" },
+  { label: "4 hours", value: "14400" },
+  { label: "8 hours", value: "28800" },
+  { label: "24 hours", value: "86400" },
+  { label: "1 week", value: "604800" },
+  { label: "Never", value: "never" },
+] as const
+
+const workspaceSessionExpiredMessage = "We signed you out to keep your workspace safe."
+const workspaceSessionActivityThrottleMs = 60_000
+const workspaceSessionLiveHeartbeatMs = 60_000
 
 const profileRouteIds = ["profile-account"]
 const settingsRouteIds = ["settings", "capture", "retention", "ai"]
@@ -2052,6 +2072,9 @@ function App() {
   const [authStatusTone, setAuthStatusTone] = React.useState<"success" | "error" | "info">("info")
   const [savedOpenAiKeyState, setSavedOpenAiKeyState] = React.useState<SavedOpenAiKeyState | null>(null)
   const [openAiKeyStatusMessage, setOpenAiKeyStatusMessage] = React.useState("")
+  const [workspaceSessionStatus, setWorkspaceSessionStatus] =
+    React.useState<WorkspaceSessionStatusResponse | null>(null)
+  const [workspaceSessionWarningOpen, setWorkspaceSessionWarningOpen] = React.useState(false)
   const [bulkImportStatus, setBulkImportStatus] = React.useState<BulkImportStatusResponse | null>(null)
   const [bulkImportStatusMessage, setBulkImportStatusMessage] = React.useState("")
   const [bulkImportStatusLoading, setBulkImportStatusLoading] = React.useState(false)
@@ -2139,6 +2162,9 @@ function App() {
   const appMainScrollRef = React.useRef<HTMLElement | null>(null)
   const pendingNavigationScrollResetRef = React.useRef(false)
   const lastScrolledNavigationKeyRef = React.useRef("")
+  const workspaceSessionActivitySentAtRef = React.useRef(0)
+  const workspaceSessionStatusRef = React.useRef<WorkspaceSessionStatusResponse | null>(null)
+  const handleWorkspaceSessionExpiredRef = React.useRef<((message?: string) => void) | null>(null)
 
   const activeOpportunity =
     workspaceOpportunities.find((opportunity) => opportunity.id === activeOpportunityId) ??
@@ -2506,6 +2532,175 @@ function App() {
     transcriptRef.current = transcript
   }, [transcript])
 
+  React.useEffect(() => {
+    workspaceSessionStatusRef.current = workspaceSessionStatus
+  }, [workspaceSessionStatus])
+
+  const handleWorkspaceSessionStatus = React.useCallback((status: WorkspaceSessionStatusResponse) => {
+    setWorkspaceSessionStatus(status)
+
+    if (status.state === "expired") {
+      handleWorkspaceSessionExpiredRef.current?.(workspaceSessionExpiredMessage)
+      return
+    }
+
+    if (status.state !== "warning" || isCallLiveRef.current) {
+      setWorkspaceSessionWarningOpen(false)
+    }
+  }, [])
+
+  const sendWorkspaceSessionActivity = React.useCallback(async (
+    activityType: Parameters<typeof recordWorkspaceSessionActivity>[0]["activityType"] = "user_activity",
+    options: { force?: boolean } = {}
+  ) => {
+    if (!authSession || !activeWorkspaceId) return null
+
+    const now = Date.now()
+    const activeCallForHeartbeat = isCallLiveRef.current ? activeCallIdRef.current || callCapture.activeCallId || null : null
+
+    if (
+      !options.force &&
+      !activeCallForHeartbeat &&
+      now - workspaceSessionActivitySentAtRef.current < workspaceSessionActivityThrottleMs
+    ) {
+      return workspaceSessionStatusRef.current
+    }
+
+    workspaceSessionActivitySentAtRef.current = now
+
+    try {
+      const status = await recordWorkspaceSessionActivity({
+        activeCallId: activeCallForHeartbeat,
+        activityType,
+        workspaceId: activeWorkspaceId,
+      })
+
+      handleWorkspaceSessionStatus(status)
+
+      return status
+    } catch (caughtError: unknown) {
+      const message = getUserFacingErrorMessage(caughtError, workspaceSessionExpiredMessage)
+
+      if (message === workspaceSessionExpiredMessage || /session/i.test(message)) {
+        handleWorkspaceSessionExpiredRef.current?.(message)
+      }
+
+      throw caughtError
+    }
+  }, [activeWorkspaceId, authSession, callCapture.activeCallId, handleWorkspaceSessionStatus])
+
+  React.useEffect(() => {
+    if (!authSession || !activeWorkspaceId) {
+      setWorkspaceSessionStatus(null)
+      setWorkspaceSessionWarningOpen(false)
+      return
+    }
+
+    let cancelled = false
+
+    getWorkspaceSessionStatus(activeWorkspaceId)
+      .then((status) => {
+        if (cancelled) return
+        handleWorkspaceSessionStatus(status)
+      })
+      .catch((caughtError: unknown) => {
+        const message = getUserFacingErrorMessage(caughtError, workspaceSessionExpiredMessage)
+
+        if (!cancelled && (message === workspaceSessionExpiredMessage || /session/i.test(message))) {
+          handleWorkspaceSessionExpiredRef.current?.(message)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeWorkspaceId, authSession, handleWorkspaceSessionStatus])
+
+  React.useEffect(() => {
+    if (!authSession || !activeWorkspaceId) return
+
+    const broadcastChannel =
+      "BroadcastChannel" in window ? new BroadcastChannel("salesframe-session-activity") : null
+    const recordActivity = () => {
+      broadcastChannel?.postMessage({ activeWorkspaceId, type: "activity" })
+      void sendWorkspaceSessionActivity("user_activity").catch(() => undefined)
+    }
+    const recordBroadcastActivity = () => {
+      void sendWorkspaceSessionActivity("user_activity").catch(() => undefined)
+    }
+    const activityEvents: Array<keyof WindowEventMap> = [
+      "keydown",
+      "pointerdown",
+      "touchstart",
+    ]
+
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, recordActivity, { passive: true }))
+    window.addEventListener("focus", recordActivity)
+    window.addEventListener("visibilitychange", recordActivity)
+    broadcastChannel?.addEventListener("message", recordBroadcastActivity)
+
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, recordActivity))
+      window.removeEventListener("focus", recordActivity)
+      window.removeEventListener("visibilitychange", recordActivity)
+      broadcastChannel?.removeEventListener("message", recordBroadcastActivity)
+      broadcastChannel?.close()
+    }
+  }, [activeWorkspaceId, authSession, sendWorkspaceSessionActivity])
+
+  React.useEffect(() => {
+    if (!authSession || !activeWorkspaceId) return
+
+    const intervalId = window.setInterval(() => {
+      if (isCallLiveRef.current) {
+        void sendWorkspaceSessionActivity("live_call_heartbeat", { force: true }).catch(() => undefined)
+        return
+      }
+
+      getWorkspaceSessionStatus(activeWorkspaceId)
+        .then(handleWorkspaceSessionStatus)
+        .catch((caughtError: unknown) => {
+          const message = getUserFacingErrorMessage(caughtError, workspaceSessionExpiredMessage)
+
+          if (message === workspaceSessionExpiredMessage || /session/i.test(message)) {
+            handleWorkspaceSessionExpiredRef.current?.(message)
+          }
+        })
+    }, workspaceSessionLiveHeartbeatMs)
+
+    return () => window.clearInterval(intervalId)
+  }, [activeWorkspaceId, authSession, handleWorkspaceSessionStatus, sendWorkspaceSessionActivity])
+
+  React.useEffect(() => {
+    if (!workspaceSessionStatus || !authSession || !activeWorkspaceId || isCallLive) {
+      setWorkspaceSessionWarningOpen(false)
+      return
+    }
+
+    const now = Date.now()
+    const warningTime = workspaceSessionStatus.warningAt ? new Date(workspaceSessionStatus.warningAt).getTime() : null
+    const expiryTime = new Date(workspaceSessionStatus.expiresAt).getTime()
+    const timeoutIds: number[] = []
+
+    if (workspaceSessionStatus.state === "warning" || (warningTime !== null && now >= warningTime)) {
+      setWorkspaceSessionWarningOpen(workspaceSessionStatus.state !== "expired")
+    } else if (warningTime !== null) {
+      timeoutIds.push(window.setTimeout(() => setWorkspaceSessionWarningOpen(true), Math.max(0, warningTime - now)))
+    }
+
+    if (now >= expiryTime) {
+      handleWorkspaceSessionExpiredRef.current?.(workspaceSessionExpiredMessage)
+    } else {
+      timeoutIds.push(
+        window.setTimeout(() => {
+          handleWorkspaceSessionExpiredRef.current?.(workspaceSessionExpiredMessage)
+        }, Math.max(0, expiryTime - now))
+      )
+    }
+
+    return () => timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId))
+  }, [activeWorkspaceId, authSession, isCallLive, workspaceSessionStatus])
+
   React.useLayoutEffect(() => {
     if (pageLoadingView || loadingWorkspace || workspaceDataState === "loading") return
     if (!pendingNavigationScrollResetRef.current && lastScrolledNavigationKeyRef.current === activeNavigationKey) return
@@ -2601,6 +2796,8 @@ function App() {
     setWorkspaceErrorMessage("")
 
     try {
+      await sendWorkspaceSessionActivity("workspace_load", { force: true })
+
       const [
         accountRows,
         opportunityRows,
@@ -2723,6 +2920,7 @@ function App() {
   }, [
     activeWorkspaceId,
     authSession,
+    sendWorkspaceSessionActivity,
   ])
 
   React.useEffect(() => {
@@ -3624,6 +3822,25 @@ function App() {
       }
       if (!isNewAccount && !accountId) {
         throw new Error("Choose an account before starting the call.")
+      }
+
+      const sessionStatus = await sendWorkspaceSessionActivity("start_call_check", { force: true })
+      const absoluteDeadlineMs = sessionStatus?.absoluteDeadline
+        ? new Date(sessionStatus.absoluteDeadline).getTime()
+        : Number.POSITIVE_INFINITY
+      const callBufferSeconds = 5 * 60
+
+      if (sessionStatus?.state === "expired") {
+        throw new Error(workspaceSessionExpiredMessage)
+      }
+      if (absoluteDeadlineMs - Date.now() < (MAX_LIVE_CALL_SECONDS + callBufferSeconds) * 1000) {
+        const message = "Sign in again before starting this call so SalesFrame can safely save the whole recording."
+        handleWorkspaceSessionExpiredRef.current?.(message)
+
+        return {
+          message,
+          ok: false as const,
+        }
       }
 
       updatePreparationStep("ai_access", "Checking that this workspace has the AI key it needs.")
@@ -5021,7 +5238,10 @@ function App() {
     [activeWorkspaceId]
   )
 
-  const signOutAndResetAuthState = async (destination: "landing" | "login" = "landing") => {
+  const signOutAndResetAuthState = async (
+    destination: "landing" | "login" = "landing",
+    options: { message?: string; tone?: "success" | "error" | "info" } = {}
+  ) => {
     setIsRecording(false)
     setLoadingWorkspace(null)
     if (workspaceLoadTimeoutRef.current !== null) {
@@ -5050,6 +5270,8 @@ function App() {
     setPendingCsvImportMode(null)
     setSavedOpenAiKeyState(null)
     setOpenAiKeyStatusMessage("")
+    setWorkspaceSessionStatus(null)
+    setWorkspaceSessionWarningOpen(false)
     setAccountDrafts({})
     setSavedAccountDrafts({})
     setOpportunityDrafts({})
@@ -5064,9 +5286,36 @@ function App() {
     if (window.location.pathname !== nextPath) {
       window.history.pushState(null, "", nextPath)
     }
-    setAuthStatusTone(error ? "error" : "success")
-    setAuthStatusMessage(error ? getUserFacingErrorMessage(error, "Sign-out needs another try.") : "Signed out.")
+    setAuthStatusTone(error ? "error" : options.tone ?? "success")
+    setAuthStatusMessage(error ? getUserFacingErrorMessage(error, "Sign-out needs another try.") : options.message ?? "Signed out.")
   }
+
+  const handleWorkspaceSessionExpired = React.useCallback(async (message = workspaceSessionExpiredMessage) => {
+    setWorkspaceSessionWarningOpen(false)
+
+    if (isCallLiveRef.current && (activeCallIdRef.current || callCapture.activeCallId)) {
+      try {
+        await handleRecordingChange(false)
+      } catch {
+        // The sign-out still needs to happen; call capture will have already attempted to save what it can.
+      }
+    }
+
+    await signOutAndResetAuthState("login", {
+      message,
+      tone: "info",
+    })
+  }, [callCapture.activeCallId])
+
+  React.useEffect(() => {
+    handleWorkspaceSessionExpiredRef.current = (message?: string) => {
+      void handleWorkspaceSessionExpired(message)
+    }
+
+    return () => {
+      handleWorkspaceSessionExpiredRef.current = null
+    }
+  }, [handleWorkspaceSessionExpired])
 
   const handleAuthLogout = async () => {
     await signOutAndResetAuthState("landing")
@@ -5146,6 +5395,12 @@ function App() {
     setActiveView("home")
     requestNavigationScrollReset()
     setActiveWorkspaceId(workspace.id)
+    void recordWorkspaceSessionActivity({
+      activityType: "workspace_switch",
+      workspaceId: workspace.id,
+    })
+      .then(handleWorkspaceSessionStatus)
+      .catch(() => undefined)
     setWorkspaceDataState("loading")
     setLoadingWorkspace(workspace)
     workspaceLoadTimeoutRef.current = window.setTimeout(() => {
@@ -5275,6 +5530,11 @@ function App() {
       return
     }
 
+    await recordWorkspaceSessionActivity({
+      activityType: "workspace_switch",
+      workspaceId: targetWorkspaceId,
+    }).then(handleWorkspaceSessionStatus)
+
     if (apiKey.trim()) {
       const status = await saveOpenAiKey(apiKey, targetWorkspaceId)
       setSavedOpenAiKeyState(mapOpenAiKeyStatusToSavedState(status))
@@ -5358,6 +5618,28 @@ function App() {
     Boolean(workspaceSetupDraft) ||
     onboardingInitialStep === 4 ||
     (Boolean(activeWorkspace) && !activeWorkspace?.onboardingCompletedAt && hasCompletedWorkspace)
+
+  const handleStaySignedIn = async () => {
+    setWorkspaceSessionWarningOpen(false)
+
+    try {
+      await sendWorkspaceSessionActivity("stay_signed_in", { force: true })
+    } catch (caughtError: unknown) {
+      const message = getUserFacingErrorMessage(caughtError, workspaceSessionExpiredMessage)
+
+      if (message === workspaceSessionExpiredMessage || /session/i.test(message)) {
+        handleWorkspaceSessionExpiredRef.current?.(message)
+      }
+    }
+  }
+
+  const handleSessionWarningSignOut = async () => {
+    setWorkspaceSessionWarningOpen(false)
+    await signOutAndResetAuthState("login", {
+      message: "Signed out.",
+      tone: "success",
+    })
+  }
 
   React.useEffect(() => {
     if (!shouldShowMobileStartCall || !mobileStartCallHasVisiblePrimaryAction) {
@@ -5462,6 +5744,29 @@ function App() {
   return (
     <TooltipProvider>
       <SidebarProvider className="h-svh min-h-0 overflow-hidden">
+        <Dialog open={workspaceSessionWarningOpen && !isCallLive} onOpenChange={setWorkspaceSessionWarningOpen}>
+          <DialogContent className="max-sm:max-w-[calc(100%-0.75rem)] sm:max-w-md">
+            <DialogHeader>
+              <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <ShieldCheckIcon className="size-5" />
+              </div>
+              <DialogTitle>Still here?</DialogTitle>
+              <DialogDescription>
+                SalesFrame will sign you out soon to keep this workspace safe.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogActions
+              cancelLabel="Sign out"
+              onCancel={handleSessionWarningSignOut}
+              primaryAction={
+                <Button className="gap-2" onClick={handleStaySignedIn}>
+                  <CheckCircle2Icon />
+                  Stay signed in
+                </Button>
+              }
+            />
+          </DialogContent>
+        </Dialog>
         <AppSidebar
           activeAccountId={activeAccount.id}
           activeOpportunityId={activeOpportunity.id}
@@ -5745,6 +6050,7 @@ function App() {
               <SettingsView
                 activeView={activeView}
                 bulkImportStatus={bulkImportStatus}
+                isWorkspaceOwner={(activeWorkspace?.role ?? "").toLowerCase() === "owner"}
                 workspaceId={activeWorkspaceId}
                 keyStatusMessage={openAiKeyStatusMessage}
                 savedKeyState={savedOpenAiKeyState}
@@ -7113,7 +7419,8 @@ function useMediaStreamLevel(stream: MediaStream | null) {
         if (!active) return
 
         analyser.getByteTimeDomainData(samples)
-        setLevel(Number(calculateAudioRms(samples).toFixed(4)))
+        const nextLevel = calculateAudioRms(samples)
+        setLevel((previousLevel) => Number(smoothAudioMeterLevel(nextLevel, previousLevel).toFixed(4)))
         animationFrameId = window.requestAnimationFrame(tick)
       }
 
@@ -7143,7 +7450,7 @@ function AudioSetupMeter({
   level: number
   status: AudioSetupStatus
 }) {
-  const meterValue = getAudioMeterPercent(level)
+  const meterValue = calculateAudioMeterPercent(level)
   const isBlocked = status === "blocked" || status === "unsupported"
 
   return (
@@ -7167,19 +7474,6 @@ function AudioSetupMeter({
       </p>
     </div>
   )
-}
-
-function getAudioMeterPercent(level: number) {
-  const normalizedLevel = Math.max(0, Math.min(1, level))
-
-  if (normalizedLevel <= 0.003) return 0
-
-  const decibels = 20 * Math.log10(Math.max(normalizedLevel, 0.00001))
-  const minDecibels = -52
-  const maxDecibels = -14
-  const scaled = ((decibels - minDecibels) / (maxDecibels - minDecibels)) * 100
-
-  return Math.max(4, Math.min(100, Math.round(scaled)))
 }
 
 function getAudioSetupStatus({
@@ -18212,6 +18506,7 @@ function WorkspaceStateView({
 function SettingsView({
   activeView,
   bulkImportStatus,
+  isWorkspaceOwner,
   workspaceId,
   keyStatusMessage,
   savedKeyState,
@@ -18221,6 +18516,7 @@ function SettingsView({
 }: {
   activeView: string
   bulkImportStatus: BulkImportStatusResponse | null
+  isWorkspaceOwner: boolean
   workspaceId: string
   keyStatusMessage: string
   savedKeyState: SavedOpenAiKeyState | null
@@ -18235,6 +18531,10 @@ function SettingsView({
   const [captureSettings, setCaptureSettings] = React.useState<CaptureSettings>(() => readCaptureSettings(workspaceId))
   const [captureSettingsMessage, setCaptureSettingsMessage] = React.useState("")
   const [captureSettingsTone, setCaptureSettingsTone] = React.useState<"success" | "warning">("success")
+  const [sessionPolicy, setSessionPolicy] = React.useState<WorkspaceSessionPolicy | null>(null)
+  const [sessionPolicyMessage, setSessionPolicyMessage] = React.useState("")
+  const [sessionPolicyTone, setSessionPolicyTone] = React.useState<"success" | "error">("success")
+  const [sessionPolicySaving, setSessionPolicySaving] = React.useState(false)
   const [removeKeyDialogOpen, setRemoveKeyDialogOpen] = React.useState(false)
   const [removeKeyError, setRemoveKeyError] = React.useState("")
   const hasApiKey = apiKey.trim().length > 0
@@ -18245,6 +18545,31 @@ function SettingsView({
     setCaptureSettings(readCaptureSettings(workspaceId))
     setCaptureSettingsMessage("")
     setCaptureSettingsTone("success")
+  }, [workspaceId])
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    setSessionPolicy(null)
+    setSessionPolicyMessage("")
+    setSessionPolicyTone("success")
+
+    if (!workspaceId) return
+
+    getWorkspaceSessionPolicy(workspaceId)
+      .then((policy) => {
+        if (cancelled) return
+        setSessionPolicy(policy)
+      })
+      .catch((caughtError: unknown) => {
+        if (cancelled) return
+        setSessionPolicyMessage(getUserFacingErrorMessage(caughtError, "Session timeout needs another check."))
+        setSessionPolicyTone("error")
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [workspaceId])
 
   React.useEffect(() => {
@@ -18346,8 +18671,33 @@ function SettingsView({
     )
   }
 
+  const handleSessionPolicyChange = async (value: string) => {
+    if (!workspaceId || !isWorkspaceOwner) return
+
+    const idleTimeoutSeconds = value === "never" ? null : Number(value)
+
+    setSessionPolicySaving(true)
+    setSessionPolicyMessage("")
+    setSessionPolicyTone("success")
+
+    try {
+      const policy = await saveWorkspaceSessionPolicy(workspaceId, idleTimeoutSeconds)
+      setSessionPolicy(policy)
+      setSessionPolicyMessage("Session timeout saved for this workspace.")
+    } catch (caughtError: unknown) {
+      setSessionPolicyTone("error")
+      setSessionPolicyMessage(getUserFacingErrorMessage(caughtError, "Session timeout needs another save attempt."))
+    } finally {
+      setSessionPolicySaving(false)
+    }
+  }
+
   const keyFeedbackMessage = saveMessage || keyStatusMessage
   const keyFeedbackIsError = saveMessage ? saveMessageTone === "error" : Boolean(keyStatusMessage)
+  const sessionPolicyValue =
+    sessionPolicy?.idle_timeout_seconds === null
+      ? "never"
+      : String(sessionPolicy?.idle_timeout_seconds ?? 3600)
 
   return (
     <div className="grid gap-4">
@@ -18531,6 +18881,55 @@ function SettingsView({
             />
           </DialogContent>
         </Dialog>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Session timeout</CardTitle>
+            <CardDescription>
+              Choose how long this workspace stays open when SalesFrame is quiet.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="workspace-session-timeout">Auto sign-out after inactivity</Label>
+              <Select
+                value={sessionPolicyValue}
+                disabled={!isWorkspaceOwner || sessionPolicySaving || !workspaceId}
+                onValueChange={handleSessionPolicyChange}
+              >
+                <SelectTrigger id="workspace-session-timeout" className="w-full sm:max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {workspaceSessionTimeoutOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-muted-foreground">
+                SalesFrame warns before signing out and treats active recording as presence. Choosing Never turns off idle sign-out for this workspace, but a fresh sign-in is still required after 24 hours.
+              </p>
+            </div>
+
+            {!isWorkspaceOwner ? (
+              <p className="text-sm text-muted-foreground">
+                Workspace owners can change this setting.
+              </p>
+            ) : null}
+
+            {sessionPolicyMessage ? (
+              <p
+                className={cn("text-sm", sessionPolicyTone === "error" ? "text-destructive" : "text-muted-foreground")}
+                aria-live={sessionPolicyTone === "error" ? "assertive" : "polite"}
+                role={sessionPolicyTone === "error" ? "alert" : "status"}
+              >
+                {sessionPolicyMessage}
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

@@ -63,6 +63,10 @@ export function getUserFacingErrorMessage(error: unknown, fallback: string) {
   const message = getRawErrorMessage(error)
   if (!message) return fallback
 
+  if (/workspace_session_expired|we signed you out to keep your workspace safe/i.test(message)) {
+    return "We signed you out to keep your workspace safe."
+  }
+
   if (/jwt|refresh token|access token|token.*expired|session.*expired/i.test(message)) {
     return "Your session has expired. Sign in again to continue."
   }

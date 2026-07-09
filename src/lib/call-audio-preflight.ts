@@ -4,6 +4,7 @@ import {
   isLikelySafariBrowser,
   resolveConstrainedAudioDeviceId,
 } from "@/lib/audio-device-setup"
+import { audibleAudioLevelThreshold } from "@/lib/audio-level-meter"
 import type { CallAudioCaptureMode, TranscriptSpeaker } from "@/lib/salesframe-core"
 
 export type AudioSourceKind = "meeting_audio" | "seller_mic" | "mixed_audio" | "in_person_microphone"
@@ -63,7 +64,7 @@ export type AudioPreflightResult = {
 
 const preflightSampleMs = 1200
 const preflightPollMs = 80
-const preflightVoiceThreshold = 0.018
+const preflightVoiceThreshold = audibleAudioLevelThreshold
 
 export class AudioPreflightError extends Error {
   result: AudioPreflightResult

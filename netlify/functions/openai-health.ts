@@ -26,14 +26,14 @@ export default async (request: Request, context: Context) => {
   try {
     if (request.method !== "GET") throw methodNotAllowed()
 
-    const { supabase, user } = await requireUser(request)
+    const { supabase, token, user } = await requireUser(request)
     const requestUrl = new URL(request.url)
     const workspaceId = requestUrl.searchParams.get("workspaceId") ?? ""
     if (!workspaceId) {
       throw badRequest("workspaceId is required.", "workspace_id_required")
     }
 
-    await authorizeWorkspace(user.id, workspaceId, supabase)
+    await authorizeWorkspace(user.id, workspaceId, supabase, { token })
     assertRateLimit({
       key: `${user.id}:${workspaceId}`,
       limit: 30,

@@ -19,6 +19,9 @@ const localFunctionRoutes: Record<string, string> = {
   "/api/openai/post-call-outputs": "post-call-outputs",
   "/api/openai/seller-domain-research": "seller-domain-research",
   "/api/openai/speaker-attribution": "speaker-attribution",
+  "/api/session/activity": "session-activity",
+  "/api/session/policy": "session-policy",
+  "/api/session/status": "session-status",
 }
 
 function normalizeModuleId(id: string) {

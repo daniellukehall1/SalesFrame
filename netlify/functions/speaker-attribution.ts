@@ -198,8 +198,8 @@ export default async (request: Request, _context: Context) => {
     if (!payload.callId) throw badRequest("callId is required.", "call_id_required")
     if (!segmentText) throw badRequest("segmentText is required.", "segment_text_required")
 
-    const { supabase, user } = await requireUser(request)
-    const call = await authorizeCall(user.id, payload.callId)
+    const { supabase, token, user } = await requireUser(request)
+    const call = await authorizeCall(user.id, payload.callId, supabase, { token })
     assertRateLimit({
       key: `${user.id}:${call.id}`,
       limit: 240,

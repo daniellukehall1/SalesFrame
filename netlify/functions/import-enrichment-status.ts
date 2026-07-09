@@ -16,14 +16,14 @@ type StatusPayload = {
 
 export default async (request: Request, context: Context) => {
   try {
-    const { supabase, user } = await requireUser(request)
+    const { supabase, token, user } = await requireUser(request)
     const requestUrl = new URL(request.url)
     const queryWorkspaceId = requestUrl.searchParams.get("workspaceId") ?? undefined
 
     if (request.method === "GET") {
       const workspaceId = queryWorkspaceId
       if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
-      await authorizeWorkspace(user.id, workspaceId, supabase)
+      await authorizeWorkspace(user.id, workspaceId, supabase, { token })
 
       return dataResponse(await listBulkImportStatus({ supabase, workspaceId }))
     }
@@ -32,7 +32,7 @@ export default async (request: Request, context: Context) => {
       const payload = await readJson<StatusPayload>(request)
       const workspaceId = payload.workspaceId ?? queryWorkspaceId
       if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
-      await authorizeWorkspace(user.id, workspaceId, supabase)
+      await authorizeWorkspace(user.id, workspaceId, supabase, { token })
       assertRateLimit({
         key: `${user.id}:${workspaceId}`,
         limit: 30,

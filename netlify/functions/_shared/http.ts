@@ -176,6 +176,7 @@ function toAppError(error: unknown, defaultMessage: string) {
 function getPublicAppErrorMessage(error: AppError, defaultMessage: string) {
   const message = error.message.trim() || defaultMessage
 
+  if (error.code === "session_expired" || error.code === "workspace_session_expired") return message
   if (error.code === "server_configuration_missing") return message
 
   const requiredContextMessage = getMissingContextMessage(error)
