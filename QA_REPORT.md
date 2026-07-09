@@ -338,6 +338,18 @@ Before/after impact: Before, legacy browser storage code could be accidentally r
 Files changed: `src/lib/research-profile.ts`, `src/lib/salesframe-core.ts`, `tests/e2e/app-production-contract.test.mjs`
 Verification evidence: targeted Start Call seller research contract passed; stale-storage search no longer finds production code references; `pnpm check` passed with secret scan, TypeScript, all 118 tests, and production build.
 
+### QA-024
+
+Severity: Medium
+Area: Session reliability / server-side idempotency
+Description: During authenticated browser QA, local function logs showed bounded `database_constraint` errors from workspace session activity. The likely race was two session activity/status requests both seeing no workspace session row and both trying to create the same `(workspace_id, user_id, session_key)` record.
+Root cause: `getWorkspaceSessionPolicy` and `createWorkspaceSession` used plain inserts after read-before-create checks, leaving duplicate creation races to surface as database constraint errors.
+User/business impact: Sellers may not see a visible crash, but launch-quality session handling should not produce hidden 500s or noisy support logs during normal app load, tab activity, or multi-tab heartbeat behavior.
+Fix applied: Made workspace session policy creation and workspace session activity creation idempotent with explicit `upsert(..., { onConflict })` calls on the database uniqueness keys, and added contract coverage for both conflict targets.
+Before/after impact: Before, concurrent app/session heartbeats could hit duplicate-key errors. After, duplicate creates settle onto the existing row and return a normal session status path.
+Files changed: `netlify/functions/_shared/workspace-session.ts`, `tests/e2e/app-production-contract.test.mjs`
+Verification evidence: targeted workspace-session contract passed; `pnpm check` passed with secret scan, TypeScript, all 118 tests, and production build.
+
 ## 11. Fixes Applied
 
 - Added visible Start Call preparation step count in `src/App.tsx`.
@@ -350,6 +362,7 @@ Verification evidence: targeted Start Call seller research contract passed; stal
 - Bounded development render-error console diagnostics so raw React error objects are not printed.
 - Added stale and malformed Live Coach popout local-storage cleanup for the short-lived fallback path.
 - Removed the legacy browser-local seller research profile path so Seller Research stays workspace/user scoped.
+- Made workspace session policy/activity creation idempotent so concurrent heartbeats do not become duplicate-key function errors.
 - Hardened playbook workspace reads by replacing raw combined filter strings with explicit system and workspace equality queries.
 - Replaced a raw `live-question` memory persistence warning with bounded safe logging.
 - Updated security contracts to assert session-aware authorization helper calls after workspace session enforcement.
@@ -385,6 +398,7 @@ Verification evidence: targeted Start Call seller research contract passed; stal
 - `netlify/functions/import-enrichment-worker.ts`
 - `netlify/functions/live-guidance.ts`
 - `netlify/functions/live-question.ts`
+- `netlify/functions/_shared/workspace-session.ts`
 - `src/App.tsx`
 - `src/components/app-error-boundary.tsx`
 - `src/components/marketing-landing-page.tsx`
@@ -417,6 +431,8 @@ Targeted:
   - Continuation result, 2026-07-09: passed 2 / 2 after tightening render diagnostics and stale popout storage cleanup.
 - `CI=true pnpm exec node --test --test-name-pattern "Start Call research step routes missing OpenAI keys" tests/e2e/app-production-contract.test.mjs`
   - Continuation result, 2026-07-09: passed 1 / 1 after removing the legacy seller research local-storage path.
+- `CI=true pnpm exec node --test --test-name-pattern "workspace session timeout" tests/e2e/app-production-contract.test.mjs`
+  - Continuation result, 2026-07-09: passed 1 / 1 after making workspace session policy/activity creation idempotent.
 - `rg -n "sellerResearchProfileStorageKey|salesframe\\.sellerResearchProfile|loadSellerResearchProfile|localStorage\\.getItem\\(sellerResearch" src tests docs netlify --glob '!dist/**'`
   - Continuation result, 2026-07-09: no production code references remained; the only remaining match was the protective negative contract assertion.
 
@@ -471,8 +487,16 @@ Targeted in-app browser QA:
 - Mobile Start Call step 4, Seller Research, had no visible horizontal scrollbar. Internal overflow flags were limited to screen-reader-only text and hidden switch internals.
 - Browser console warnings/errors were empty during the sampled authenticated dashboard, Start Call drawer, and playbook dropdown checks.
 - Public homepage and How It Works dialog were verified through a dev-only public preview route at `/?salesframe_public_preview=1` without clearing the user's active authenticated app session.
-- Desktop public preview showed the homepage and How It Works dialog at a stable 480 x 520 dialog footprint, with step 1 image present, no horizontal overflow, no viewport overflow, and no console errors.
-- Mobile public preview at 390 x 844 showed the homepage with 44px hero action buttons and the How It Works dialog with 44px footer actions, 32px step controls, no horizontal overflow, no viewport overflow, and no console errors.
+- Desktop public preview showed the homepage and How It Works dialog at a stable 480 x 576 dialog footprint, with the WebP step image present, no horizontal overflow, no viewport overflow, and no console errors.
+- Mobile public preview at 390 x 844 showed the homepage with no horizontal overflow. The How It Works dialog kept a stable 358 x 496 footprint across all 7 steps, used WebP media on every image-backed step, and showed no internal scroll, page-width overflow, or console errors.
+- Continuation browser QA after commit `c71db24` confirmed the authenticated mobile Start Call drawer opened at 390px wide with no horizontal overflow; step 3 Call showed one-channel/two-channel audio setup, Seller microphone and Shared meeting audio sections, and diagnostic permission-denied copy when the browser had already blocked microphone access.
+- Continuation browser QA after commit `c71db24` confirmed the Start Call playbook selector on both mobile and desktop uses an internal 288px scroll area with `overflow-y: auto`; the dialog itself did not resize, widen, or gain a page-level horizontal scrollbar.
+- Continuation browser QA after commit `c71db24` confirmed desktop Opportunities and Calls pages loaded with account-name columns, sortable header buttons, pagination, no page-level horizontal overflow, and no console errors. Clicking the Calls `Account` header set `aria-sort="ascending"` and reordered the rows without layout shift.
+- The browser viewport override became unreliable after one browser-control kernel timeout during a later mobile Calls-page reload, so that specific mobile Calls-page check was not treated as verified evidence.
+- Safe test credential environment variables were checked without printing values. `TEST_USER_EMAIL` and `TEST_USER_PASSWORD` were not present, so full login/signup submission was not performed.
+- Logout was tested through the authenticated mobile sidebar user menu. It returned the app to the public homepage with no console errors and no horizontal overflow.
+- After logout, `/login` and `/signup` were inspected at 390 x 844. Both rendered the expected mobile auth forms, field autocomplete attributes, Back to home action, no horizontal overflow, and no console errors.
+- The login page's empty Forgot password action was tested. It showed the calm inline alert `Enter your email first, then request a password reset.` without contacting credentials or producing console errors.
 - A deeper automated click-through of every opportunity inner tab was attempted after the account/opportunity sweep, but the browser-control session timed out while iterating tabs. The already-captured record and post-call checks remained clean, and the limitation is included in remaining runtime QA risk.
 
 Documentation drift check:
@@ -490,7 +514,7 @@ Performance check:
 ## 14. Remaining Risks
 
 - Full login/signup/workspace-creation browser QA was not completed because no safe test credentials were provided through `TEST_USER_EMAIL` / `TEST_USER_PASSWORD`. A read-only authenticated shell pass was completed using the already-open local session.
-- Public landing and How It Works dialog runtime QA was completed locally through a dev-only preview route. A clean production-equivalent unauthenticated browser session should still be included before public launch because the active in-app browser session remained authenticated.
+- Public landing and How It Works dialog runtime QA was completed locally through a dev-only preview route. Logout plus logged-out login/signup form rendering were also verified locally. Full credential-backed login/signup submission still needs safe `TEST_USER_EMAIL` / `TEST_USER_PASSWORD` values before public launch.
 - The opportunity workspace was sampled at record and post-call depth, but a full automated inner-tab sweep was interrupted by browser-control timeout. Manual follow-up should still cover opportunity Intel, Methodology, History, and live Call Cockpit tabs.
 - Production Deepgram, OpenAI, Supabase, and Netlify readiness were not verified because the instruction explicitly forbids production deploys, migrations, production data changes, or secret handling.
 - The scheduled import-enrichment worker now requires a valid scheduled payload before service-role work, matching the existing retention cleanup posture. Netlify's scheduled function documentation says deployed scheduled functions cannot be invoked directly by URL, but production QA should still verify both scheduled functions appear with the `Scheduled` badge in Netlify and are not exposed through custom public API paths.

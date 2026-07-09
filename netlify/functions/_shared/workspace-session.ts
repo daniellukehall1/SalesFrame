@@ -66,7 +66,7 @@ export async function getWorkspaceSessionPolicy(
 
   const { data: createdPolicy, error: insertError } = await supabase
     .from("workspace_session_policies")
-    .insert({ workspace_id: workspaceId })
+    .upsert({ workspace_id: workspaceId }, { onConflict: "workspace_id" })
     .select("*")
     .single()
 
@@ -309,7 +309,7 @@ async function createWorkspaceSession({
   }
   const { data, error } = await supabase
     .from("workspace_session_activity")
-    .insert(row)
+    .upsert(row, { onConflict: "workspace_id,user_id,session_key" })
     .select("*")
     .single()
 

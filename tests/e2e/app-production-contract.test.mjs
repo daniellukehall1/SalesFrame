@@ -4922,6 +4922,8 @@ test("workspace session timeout is server enforced with calm client warnings", a
   assert.match(workspaceSession, /getJwtSessionId\(token\)/)
   assert.match(workspaceSession, /workspace_session_expired/)
   assert.match(workspaceSession, /policy\.idle_timeout_seconds === null \|\| activeCallId/)
+  assert.match(workspaceSession, /\.upsert\(\{ workspace_id: workspaceId \}, \{ onConflict: "workspace_id" \}\)/)
+  assert.match(workspaceSession, /\.upsert\(row, \{ onConflict: "workspace_id,user_id,session_key" \}\)/)
 
   assert.match(sharedSupabase, /requireActiveWorkspaceSession/)
   assert.match(sharedSupabase, /requireActiveSession\?: boolean/)
