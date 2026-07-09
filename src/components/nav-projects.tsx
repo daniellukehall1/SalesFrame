@@ -14,6 +14,7 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import {
   ArchiveIcon,
@@ -85,6 +86,7 @@ export function NavProjects({
   onEditOpportunity: (id: string) => void
   onOpportunitySelect: (id: string) => void
 }) {
+  const { isMobile, setOpenMobile } = useSidebar()
   const sortedAccounts = React.useMemo(
     () =>
       [...accounts].sort((firstAccount, secondAccount) =>
@@ -143,6 +145,10 @@ export function NavProjects({
     })
   }
 
+  const closeMobileNavigation = React.useCallback(() => {
+    if (isMobile) setOpenMobile(false)
+  }, [isMobile, setOpenMobile])
+
   const handleAccountButtonClick = (account: AccountNavItem) => {
     if (account.opportunities.length) {
       setExpandedAccountIds((currentIds) => {
@@ -160,6 +166,7 @@ export function NavProjects({
     }
 
     onAccountSelect(account.id)
+    closeMobileNavigation()
   }
 
   const handleToggleAllAccounts = () => {
@@ -196,7 +203,10 @@ export function NavProjects({
             type="button"
             aria-label="Create account"
             className="flex size-7 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
-            onClick={onCreateAccount}
+            onClick={() => {
+              onCreateAccount()
+              closeMobileNavigation()
+            }}
           >
             <PlusIcon className="size-4" />
             <span className="sr-only">Create account</span>
@@ -277,7 +287,10 @@ export function NavProjects({
                             size="sm"
                             className="h-6 cursor-pointer text-muted-foreground data-[size=sm]:text-[11px] data-active:text-sidebar-accent-foreground [&>svg]:size-3 [&>svg]:text-muted-foreground"
                             isActive={opportunity.id === activeOpportunityId}
-                            onClick={() => onOpportunitySelect(opportunity.id)}
+                            onClick={() => {
+                              onOpportunitySelect(opportunity.id)
+                              closeMobileNavigation()
+                            }}
                           >
                             <CircleDotIcon />
                             <span className="truncate">{opportunity.name}</span>

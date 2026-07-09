@@ -242,7 +242,7 @@ function HowItWorksDialog({
         </DialogHeader>
 
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden p-3 sm:gap-4 sm:p-4">
-          <div className="h-32 shrink-0 overflow-hidden rounded-xl bg-black/[0.04] ring-1 ring-black/10 sm:h-44">
+          <div className="h-28 shrink-0 overflow-hidden rounded-xl bg-black/[0.04] ring-1 ring-black/10 sm:h-44">
             {activeStep.imageUrl ? (
               <img
                 src={activeStep.imageUrl}
@@ -258,7 +258,7 @@ function HowItWorksDialog({
             )}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+          <div className="min-h-0 flex-1 overflow-hidden">
             <div className="grid content-start gap-2 pb-1 sm:gap-3">
               <p className="text-xs font-medium uppercase tracking-[0.18em] text-black/45">
                 Step {stepIndex + 1} of {howItWorksSteps.length}
@@ -266,8 +266,8 @@ function HowItWorksDialog({
               <h2 className="overflow-hidden text-ellipsis whitespace-nowrap font-heading text-xl leading-tight tracking-tight text-black sm:text-[1.7rem]">
                 {activeStep.title}
               </h2>
-              <p className="salesframe-how-it-works-body text-sm leading-6 text-black/70 sm:text-[0.95rem]">{activeStep.body}</p>
-              <p className="rounded-lg bg-black/[0.04] p-2.5 text-sm leading-6 text-black/60 sm:p-3">
+              <p className="salesframe-how-it-works-body text-sm leading-5 text-black/70 sm:text-[0.95rem] sm:leading-6">{activeStep.body}</p>
+              <p className="salesframe-how-it-works-note rounded-lg bg-black/[0.04] px-2.5 py-2 text-sm leading-5 text-black/60 sm:p-3 sm:leading-6">
                 {activeStep.note}
               </p>
             </div>

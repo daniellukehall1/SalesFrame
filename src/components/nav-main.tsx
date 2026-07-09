@@ -1,4 +1,4 @@
-import type * as React from "react"
+import * as React from "react"
 import {
   Collapsible,
   CollapsibleContent,
@@ -13,6 +13,7 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { ChevronRightIcon } from "lucide-react"
 
@@ -37,6 +38,15 @@ export function NavMain({
   items: NavMainItem[]
   onNavigate: (id: string) => void
 }) {
+  const { isMobile, setOpenMobile } = useSidebar()
+  const handleNavigate = React.useCallback(
+    (id: string) => {
+      onNavigate(id)
+      if (isMobile) setOpenMobile(false)
+    },
+    [isMobile, onNavigate, setOpenMobile]
+  )
+
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Platform</SidebarGroupLabel>
@@ -51,7 +61,7 @@ export function NavMain({
                 <SidebarMenuButton
                   tooltip={item.title}
                   isActive={activeView === item.id}
-                  onClick={() => onNavigate(item.id)}
+                  onClick={() => handleNavigate(item.id)}
                 >
                   {item.icon}
                   <span>{item.title}</span>
@@ -72,7 +82,7 @@ export function NavMain({
                   <SidebarMenuButton
                     tooltip={item.title}
                     isActive={activeView === item.id}
-                    onClick={() => onNavigate(item.id)}
+                    onClick={() => handleNavigate(item.id)}
                   >
                     {item.icon}
                     <span>{item.title}</span>
@@ -85,7 +95,7 @@ export function NavMain({
                       <SidebarMenuSubItem key={subItem.title}>
                         <SidebarMenuSubButton
                           isActive={activeView === subItem.id}
-                          onClick={() => onNavigate(subItem.id)}
+                          onClick={() => handleNavigate(subItem.id)}
                         >
                           {subItem.icon}
                           <span>{subItem.title}</span>

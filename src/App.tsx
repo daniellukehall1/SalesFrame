@@ -2162,6 +2162,7 @@ function App() {
   const appMainScrollRef = React.useRef<HTMLElement | null>(null)
   const pendingNavigationScrollResetRef = React.useRef(false)
   const lastScrolledNavigationKeyRef = React.useRef("")
+  const navigationScrollResetTokenRef = React.useRef(0)
   const workspaceSessionActivitySentAtRef = React.useRef(0)
   const workspaceSessionStatusRef = React.useRef<WorkspaceSessionStatusResponse | null>(null)
   const handleWorkspaceSessionExpiredRef = React.useRef<((message?: string) => void) | null>(null)
@@ -2220,15 +2221,38 @@ function App() {
   ].join(":")
 
   const scrollAppContentToTop = React.useCallback(() => {
+    const resetToken = navigationScrollResetTokenRef.current + 1
+    navigationScrollResetTokenRef.current = resetToken
+    let userScrolledAfterNavigation = false
+    let cleanupUserScrollListeners: (() => void) | null = null
+
+    const markUserScrolledAfterNavigation = () => {
+      userScrolledAfterNavigation = true
+      cleanupUserScrollListeners?.()
+      cleanupUserScrollListeners = null
+    }
+
+    const attachUserScrollListeners = () => {
+      const appContent = appMainScrollRef.current
+      if (!appContent || cleanupUserScrollListeners || navigationScrollResetTokenRef.current !== resetToken) return
+
+      appContent.addEventListener("scroll", markUserScrolledAfterNavigation, { passive: true })
+      window.addEventListener("wheel", markUserScrolledAfterNavigation, { passive: true })
+      window.addEventListener("touchmove", markUserScrolledAfterNavigation, { passive: true })
+
+      cleanupUserScrollListeners = () => {
+        appContent.removeEventListener("scroll", markUserScrolledAfterNavigation)
+        window.removeEventListener("wheel", markUserScrolledAfterNavigation)
+        window.removeEventListener("touchmove", markUserScrolledAfterNavigation)
+      }
+    }
+
     const resetScrollPosition = () => {
+      if (navigationScrollResetTokenRef.current !== resetToken || userScrolledAfterNavigation) return
+
       const appContent = appMainScrollRef.current
 
       appContent?.scrollTo({ left: 0, top: 0, behavior: "auto" })
-      appContent?.querySelectorAll<HTMLElement>("*").forEach((element) => {
-        if (element.dataset.preserveNavigationScroll === "true") return
-        if (element.scrollTop > 0) element.scrollTop = 0
-        if (element.scrollLeft > 0) element.scrollLeft = 0
-      })
       window.scrollTo({ left: 0, top: 0, behavior: "auto" })
       document.documentElement.scrollTop = 0
       document.body.scrollTop = 0
@@ -2237,13 +2261,15 @@ function App() {
     resetScrollPosition()
     window.requestAnimationFrame(() => {
       resetScrollPosition()
+      attachUserScrollListeners()
       window.requestAnimationFrame(resetScrollPosition)
     })
-    window.setTimeout(resetScrollPosition, 0)
-    window.setTimeout(resetScrollPosition, 120)
-    window.setTimeout(resetScrollPosition, 320)
-    window.setTimeout(resetScrollPosition, minimumPageLoadMs + 80)
-    window.setTimeout(resetScrollPosition, minimumPageLoadMs + 420)
+    window.setTimeout(resetScrollPosition, 80)
+    window.setTimeout(() => {
+      resetScrollPosition()
+      cleanupUserScrollListeners?.()
+      cleanupUserScrollListeners = null
+    }, 180)
   }, [])
 
   const requestNavigationScrollReset = React.useCallback(() => {
@@ -11184,78 +11210,131 @@ function HomeDashboard({
             ) : null}
           </div>
           {filteredFocusOpportunities.length ? (
-            <div className="overflow-hidden">
-              <table className="w-full table-fixed text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs text-muted-foreground">
-                    <th className="w-[38%] py-2 pr-4 font-medium">Opportunity</th>
-                    <th className="hidden w-[14%] py-2 pr-4 font-medium lg:table-cell">Stage</th>
-                    <th className="w-[22%] py-2 pr-4 font-medium">Attention</th>
-                    <th className="hidden w-[16%] py-2 pr-4 font-medium md:table-cell">Gaps</th>
-                    <th className="w-[84px] py-2 text-right font-medium">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleFocusOpportunities.map((opportunity) => {
-                    const account = accountById.get(opportunity.accountId)
-                    const attention = getOpportunityAttention(opportunity)
+            <>
+              <div className="grid gap-2 md:hidden" data-testid="dashboard-opportunity-focus-mobile-list">
+                {visibleFocusOpportunities.map((opportunity) => {
+                  const account = accountById.get(opportunity.accountId)
+                  const attention = getOpportunityAttention(opportunity)
 
-                    return (
-                      <tr
-                        key={`${opportunity.id}-row`}
-                        className="cursor-pointer border-b transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
-                        tabIndex={0}
-                        aria-label={`Open ${opportunity.name}`}
-                        onClick={() => onOpportunitySelect(opportunity.id)}
-                        onKeyDown={(event) => {
-                          if (event.target !== event.currentTarget) return
-                          if (event.key !== "Enter" && event.key !== " ") return
+                  return (
+                    <div
+                      key={`${opportunity.id}-mobile-focus`}
+                      className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-3 transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      tabIndex={0}
+                      aria-label={`Open ${opportunity.name}`}
+                      onClick={() => onOpportunitySelect(opportunity.id)}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return
+                        if (event.key !== "Enter" && event.key !== " ") return
 
-                          event.preventDefault()
-                          onOpportunitySelect(opportunity.id)
-                        }}
-                      >
-                        <td className="min-w-0 py-3 pr-4">
-                          <p className="truncate font-medium">{opportunity.name}</p>
+                        event.preventDefault()
+                        onOpportunitySelect(opportunity.id)
+                      }}
+                    >
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{opportunity.name}</p>
                           <p className="truncate text-xs text-muted-foreground">{account?.name ?? "No account linked"}</p>
-                          <p className="mt-1 hidden truncate text-xs text-muted-foreground xl:block">
-                            {getOpportunityGuidancePreview(opportunity)}
-                          </p>
-                        </td>
-                        <td className="hidden py-3 pr-4 text-muted-foreground lg:table-cell">
-                          <span className="block truncate">{opportunity.stage}</span>
-                        </td>
-                        <td className="py-3 pr-4">
-                          <div className="grid min-w-0 gap-1.5">
-                            <Badge
-                              variant="outline"
-                              className={getAttentionBadgeClassName(attention.score)}
-                              data-attention-tone={attention.tone}
-                              data-testid="dashboard-attention-badge"
-                            >
-                              {attention.label}
-                            </Badge>
-                            <span className="truncate text-xs text-muted-foreground">{attention.detail}</span>
-                          </div>
-                        </td>
-                        <td className="hidden py-3 pr-4 text-muted-foreground md:table-cell">
-                          <span className="block truncate">
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={cn("shrink-0", getAttentionBadgeClassName(attention.score))}
+                          data-attention-tone={attention.tone}
+                          data-testid="dashboard-attention-badge"
+                        >
+                          {attention.label}
+                        </Badge>
+                      </div>
+                      <p className="text-sm leading-relaxed text-muted-foreground">
+                        {attention.detail}
+                      </p>
+                      <div className="grid min-w-0 gap-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-xs text-muted-foreground">
                             {opportunity.missing} missing / {opportunity.weak} weak
                           </span>
-                        </td>
-                        <td
-                          className="py-3 text-right"
-                          onClick={(event) => event.stopPropagation()}
-                          onKeyDown={(event) => event.stopPropagation()}
+                          <span className="text-xs font-medium">{opportunity.coverage}%</span>
+                        </div>
+                        <CoverageProgress value={opportunity.coverage} className="h-1.5" />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="hidden overflow-hidden md:block">
+                <table className="w-full table-fixed text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs text-muted-foreground">
+                      <th className="w-[38%] py-2 pr-4 font-medium">Opportunity</th>
+                      <th className="hidden w-[14%] py-2 pr-4 font-medium lg:table-cell">Stage</th>
+                      <th className="w-[22%] py-2 pr-4 font-medium">Attention</th>
+                      <th className="hidden w-[16%] py-2 pr-4 font-medium md:table-cell">Gaps</th>
+                      <th className="w-[84px] py-2 text-right font-medium">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleFocusOpportunities.map((opportunity) => {
+                      const account = accountById.get(opportunity.accountId)
+                      const attention = getOpportunityAttention(opportunity)
+
+                      return (
+                        <tr
+                          key={`${opportunity.id}-row`}
+                          className="cursor-pointer border-b transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
+                          tabIndex={0}
+                          aria-label={`Open ${opportunity.name}`}
+                          onClick={() => onOpportunitySelect(opportunity.id)}
+                          onKeyDown={(event) => {
+                            if (event.target !== event.currentTarget) return
+                            if (event.key !== "Enter" && event.key !== " ") return
+
+                            event.preventDefault()
+                            onOpportunitySelect(opportunity.id)
+                          }}
                         >
-                          <OpenButton onClick={() => onOpportunitySelect(opportunity.id)} />
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          <td className="min-w-0 py-3 pr-4">
+                            <p className="truncate font-medium">{opportunity.name}</p>
+                            <p className="truncate text-xs text-muted-foreground">{account?.name ?? "No account linked"}</p>
+                            <p className="mt-1 hidden truncate text-xs text-muted-foreground xl:block">
+                              {getOpportunityGuidancePreview(opportunity)}
+                            </p>
+                          </td>
+                          <td className="hidden py-3 pr-4 text-muted-foreground lg:table-cell">
+                            <span className="block truncate">{opportunity.stage}</span>
+                          </td>
+                          <td className="py-3 pr-4">
+                            <div className="grid min-w-0 gap-1.5">
+                              <Badge
+                                variant="outline"
+                                className={getAttentionBadgeClassName(attention.score)}
+                                data-attention-tone={attention.tone}
+                                data-testid="dashboard-attention-badge"
+                              >
+                                {attention.label}
+                              </Badge>
+                              <span className="truncate text-xs text-muted-foreground">{attention.detail}</span>
+                            </div>
+                          </td>
+                          <td className="hidden py-3 pr-4 text-muted-foreground md:table-cell">
+                            <span className="block truncate">
+                              {opportunity.missing} missing / {opportunity.weak} weak
+                            </span>
+                          </td>
+                          <td
+                            className="py-3 text-right"
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
+                          >
+                            <OpenButton onClick={() => onOpportunitySelect(opportunity.id)} />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           ) : (
             <ListEmptyState
               icon={<TargetIcon />}
@@ -14882,7 +14961,7 @@ function getAudioHealthIndicators({
     capturePermissionState === "denied" || captureStatus === "permission-denied"
       ? { label: "Seller mic", tone: "error", value: "Blocked" }
       : audioPreflight?.sellerMicReady
-        ? { label: "Seller mic", tone: isLive ? "live" : "building", value: isLive ? "Listening" : "Connected" }
+        ? { label: "Seller mic", tone: isLive ? "live" : "building", value: isLive ? "Live" : "Connected" }
         : isStarting
           ? { label: "Seller mic", tone: "building", value: "Checking" }
           : { label: "Seller mic", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
@@ -14893,21 +14972,21 @@ function getAudioHealthIndicators({
     ? audioPreflight.requiredCustomerAudio
       ? audioPreflight.customerAudioReady
         ? sharedAudioSilent
-          ? { label: "Shared audio", tone: "warning", value: "Quiet" }
-          : { label: "Shared audio", tone: isLive ? "live" : "building", value: isLive ? "Two channels" : "Connected" }
+          ? { label: "Shared audio", tone: "warning", value: "No signal" }
+          : { label: "Shared audio", tone: isLive ? "live" : "building", value: isLive ? "Live" : "Connected" }
         : {
             label: "Shared audio",
             tone: needsAttention || isLive ? "error" : "warning",
             value: "Not detected",
           }
       : audioPreflight.mixedRoomReady
-        ? { label: "Room/call audio", tone: isLive ? "warning" : "building", value: isLive ? "Inferred" : "One channel" }
+        ? { label: "Room/call audio", tone: isLive ? "live" : "building", value: isLive ? "Live" : "One channel" }
         : { label: "Room/call audio", tone: "muted", value: "One channel" }
     : isStarting
       ? { label: "Room/call audio", tone: "building", value: "Checking" }
       : { label: "Room/call audio", tone: needsAttention ? "warning" : "muted", value: "Not checked" }
   const liveTranscript: CaptureSignalIndicator = guidance
-    ? { label: "Live transcript", tone: "live", value: isLive ? "Deepgram live" : "Ready" }
+    ? { label: "Live transcript", tone: "live", value: isLive ? "Live" : "Ready" }
     : isLive
       ? { label: "Live transcript", tone: "building", value: "Connecting" }
       : isStarting
@@ -17559,13 +17638,13 @@ function PersonalAccountView({
             <CardDescription>Import customer accounts and opportunities into the selected workspace.</CardDescription>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="rounded-lg bg-muted/30 p-4">
-            <div className="flex items-start gap-3">
-              <DatabaseIcon className="mt-0.5 size-4 text-muted-foreground" />
-              <div>
+        <CardContent className="grid min-w-0 gap-4">
+          <div className="min-w-0 overflow-hidden rounded-lg bg-muted/30 p-4">
+            <div className="flex min-w-0 items-start gap-3">
+              <DatabaseIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
                 <p className="text-sm font-medium">Current workspace only</p>
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="mt-1 max-w-full break-words text-sm leading-relaxed text-muted-foreground">
                   This import only affects the selected workspace. Switch workspace to import a different dataset.
                 </p>
               </div>
@@ -17843,8 +17922,8 @@ function BulkImportStatusPanel({
   const failedCount = runs.reduce((total, run) => total + run.enrichment.failed, 0)
 
   return (
-    <div className="grid gap-3 rounded-lg bg-muted/30 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="grid min-w-0 max-w-full gap-3 overflow-hidden rounded-lg bg-muted/30 p-4">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <SparklesIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0">
@@ -17854,29 +17933,29 @@ function BulkImportStatusPanel({
             </p>
           </div>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
           {failedCount > 0 ? (
-            <Button variant="outline" size="sm" className="gap-2" disabled={loading} onClick={onRetryFailed}>
+            <Button variant="outline" size="sm" className="w-full gap-2 sm:w-auto" disabled={loading} onClick={onRetryFailed}>
               <SparklesIcon />
               Retry failed
             </Button>
           ) : null}
-          <Button variant="outline" size="sm" disabled={loading} onClick={onRefresh}>
+          <Button variant="outline" size="sm" className="w-full sm:w-auto" disabled={loading} onClick={onRefresh}>
             {loading ? "Refreshing..." : "Refresh status"}
           </Button>
         </div>
       </div>
 
       {pausedCount > 0 ? (
-        <div className="rounded-lg bg-background/70 p-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 overflow-hidden rounded-lg bg-background/70 p-3">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="text-sm font-medium">AI enrichment is paused</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 {pausedCount} accounts are waiting for an OpenAI key before SalesFrame can research them.
               </p>
             </div>
-            <Button variant="outline" size="sm" className="gap-2" onClick={onOpenSettings}>
+            <Button variant="outline" size="sm" className="w-full gap-2 sm:w-auto" onClick={onOpenSettings}>
               <KeyRoundIcon />
               Open settings
             </Button>
@@ -17886,7 +17965,7 @@ function BulkImportStatusPanel({
 
       {message ? (
         <p
-          className={cn("text-sm", /needs|try|failed|error/i.test(message) ? "text-destructive" : "text-muted-foreground")}
+          className={cn("break-words text-sm", /needs|try|failed|error/i.test(message) ? "text-destructive" : "text-muted-foreground")}
           aria-live={/needs|try|failed|error/i.test(message) ? "assertive" : "polite"}
           role={/needs|try|failed|error/i.test(message) ? "alert" : "status"}
         >
@@ -17895,13 +17974,13 @@ function BulkImportStatusPanel({
       ) : null}
 
       {runs.length > 0 ? (
-        <div className="grid gap-2">
+        <div className="grid min-w-0 gap-2">
           {runs.map((run) => (
             <BulkImportRunRow key={run.id} run={run} />
           ))}
         </div>
       ) : (
-        <div className="rounded-lg bg-background/70 p-3 text-sm text-muted-foreground">
+        <div className="min-w-0 overflow-hidden rounded-lg bg-background/70 p-3 text-sm text-muted-foreground">
           No imports yet. When you upload a CSV, enrichment progress will show here.
         </div>
       )}
@@ -17936,19 +18015,23 @@ function BulkImportRunRow({ run }: { run: BulkImportStatusResponse["runs"][numbe
           <Clock3Icon className="size-4 text-muted-foreground" />
 
   return (
-    <div className="rounded-lg bg-background/70 p-3">
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5">{icon}</div>
+    <div className="min-w-0 overflow-hidden rounded-lg bg-background/70 p-3">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="mt-0.5 shrink-0">{icon}</div>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <p className="truncate text-sm font-medium">
-              {run.importType === "accounts" ? "Accounts import" : "Opportunities import"}
-              {run.fileName ? ` / ${run.fileName}` : ""}
-            </p>
-            <p className="text-xs text-muted-foreground">Updated {formatSavedAt(run.lastUpdatedAt)}</p>
+          <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">
+                {run.importType === "accounts" ? "Accounts import" : "Opportunities import"}
+              </p>
+              {run.fileName ? (
+                <p className="mt-0.5 break-all text-xs text-muted-foreground">{run.fileName}</p>
+              ) : null}
+            </div>
+            <p className="shrink-0 text-xs text-muted-foreground">Updated {formatSavedAt(run.lastUpdatedAt)}</p>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{enrichmentLine}</p>
+          <p className="mt-1 break-words text-sm text-muted-foreground">{summary}</p>
+          <p className="mt-1 break-words text-sm text-muted-foreground">{enrichmentLine}</p>
           {run.enrichment.total > 0 ? (
             <Progress className="mt-3 h-2" value={run.progress} aria-label="AI enrichment progress" />
           ) : null}
@@ -17956,7 +18039,7 @@ function BulkImportRunRow({ run }: { run: BulkImportStatusResponse["runs"][numbe
             <Button
               variant="outline"
               size="sm"
-              className="mt-3 gap-2"
+              className="mt-3 w-full gap-2 sm:w-auto"
               onClick={() => downloadBulkImportFailedRows(run)}
             >
               <DownloadIcon />
