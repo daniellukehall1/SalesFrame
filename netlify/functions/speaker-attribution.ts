@@ -5,7 +5,7 @@ import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson, up
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { assertRateLimit } from "./_shared/rate-limit"
-import { authorizeCall, requireUser } from "./_shared/supabase"
+import { assertCallIsLive, authorizeCall, requireUser } from "./_shared/supabase"
 
 type SpeakerLabel =
   | "Seller"
@@ -200,6 +200,7 @@ export default async (request: Request, _context: Context) => {
 
     const { supabase, token, user } = await requireUser(request)
     const call = await authorizeCall(user.id, payload.callId, supabase, { token })
+    assertCallIsLive(call)
     assertRateLimit({
       key: `${user.id}:${call.id}`,
       limit: 240,

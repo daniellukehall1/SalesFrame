@@ -350,6 +350,30 @@ Before/after impact: Before, concurrent app/session heartbeats could hit duplica
 Files changed: `netlify/functions/_shared/workspace-session.ts`, `tests/e2e/app-production-contract.test.mjs`
 Verification evidence: targeted workspace-session contract passed; `pnpm check` passed with secret scan, TypeScript, all 118 tests, and production build.
 
+### QA-025
+
+Severity: Medium
+Area: Live call AI/transcription / cost and lifecycle control
+Description: Live-call endpoints authorized call ownership, but did not consistently require the call to still be live before minting transcription tokens or making live OpenAI guidance/attribution calls.
+Root cause: `authorizeCall` only returned identity fields for the call, so live endpoints could prove workspace access but not call lifecycle state.
+User/business impact: A stale browser tab or replayed client request for an ended, processing, archived, or otherwise non-live call could request new Deepgram/OpenAI live work. That is a cost-control and privacy lifecycle risk for a real-time audio product.
+Fix applied: Expanded call authorization to include `status`, `started_at`, and `ended_at`, added a shared `assertCallIsLive` helper, and required active unended calls before Deepgram tokens, live question, live guidance, live state, and speaker attribution work.
+Before/after impact: Before, any authorized call ID could reach live provider work. After, live AI/transcription endpoints only run for active unended calls, while post-call functions can still read completed calls through the normal authorization path.
+Files changed: `netlify/functions/_shared/supabase.ts`, `netlify/functions/deepgram-token.ts`, `netlify/functions/live-question.ts`, `netlify/functions/live-guidance.ts`, `netlify/functions/live-state.ts`, `netlify/functions/speaker-attribution.ts`, `tests/functions/security-contract.test.mjs`
+Verification evidence: targeted security contracts for protected functions and expensive AI functions passed; `pnpm check` passed with secret scan, TypeScript, all 118 tests, and production build.
+
+### QA-026
+
+Severity: High
+Area: AI safety / prompt injection
+Description: OpenAI calls received transcripts, account fields, opportunity fields, notes, research inputs, and web-search content as user input, but the shared OpenAI helper did not consistently add an explicit prompt-injection boundary around that untrusted content.
+Root cause: Individual prompts contained task-specific safety language, but the provider wrapper did not enforce a universal rule that customer, seller-entered, transcript, and web content are evidence only, never instructions.
+User/business impact: A malicious or accidental instruction inside a transcript, note, website, or account field could try to steer live coaching, post-call outputs, or enrichment away from SalesFrame's intended system rules and JSON contracts.
+Fix applied: Added a shared prompt-injection defense instruction to the OpenAI helper and appended it to every structured JSON and web-search JSON system prompt. Added contract coverage so future OpenAI calls keep the guard.
+Before/after impact: Before, injection resistance depended on each prompt author remembering the rule. After, all OpenAI JSON paths inherit the same untrusted-content boundary.
+Files changed: `netlify/functions/_shared/openai.ts`, `tests/functions/security-contract.test.mjs`
+Verification evidence: targeted OpenAI helper contract passed.
+
 ## 11. Fixes Applied
 
 - Added visible Start Call preparation step count in `src/App.tsx`.
@@ -363,6 +387,8 @@ Verification evidence: targeted workspace-session contract passed; `pnpm check` 
 - Added stale and malformed Live Coach popout local-storage cleanup for the short-lived fallback path.
 - Removed the legacy browser-local seller research profile path so Seller Research stays workspace/user scoped.
 - Made workspace session policy/activity creation idempotent so concurrent heartbeats do not become duplicate-key function errors.
+- Scoped Deepgram temporary transcription tokens and live OpenAI coaching/attribution endpoints to active, unended calls only.
+- Added a shared OpenAI prompt-injection defense so transcripts, seller notes, account/opportunity fields, research inputs, and web content are treated as untrusted evidence rather than instructions.
 - Hardened playbook workspace reads by replacing raw combined filter strings with explicit system and workspace equality queries.
 - Replaced a raw `live-question` memory persistence warning with bounded safe logging.
 - Updated security contracts to assert session-aware authorization helper calls after workspace session enforcement.
@@ -398,6 +424,11 @@ Verification evidence: targeted workspace-session contract passed; `pnpm check` 
 - `netlify/functions/import-enrichment-worker.ts`
 - `netlify/functions/live-guidance.ts`
 - `netlify/functions/live-question.ts`
+- `netlify/functions/live-state.ts`
+- `netlify/functions/speaker-attribution.ts`
+- `netlify/functions/deepgram-token.ts`
+- `netlify/functions/_shared/openai.ts`
+- `netlify/functions/_shared/supabase.ts`
 - `netlify/functions/_shared/workspace-session.ts`
 - `src/App.tsx`
 - `src/components/app-error-boundary.tsx`
@@ -433,6 +464,10 @@ Targeted:
   - Continuation result, 2026-07-09: passed 1 / 1 after removing the legacy seller research local-storage path.
 - `CI=true pnpm exec node --test --test-name-pattern "workspace session timeout" tests/e2e/app-production-contract.test.mjs`
   - Continuation result, 2026-07-09: passed 1 / 1 after making workspace session policy/activity creation idempotent.
+- `CI=true pnpm exec node --test --test-name-pattern "protected OpenAI functions|expensive AI functions" tests/functions/security-contract.test.mjs`
+  - Continuation result, 2026-07-09: passed 2 / 2 after requiring Deepgram transcription tokens to target active, unended calls.
+- `CI=true pnpm exec node --test --test-name-pattern "OpenAI helper supports" tests/functions/security-contract.test.mjs`
+  - Continuation result, 2026-07-09: passed 1 / 1 after adding the shared prompt-injection defense wrapper.
 - `rg -n "sellerResearchProfileStorageKey|salesframe\\.sellerResearchProfile|loadSellerResearchProfile|localStorage\\.getItem\\(sellerResearch" src tests docs netlify --glob '!dist/**'`
   - Continuation result, 2026-07-09: no production code references remained; the only remaining match was the protective negative contract assertion.
 

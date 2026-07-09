@@ -6,7 +6,7 @@ import { badRequest, dataResponse, errorResponse, forbidden, logSafeEvent, metho
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { assertRateLimit } from "./_shared/rate-limit"
-import { authorizeAccount, authorizeCall, authorizeOpportunity, requireUser } from "./_shared/supabase"
+import { assertCallIsLive, authorizeAccount, authorizeCall, authorizeOpportunity, requireUser } from "./_shared/supabase"
 
 type TranscriptLine = {
   audioSourceKind?: string
@@ -943,6 +943,7 @@ export default async (request: Request, _context: Context) => {
     if (authorizedCall.account_id !== authorizedAccount.id) throw forbidden("Call does not belong to this account.")
     if (authorizedCall.opportunity_id !== authorizedOpportunity.id) throw forbidden("Call does not belong to this opportunity.")
     if (authorizedOpportunity.account_id !== authorizedAccount.id) throw forbidden("Opportunity does not belong to this account.")
+    assertCallIsLive(authorizedCall)
 
     assertRateLimit({
       key: `${user.id}:${authorizedCall.id}`,

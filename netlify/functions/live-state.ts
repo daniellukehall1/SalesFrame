@@ -6,7 +6,7 @@ import { badRequest, dataResponse, errorResponse, forbidden, methodNotAllowed, r
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { assertRateLimit } from "./_shared/rate-limit"
-import { authorizeAccount, authorizeCall, authorizeOpportunity, requireUser } from "./_shared/supabase"
+import { assertCallIsLive, authorizeAccount, authorizeCall, authorizeOpportunity, requireUser } from "./_shared/supabase"
 
 type LiveStatePayload = {
   accountId?: string
@@ -207,6 +207,7 @@ export default async (request: Request, _context: Context) => {
     if (call.account_id !== account.id) throw forbidden("Call does not belong to this account.")
     if (call.opportunity_id !== opportunity.id) throw forbidden("Call does not belong to this opportunity.")
     if (opportunity.account_id !== account.id) throw forbidden("Opportunity does not belong to this account.")
+    assertCallIsLive(call)
 
     assertRateLimit({
       key: `${user.id}:${call.id}`,

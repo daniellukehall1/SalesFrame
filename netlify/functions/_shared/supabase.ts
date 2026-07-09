@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient, type User } from "@supabase/supabase
 
 import type { Database } from "../../../src/lib/supabase/database.types"
 import { getEnv, requireEnv } from "./env"
-import { forbidden, notFound, unauthorized } from "./http"
+import { AppError, forbidden, notFound, unauthorized } from "./http"
 import { requireActiveWorkspaceSession } from "./workspace-session"
 
 let adminClient: SupabaseClient<Database> | null = null
@@ -11,6 +11,24 @@ export type AuthedRequestContext = {
   supabase: SupabaseClient<Database>
   token: string
   user: User
+}
+
+type LiveCallLike = Pick<Database["public"]["Tables"]["calls"]["Row"], "ended_at" | "started_at" | "status">
+
+export function assertCallIsLive(
+  call: LiveCallLike,
+  options: {
+    code?: string
+    message?: string
+  } = {}
+) {
+  if (call.status === "active" && call.started_at && !call.ended_at) return
+
+  throw new AppError(
+    options.code ?? "live_call_not_active",
+    options.message ?? "This call is no longer live. Start a new call before using live coaching.",
+    409
+  )
 }
 
 export function getSupabaseAdmin() {
@@ -149,7 +167,7 @@ export async function authorizeCall(
 ) {
   const { data: call, error } = await supabase
     .from("calls")
-    .select("id,workspace_id,account_id,opportunity_id")
+    .select("id,workspace_id,account_id,opportunity_id,status,started_at,ended_at")
     .eq("id", callId)
     .maybeSingle()
 

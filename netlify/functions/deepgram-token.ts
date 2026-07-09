@@ -3,7 +3,7 @@ import type { Config, Context } from "@netlify/functions"
 import { createDeepgramListenUrls, createDeepgramTemporaryToken, getDeepgramFluxConfig } from "./_shared/deepgram"
 import { badRequest, dataResponse, errorResponse, methodNotAllowed } from "./_shared/http"
 import { assertRateLimit } from "./_shared/rate-limit"
-import { authorizeCall, requireUser } from "./_shared/supabase"
+import { assertCallIsLive, authorizeCall, requireUser } from "./_shared/supabase"
 
 type DeepgramTokenPayload = {
   callId?: string
@@ -19,6 +19,10 @@ export default async (request: Request, _context: Context) => {
 
     const { token: authToken, user } = await requireUser(request)
     const call = await authorizeCall(user.id, payload.callId, undefined, { token: authToken })
+    assertCallIsLive(call, {
+      code: "deepgram_call_not_active",
+      message: "This call is no longer live. Start a new call before opening live transcript.",
+    })
     assertRateLimit({
       key: `${user.id}:${call.id}:${payload.sourceKind ?? "source"}`,
       limit: 40,
