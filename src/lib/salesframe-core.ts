@@ -199,7 +199,6 @@ export const defaultSellerResearchProfile: SellerResearchProfile = {
   productContext: defaultCustomerResearch.productContext,
 }
 
-export const sellerResearchProfileStorageKey = "salesframe.sellerResearchProfile"
 export const openAiKeyStateStorageKey = "salesframe.openAiKeyState"
 
 export const workspaceDataStateOptions = [

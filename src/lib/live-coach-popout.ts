@@ -99,7 +99,11 @@ export function readStoredLiveCoachPopoutSnapshot(): LiveCoachPopoutSnapshot | n
     isLiveCoachPopoutSnapshot
   )
 
-  return snapshot && isFreshLiveCoachPopoutSnapshot(snapshot) ? snapshot : null
+  if (!snapshot) return null
+  if (isFreshLiveCoachPopoutSnapshot(snapshot)) return snapshot
+
+  removeStoredLiveCoachPopoutValue(liveCoachPopoutSnapshotStorageKey)
+  return null
 }
 
 export function writeStoredLiveCoachPopoutSnapshot(snapshot: LiveCoachPopoutSnapshot) {
@@ -281,8 +285,12 @@ function readStoredLiveCoachPopoutValue<T>(
     if (!rawValue) return null
     const parsedValue: unknown = JSON.parse(rawValue)
 
-    return validate(parsedValue) ? parsedValue : null
+    if (validate(parsedValue)) return parsedValue
+
+    removeStoredLiveCoachPopoutValue(key)
+    return null
   } catch {
+    removeStoredLiveCoachPopoutValue(key)
     return null
   }
 }
@@ -294,6 +302,16 @@ function writeStoredLiveCoachPopoutValue(key: string, value: unknown) {
     window.localStorage.setItem(key, JSON.stringify(value))
   } catch {
     // BroadcastChannel is the primary path. Storage can be unavailable in private browser modes.
+  }
+}
+
+function removeStoredLiveCoachPopoutValue(key: string) {
+  if (typeof window === "undefined") return
+
+  try {
+    window.localStorage.removeItem(key)
+  } catch {
+    // Storage cleanup is best-effort; stale values are still ignored by freshness checks.
   }
 }
 

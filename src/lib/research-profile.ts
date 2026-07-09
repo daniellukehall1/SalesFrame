@@ -1,35 +1,8 @@
 import {
   defaultSellerResearchProfile,
   knownSellerResearchProfiles,
-  sellerResearchProfileStorageKey,
   type SellerResearchProfile,
 } from "@/lib/salesframe-core"
-
-export function loadSellerResearchProfile(): SellerResearchProfile {
-  try {
-    const storedValue = window.localStorage.getItem(sellerResearchProfileStorageKey)
-    if (!storedValue) return defaultSellerResearchProfile
-
-    const parsedValue = JSON.parse(storedValue) as Partial<SellerResearchProfile>
-
-    return {
-      sellerCompany:
-        typeof parsedValue.sellerCompany === "string" && parsedValue.sellerCompany.trim()
-          ? parsedValue.sellerCompany
-          : defaultSellerResearchProfile.sellerCompany,
-      sellerDomain:
-        typeof parsedValue.sellerDomain === "string" && parsedValue.sellerDomain.trim()
-          ? parsedValue.sellerDomain
-          : defaultSellerResearchProfile.sellerDomain,
-      productContext:
-        typeof parsedValue.productContext === "string" && parsedValue.productContext.trim()
-          ? parsedValue.productContext
-          : defaultSellerResearchProfile.productContext,
-    }
-  } catch {
-    return defaultSellerResearchProfile
-  }
-}
 
 export function areSellerResearchProfilesEqual(
   left: SellerResearchProfile,

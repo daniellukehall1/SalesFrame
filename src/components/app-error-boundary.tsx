@@ -39,7 +39,10 @@ export class AppErrorBoundary extends React.Component<
     })
 
     if (import.meta.env.DEV) {
-      console.error("SalesFrame render error", error, info)
+      console.warn("SalesFrame render error captured", {
+        componentStackLines: info.componentStack?.split("\n").filter(Boolean).length ?? 0,
+        errorName: error.name || "Error",
+      })
     }
   }
 

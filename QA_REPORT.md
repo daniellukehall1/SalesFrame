@@ -1,12 +1,14 @@
 # SalesFrame.ai Launch-Readiness QA Report
 
-Date: 2026-07-07  
-Scope: local codebase audit, contract test repair, safe UX/code fixes, targeted in-app browser layout QA, secret scan, typecheck, full test suite, production build  
-Production actions: none. No GitHub push, Netlify deploy, production migration, or production data change was performed.
+Date: 2026-07-09
+Scope: local codebase audit, contract test repair, safe UX/code fixes, targeted in-app browser layout QA, secret scan, typecheck, full test suite, production build, continuation release-gate verification
+Production actions: no production migration or production data change was performed. A GitHub commit and Netlify production deploy may be performed separately only when explicitly requested.
 
 ## 1. Executive Summary
 
 SalesFrame is in a materially stronger launch-readiness position after this pass. The local production gate now passes end to end: secret scan, TypeScript, all tests, and production build.
+
+Continuation note, 2026-07-09: a fresh release-gate run found three stale security-contract assertions after the workspace-session authorization helper was hardened to pass the active auth token through workspace and call authorization. The implementation was already safer than the old contract. The contract tests were updated to require the session-aware authorization calls, and the full production gate now passes with 118 / 118 tests.
 
 The largest finding was not a runtime crash. It was a QA reliability problem: several contract tests had drifted behind intentional product decisions made later in the build, especially around download-only post-call audio, calm playbook pages, non-blocking buyer-audio meters, sortable table headers, and sidebar account toggling. Those stale contracts were creating false failures and could have pushed the app back toward poorer UX.
 
@@ -82,7 +84,7 @@ User/business impact: False failures would either block review or pressure futur
 Fix applied: Updated contracts to protect the current product direction and added a real call-start progress assertion.  
 Before/after impact: Before, `pnpm check` failed. After, the full local production gate passes.  
 Files changed: `tests/e2e/app-production-contract.test.mjs`, `tests/e2e/live-call-eval-contract.test.mjs`  
-Verification evidence: `pnpm test` passed 115 / 115; `pnpm check` passed.
+Verification evidence: `pnpm test` passed 118 / 118; `pnpm check` passed.
 
 ### QA-003
 
@@ -300,6 +302,42 @@ Before/after impact: Before, a failed memory write could log raw technical text.
 Files changed: `netlify/functions/live-question.ts`, `tests/functions/security-contract.test.mjs`  
 Verification evidence: targeted security contract passed; full `pnpm check` passed.
 
+### QA-021
+
+Severity: High
+Area: Release gate / workspace session security contracts
+Description: A fresh release-gate run failed three security-contract checks after workspace-session enforcement changed authorization calls to pass the active bearer token into `authorizeWorkspace`, `authorizeCall`, `authorizeAccount`, and `authorizeOpportunity`.
+Root cause: The implementation had been hardened for server-enforced workspace sessions, but the contracts still expected the older helper calls without the token/options argument.
+User/business impact: The release gate was red even though the code was using the safer session-aware authorization path. Left unresolved, this would either block releases or encourage weakening the implementation back to a less secure shape.
+Fix applied: Updated the security contracts to require the token-aware authorization calls for live-state, Deepgram token issuance, OpenAI key management, and CSV import functions.
+Before/after impact: Before, `pnpm check` failed with 3 stale contract failures. After, `pnpm test:functions` passes 17 / 17 and `pnpm check` passes 118 / 118 with the current session-aware authorization model protected.
+Files changed: `tests/functions/security-contract.test.mjs`
+Verification evidence: `pnpm test:functions` passed 17 / 17; `pnpm check` passed with secret scan, TypeScript, all 118 tests, and production build.
+
+### QA-022
+
+Severity: Medium
+Area: Security / browser diagnostics and popout storage
+Description: The app error boundary still printed raw render error objects and React error info to the browser console in development, and stale Live Coach popout fallback snapshots were ignored but left in local storage.
+Root cause: Server-side client-error reporting had already been sanitized, but the local development console path and same-origin popout fallback cleanup were not tightened to the same privacy posture.
+User/business impact: Raw browser diagnostics can include sensitive values during local/support debugging, and stale popout snapshots can leave short-lived account, opportunity, and question text in browser storage longer than needed.
+Fix applied: Replaced raw development render-error logging with bounded diagnostic fields, and made the popout fallback remove stale, malformed, or unparsable local-storage values.
+Before/after impact: Before, dev console output could include raw error/info objects and stale popout snapshots remained stored. After, diagnostics are bounded to error name and component-stack line count, and stale fallback data self-cleans while BroadcastChannel remains the primary live path.
+Files changed: `src/components/app-error-boundary.tsx`, `src/lib/live-coach-popout.ts`, `tests/e2e/app-production-contract.test.mjs`
+Verification evidence: targeted app-production contracts passed for render crash handling and live coach popout; `pnpm check` passed with secret scan, TypeScript, all 118 tests, and production build.
+
+### QA-023
+
+Severity: Medium
+Area: Security / seller research storage
+Description: The seller research profile had moved to the Supabase-backed `seller_research_profiles` path, but a legacy local-storage reader and storage key remained in the shared library.
+Root cause: The old browser-local seller research path was left behind after workspace/user-scoped seller research profiles became the source of truth.
+User/business impact: Stale browser storage could reintroduce cross-session selling context drift later if the helper was reused, which would be especially risky for shared devices or multi-workspace sellers.
+Fix applied: Removed the legacy `loadSellerResearchProfile` local-storage reader and `sellerResearchProfileStorageKey`, then added contract coverage that the Start Call seller research step is database-backed and does not rely on the old local-storage key.
+Before/after impact: Before, legacy browser storage code could be accidentally revived. After, seller research profile state is guarded around the workspace/user database path.
+Files changed: `src/lib/research-profile.ts`, `src/lib/salesframe-core.ts`, `tests/e2e/app-production-contract.test.mjs`
+Verification evidence: targeted Start Call seller research contract passed; stale-storage search no longer finds production code references; `pnpm check` passed with secret scan, TypeScript, all 118 tests, and production build.
+
 ## 11. Fixes Applied
 
 - Added visible Start Call preparation step count in `src/App.tsx`.
@@ -309,8 +347,12 @@ Verification evidence: targeted security contract passed; full `pnpm check` pass
 - Added per-user/workspace rate limits to CSV import and import-enrichment POST actions.
 - Tightened call-recording storage RLS so recordings require access to the specific call ID in the object path and that call must belong to the workspace segment in the storage path.
 - Hardened client-side crash reporting so raw browser stacks and arbitrary metadata are not sent to or logged by Netlify functions.
+- Bounded development render-error console diagnostics so raw React error objects are not printed.
+- Added stale and malformed Live Coach popout local-storage cleanup for the short-lived fallback path.
+- Removed the legacy browser-local seller research profile path so Seller Research stays workspace/user scoped.
 - Hardened playbook workspace reads by replacing raw combined filter strings with explicit system and workspace equality queries.
 - Replaced a raw `live-question` memory persistence warning with bounded safe logging.
+- Updated security contracts to assert session-aware authorization helper calls after workspace session enforcement.
 - Tightened the How It Works dialog layout in `src/components/marketing-landing-page.tsx` to remove unnecessary reserved white space while keeping stable media/story structure.
 - Added a dev-only public landing preview route so marketing pages can be QA'd locally without disrupting an authenticated app session.
 - Increased mobile How It Works dialog touch targets while keeping the dialog visually calm.
@@ -344,9 +386,13 @@ Verification evidence: targeted security contract passed; full `pnpm check` pass
 - `netlify/functions/live-guidance.ts`
 - `netlify/functions/live-question.ts`
 - `src/App.tsx`
+- `src/components/app-error-boundary.tsx`
 - `src/components/marketing-landing-page.tsx`
 - `src/hooks/use-call-capture.ts`
 - `src/lib/client-error-reporting.ts`
+- `src/lib/live-coach-popout.ts`
+- `src/lib/research-profile.ts`
+- `src/lib/salesframe-core.ts`
 - `src/lib/supabase/salesframe-data.ts`
 - `supabase/migrations/202607070002_tighten_call_recording_storage_rls.sql`
 - `tests/e2e/app-production-contract.test.mjs`
@@ -364,6 +410,15 @@ Baseline:
   - Initial result: failed at test stage with 16 failing tests.
 
 Targeted:
+
+- `CI=true pnpm test:functions`
+  - Continuation result, 2026-07-09: passed 17 / 17 after updating session-aware authorization contracts.
+- `CI=true pnpm exec node --test --test-name-pattern "app shell catches render crashes|live coach popout" tests/e2e/app-production-contract.test.mjs`
+  - Continuation result, 2026-07-09: passed 2 / 2 after tightening render diagnostics and stale popout storage cleanup.
+- `CI=true pnpm exec node --test --test-name-pattern "Start Call research step routes missing OpenAI keys" tests/e2e/app-production-contract.test.mjs`
+  - Continuation result, 2026-07-09: passed 1 / 1 after removing the legacy seller research local-storage path.
+- `rg -n "sellerResearchProfileStorageKey|salesframe\\.sellerResearchProfile|loadSellerResearchProfile|localStorage\\.getItem\\(sellerResearch" src tests docs netlify --glob '!dist/**'`
+  - Continuation result, 2026-07-09: no production code references remained; the only remaining match was the protective negative contract assertion.
 
 - `node --test --test-name-pattern "public homepage" tests/e2e/app-production-contract.test.mjs`
   - Final result: passed 3 / 3. This covers the protected auth splash guard, SEO/crawl controls, and mobile-sized homepage action buttons.
@@ -391,14 +446,16 @@ Full validation:
 - `CI=true pnpm lint`
   - Passed. TypeScript build check succeeded.
 - `CI=true pnpm test`
-  - Passed. 115 / 115 tests.
+  - Passed. 118 / 118 tests.
 - `CI=true pnpm build`
-  - Passed. Latest production build completed without a chunk-size warning. Main chunk: `index-61Vx7uBN.js` at 452.94 kB. Split chunks include `call-capture-C-aT5RTu.js`, `salesframe-data-CY2aiF2R.js`, and `deepgram-live-transcription-D055ylOd.js`.
+  - Passed. Latest production build completed without a chunk-size warning. Main chunk: `index-CvUBA7ph.js` at 470.76 kB. Split chunks include `call-capture-C0ZXTyO3.js`, `salesframe-data-D3_KhuLm.js`, and `deepgram-live-transcription-BzRy_mO1.js`.
 - `CI=true pnpm check`
   - Passed. Secret scan, typecheck, tests, and production build all succeeded.
 
 Validation environment note:
 
+- A first continuation attempt to run plain `pnpm check` failed before app validation because pnpm tried to verify/install dependencies while sandboxed networking blocked registry access and then aborted module purging without a TTY. The release gate was rerun with the bundled runtime path and CI mode.
+- A second continuation attempt with network access but no runtime PATH failed at `node scripts/check-secrets.mjs` because `node` was not on the shell PATH. It was rerun successfully with the bundled workspace runtime path explicitly set.
 - The first direct shell attempts to run `node --test ...` and `pnpm lint` failed because `node` was not on that shell's `PATH` (`zsh:1: command not found: node` and `exec: node: not found`). They were rerun successfully with the bundled workspace runtime path explicitly set. This was an environment-path issue, not an app failure.
 
 Targeted in-app browser QA:
@@ -503,9 +560,9 @@ The current local code is ready for owner review, but not for unattended product
 
 - Phase 0 repo understanding: Completed. Evidence: README, package scripts, Netlify config, env example, migrations, source/function/test maps inspected; architecture map added above.
 - Phase 1 product surface map: Completed by code inspection and report mapping. Evidence: Appendix B.
-- Phase 2 code QA audit: Partially completed with contract/security/performance/accessibility-focused inspection and tests. Evidence: issues QA-001 through QA-018 and passing contract/function tests. Not a formal line-by-line audit of every component.
+- Phase 2 code QA audit: Partially completed with contract/security/performance/accessibility-focused inspection and tests. Evidence: issues QA-001 through QA-023 and passing contract/function tests. Not a formal line-by-line audit of every component.
 - Phase 3 runtime/browser testing: Partially completed. Evidence: targeted in-app browser checks on authenticated desktop and mobile surfaces plus local public homepage/dialog preview. Limitation: clean unauthenticated login/signup/logout and live-call hardware flows were not completed because safe `TEST_USER_EMAIL` / `TEST_USER_PASSWORD` were absent and the in-app browser was already authenticated.
-- Phase 4 prioritise and fix: Completed for safe, high-impact local issues found in this pass. Evidence: QA-001 through QA-018 fixes and validation.
+- Phase 4 prioritise and fix: Completed for safe, high-impact local issues found in this pass. Evidence: QA-001 through QA-023 fixes and validation.
 - Phase 5 design system/calm UX polish: Partially completed. Evidence: How It Works dialog whitespace fix, Start Call progress clarity, contract guards for calm UI. Limitation: full visual sweep of every authenticated modal and live-call state remains recommended.
 - Phase 6 verification: Completed for local automated gate and targeted browser checks. Evidence: `pnpm check` passed, browser checks listed above.
 - Phase 7 deliverables: Completed. Evidence: `QA_REPORT.md` includes the requested sections plus architecture/surface/completion appendices.
