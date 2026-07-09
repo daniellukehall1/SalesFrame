@@ -1,4 +1,4 @@
-import { AppError, logSafeEvent } from "./http"
+import { AppError, fetchWithTimeout, logSafeEvent } from "./http"
 import { getEnv } from "./env"
 
 type DeepgramGrantResponse = {
@@ -42,18 +42,27 @@ export async function createDeepgramTemporaryToken(context: Record<string, unkno
 
   let response: Response
   try {
-    response = await fetch(deepgramGrantUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${apiKey}`,
+    response = await fetchWithTimeout(
+      deepgramGrantUrl,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Token ${apiKey}`,
+        },
       },
-    })
+      getDeepgramGrantTimeoutMs()
+    )
   } catch (error) {
+    const code =
+      error instanceof AppError && error.code === "upstream_timeout"
+        ? "deepgram_token_timeout"
+        : "deepgram_token_network_error"
     logSafeEvent("warn", "deepgram_token_network_error", {
       ...context,
+      code,
       message: error instanceof Error ? error.message : String(error),
     })
-    throw new AppError("deepgram_token_network_error", "Deepgram needs another moment. Try again shortly.", 502)
+    throw new AppError(code, "Deepgram needs another moment. Try again shortly.", 502)
   }
 
   const payload = await response.json().catch(() => ({})) as DeepgramGrantResponse
@@ -226,6 +235,10 @@ function getNumberEnv(name: string, fallback: number, min: number, max: number) 
   if (!Number.isFinite(value)) return fallback
 
   return Math.max(min, Math.min(max, value))
+}
+
+function getDeepgramGrantTimeoutMs() {
+  return Math.round(getNumberEnv("DEEPGRAM_TOKEN_GRANT_TIMEOUT_MS", 8000, 3000, 15000))
 }
 
 function getDeepgramTokenFailureCode(status: number) {

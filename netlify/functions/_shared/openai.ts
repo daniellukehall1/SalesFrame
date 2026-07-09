@@ -1,5 +1,5 @@
 import { getEnv } from "./env"
-import { upstreamFailure } from "./http"
+import { AppError, fetchWithTimeout, upstreamFailure } from "./http"
 
 export type OpenAiJsonRequest = {
   apiKey: string
@@ -39,13 +39,9 @@ export async function callOpenAiJson<T>({
   system,
   useWebSearch = false,
 }: OpenAiJsonRequest): Promise<T> {
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const response = await fetchOpenAiResponses({
+    apiKey,
+    body: {
       model,
       input: [
         {
@@ -88,7 +84,8 @@ export async function callOpenAiJson<T>({
             },
           ]
         : undefined,
-    }),
+    },
+    timeoutMs: getOpenAiTimeoutMs("OPENAI_REQUEST_TIMEOUT_MS", 25000),
   })
 
   const data = await readOpenAiPayload(response)
@@ -135,13 +132,9 @@ export async function callOpenAiWebSearchJson<T>({
     }
   }
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const response = await fetchOpenAiResponses({
+    apiKey,
+    body: {
       model,
       include: ["web_search_call.action.sources"],
       input: [
@@ -178,7 +171,8 @@ export async function callOpenAiWebSearchJson<T>({
       },
       tool_choice: "required",
       tools: [webSearchTool],
-    }),
+    },
+    timeoutMs: getOpenAiTimeoutMs("OPENAI_WEB_SEARCH_TIMEOUT_MS", 45000),
   })
 
   const data = await readOpenAiPayload(response)
@@ -201,6 +195,44 @@ export async function callOpenAiWebSearchJson<T>({
   } catch {
     throw upstreamFailure("OpenAI returned malformed JSON.", "openai_malformed_json")
   }
+}
+
+async function fetchOpenAiResponses({
+  apiKey,
+  body,
+  timeoutMs,
+}: {
+  apiKey: string
+  body: Record<string, unknown>
+  timeoutMs: number
+}) {
+  try {
+    return await fetchWithTimeout(
+      "https://api.openai.com/v1/responses",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+      timeoutMs
+    )
+  } catch (error) {
+    if (error instanceof AppError && error.code === "upstream_timeout") {
+      throw upstreamFailure("OpenAI request timed out.", "openai_timeout")
+    }
+
+    throw upstreamFailure("OpenAI request failed before receiving a response.", "openai_network_error")
+  }
+}
+
+function getOpenAiTimeoutMs(name: string, fallback: number) {
+  const value = Number(getEnv(name, String(fallback)))
+  if (!Number.isFinite(value)) return fallback
+
+  return Math.max(5000, Math.min(60000, Math.round(value)))
 }
 
 async function readOpenAiPayload(response: Response) {

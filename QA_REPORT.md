@@ -374,6 +374,42 @@ Before/after impact: Before, injection resistance depended on each prompt author
 Files changed: `netlify/functions/_shared/openai.ts`, `tests/functions/security-contract.test.mjs`
 Verification evidence: targeted OpenAI helper contract passed.
 
+### QA-027
+
+Severity: Medium
+Area: Recording UX / signed URL handling
+Description: The main post-call replay card had been simplified to download-only audio actions, but the opportunity recording history still opened signed recording URLs in a new browser tab.
+Root cause: The earlier playback cleanup only covered `CallReplayCard`; `OpportunityRecordingHistory` kept a separate `handleOpenRecording` path with `window.open`.
+User/business impact: Sellers could still hit the confusing blank/new-tab signed-link experience from an older recording list, and the app exposed a second, inconsistent way to handle sensitive call-recording URLs.
+Fix applied: Replaced the opportunity recording history open-new-tab flow with the same forced blob-download helper used by the post-call card. The history list now shows `Download audio` and does not navigate signed URLs.
+Before/after impact: Before, previous recordings could be opened in a new tab from the opportunity history. After, stored audio downloads consistently as a file from both post-call and history surfaces.
+Files changed: `src/App.tsx`, `tests/e2e/app-production-contract.test.mjs`
+Verification evidence: targeted post-call recording contract passed.
+
+### QA-028
+
+Severity: High
+Area: Supabase RLS / session enforcement
+Description: The workspace session-timeout migration hardened most active workspace data tables, but left `user_ai_settings` on the older `is_workspace_member(workspace_id)` policy.
+Root cause: The initial workspace-session migration updated account, opportunity, call, transcript, enrichment, import, and seller/customer research policies, but the per-user OpenAI key settings table was introduced by a separate workspace-scoped AI settings migration and was missed in the follow-up session RLS sweep.
+User/business impact: Server functions already require an active workspace session before reading or writing key status, but a valid Supabase token outside the app's active-session window could still directly read or mutate that user's encrypted AI settings row through RLS. Even encrypted key metadata should follow the same active-session boundary as the rest of the workspace.
+Fix applied: Added a follow-up Supabase migration that recreates the `user_ai_settings` policy with `user_id = auth.uid()` plus `public.is_workspace_member_with_active_session(workspace_id)`.
+Before/after impact: Before, direct database access to user AI settings required workspace membership but not an active SalesFrame workspace session. After, the encrypted key table participates in the same server-enforced session posture as active workspace data.
+Files changed: `supabase/migrations/202607090002_require_active_session_for_ai_settings.sql`, `tests/e2e/app-production-contract.test.mjs`, `tests/functions/security-contract.test.mjs`
+Verification evidence: targeted workspace-session and OpenAI-key security contracts passed.
+
+### QA-029
+
+Severity: Medium
+Area: Serverless provider reliability / timeout control
+Description: Shared OpenAI Responses calls and the Deepgram temporary-token grant path did not have explicit provider timeouts.
+Root cause: The functions relied on the platform/client request lifecycle rather than an app-owned timeout boundary for upstream AI and transcription-provider calls.
+User/business impact: A slow provider or network stall could leave the app waiting until a broader platform timeout, making live-call start and AI guidance feel frozen or fail with less useful recovery behavior.
+Fix applied: Added a shared `fetchWithTimeout` helper, applied it to OpenAI JSON/web-search requests and Deepgram token grants, added timeout env defaults, and added contract coverage for the explicit timeout/error-code paths.
+Before/after impact: Before, provider setup could hang without an app-owned cutoff. After, OpenAI and Deepgram provider calls fail closed with bounded, classified timeout/network errors that the UI can translate into calm recovery states.
+Files changed: `.env.example`, `netlify/functions/_shared/http.ts`, `netlify/functions/_shared/openai.ts`, `netlify/functions/_shared/deepgram.ts`, `tests/functions/security-contract.test.mjs`
+Verification evidence: targeted provider-timeout security contracts and full release gate passed.
+
 ## 11. Fixes Applied
 
 - Added visible Start Call preparation step count in `src/App.tsx`.
@@ -389,6 +425,9 @@ Verification evidence: targeted OpenAI helper contract passed.
 - Made workspace session policy/activity creation idempotent so concurrent heartbeats do not become duplicate-key function errors.
 - Scoped Deepgram temporary transcription tokens and live OpenAI coaching/attribution endpoints to active, unended calls only.
 - Added a shared OpenAI prompt-injection defense so transcripts, seller notes, account/opportunity fields, research inputs, and web content are treated as untrusted evidence rather than instructions.
+- Removed the remaining open-new-tab signed recording path from opportunity recording history and made previous call audio download-only.
+- Added a follow-up Supabase migration so `user_ai_settings` requires an active workspace session, matching the intended session-timeout security boundary.
+- Added explicit OpenAI and Deepgram upstream timeouts so provider stalls fail closed with classified recovery errors instead of broad platform timeouts.
 - Hardened playbook workspace reads by replacing raw combined filter strings with explicit system and workspace equality queries.
 - Replaced a raw `live-question` memory persistence warning with bounded safe logging.
 - Updated security contracts to assert session-aware authorization helper calls after workspace session enforcement.
@@ -444,6 +483,7 @@ Verification evidence: targeted OpenAI helper contract passed.
 - `tests/e2e/live-call-eval-contract.test.mjs`
 - `tests/functions/security-contract.test.mjs`
 - `vite.config.ts`
+- `supabase/migrations/202607090002_require_active_session_for_ai_settings.sql`
 
 Note: `src/components/marketing-landing-page.tsx` was already modified in the current worktree before this QA-report step, for the homepage dialog image and whitespace work.
 
@@ -468,6 +508,12 @@ Targeted:
   - Continuation result, 2026-07-09: passed 2 / 2 after requiring Deepgram transcription tokens to target active, unended calls.
 - `CI=true pnpm exec node --test --test-name-pattern "OpenAI helper supports" tests/functions/security-contract.test.mjs`
   - Continuation result, 2026-07-09: passed 1 / 1 after adding the shared prompt-injection defense wrapper.
+- `CI=true pnpm exec node --test --test-name-pattern "post-call recording actions" tests/e2e/app-production-contract.test.mjs`
+  - Continuation result, 2026-07-09: passed 1 / 1 after making opportunity recording history download-only.
+- `CI=true pnpm exec node --test --test-name-pattern "opportunity history tab|customer-facing errors|post-call recording actions" tests/e2e/app-production-contract.test.mjs`
+  - Continuation result, 2026-07-09: passed 3 / 3 after updating stale recording-history and customer-facing-error contracts.
+- `CI=true pnpm exec node --test --test-name-pattern "workspace session timeout|OpenAI keys are scoped" tests/e2e/app-production-contract.test.mjs tests/functions/security-contract.test.mjs`
+  - Continuation result, 2026-07-09: passed 2 / 2 after adding active-session RLS coverage for `user_ai_settings`.
 - `rg -n "sellerResearchProfileStorageKey|salesframe\\.sellerResearchProfile|loadSellerResearchProfile|localStorage\\.getItem\\(sellerResearch" src tests docs netlify --glob '!dist/**'`
   - Continuation result, 2026-07-09: no production code references remained; the only remaining match was the protective negative contract assertion.
 
@@ -502,6 +548,8 @@ Full validation:
   - Passed. Latest production build completed without a chunk-size warning. Main chunk: `index-CvUBA7ph.js` at 470.76 kB. Split chunks include `call-capture-C0ZXTyO3.js`, `salesframe-data-D3_KhuLm.js`, and `deepgram-live-transcription-BzRy_mO1.js`.
 - `CI=true pnpm check`
   - Passed. Secret scan, typecheck, tests, and production build all succeeded.
+  - Continuation result, 2026-07-09 after QA-027: passed. Secret scan, TypeScript, 118 / 118 tests, and production build all succeeded. Latest main app chunk: `index-logt9QFt.js` at 470.54 kB.
+  - Continuation result, 2026-07-09 after QA-028: passed. Secret scan, TypeScript, 118 / 118 tests, and production build all succeeded. Latest main app chunk remained `index-logt9QFt.js` at 470.54 kB.
 
 Validation environment note:
 

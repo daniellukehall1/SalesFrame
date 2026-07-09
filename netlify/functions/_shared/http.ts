@@ -152,6 +152,34 @@ export function upstreamFailure(message: string, code = "upstream_failure") {
   return new AppError(code, message, 502)
 }
 
+export async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = 15000
+) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new AppError("upstream_timeout", "Provider request timed out.", 502)
+    }
+
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+export function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError"
+}
+
 function isMissingServerConfiguration(error: unknown) {
   return (
     error instanceof Error &&

@@ -15265,8 +15265,8 @@ function OpportunityRecordingHistory({
   opportunity: Opportunity
   onDeleteCall: (callId: string) => void
 }) {
-  const [openingCallId, setOpeningCallId] = React.useState("")
-  const [openError, setOpenError] = React.useState("")
+  const [downloadingCallId, setDownloadingCallId] = React.useState("")
+  const [downloadError, setDownloadError] = React.useState("")
   const recordings = calls
     .filter((call) => call.opportunityId === opportunity.id)
     .filter(canReplayCall)
@@ -15278,32 +15278,15 @@ function OpportunityRecordingHistory({
       return rightStartedAt - leftStartedAt
     })
 
-  const handleOpenRecording = async (call: CallSummary) => {
-    setOpenError("")
-    setOpeningCallId(call.id)
-
-    const targetWindow = window.open("about:blank", "_blank", "noopener,noreferrer")
-    if (targetWindow) targetWindow.opener = null
-
+  const handleDownloadRecording = async (call: CallSummary) => {
+    setDownloadError("")
+    setDownloadingCallId(call.id)
     try {
-      const recordingUrl =
-        call.recordingUrl ||
-        (call.recordingStoragePath ? await createCallRecordingSignedUrl(call.recordingStoragePath) : "")
-
-      if (!recordingUrl) {
-        throw new Error("No recording is available for this call.")
-      }
-
-      if (targetWindow) {
-        targetWindow.location.href = recordingUrl
-      } else {
-        window.open(recordingUrl, "_blank", "noopener,noreferrer")
-      }
+      await downloadCallAudioFile(call)
     } catch (caughtError: unknown) {
-      targetWindow?.close()
-      setOpenError(getUserFacingErrorMessage(caughtError, "Recording needs another open attempt."))
+      setDownloadError(getUserFacingErrorMessage(caughtError, "Recording needs another download attempt."))
     } finally {
-      setOpeningCallId("")
+      setDownloadingCallId("")
     }
   }
 
@@ -15311,12 +15294,12 @@ function OpportunityRecordingHistory({
     <Card>
       <CardHeader>
         <CardTitle>Previous call recordings</CardTitle>
-        <CardDescription>Stored recordings for this opportunity</CardDescription>
+        <CardDescription>Download stored audio from earlier calls on this opportunity</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
-        {openError ? (
+        {downloadError ? (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
-            {openError}
+            {downloadError}
           </div>
         ) : null}
         {recordings.map((call) => {
@@ -15346,10 +15329,12 @@ function OpportunityRecordingHistory({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={openingCallId === call.id}
-                  onClick={() => void handleOpenRecording(call)}
+                  className="gap-2"
+                  disabled={downloadingCallId === call.id}
+                  onClick={() => void handleDownloadRecording(call)}
                 >
-                  {openingCallId === call.id ? "Opening..." : "Open"}
+                  <DownloadIcon />
+                  {downloadingCallId === call.id ? "Downloading..." : "Download audio"}
                 </Button>
                 <Button size="sm" variant="destructive" onClick={() => onDeleteCall(call.id)}>
                   Delete
