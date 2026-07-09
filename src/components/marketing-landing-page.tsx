@@ -281,7 +281,7 @@ function HowItWorksDialog({
                 aria-label={`Show ${step.title}`}
                 aria-current={index === stepIndex ? "step" : undefined}
                 tabIndex={-1}
-                className="group grid size-8 place-items-center rounded-md transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
+                className="group grid size-11 place-items-center rounded-md transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 sm:size-8"
                 onClick={() => setStepIndex(index)}
               >
                 <span

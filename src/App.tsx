@@ -7162,7 +7162,7 @@ function CommandBar({
 
       <div className="grid gap-2 sm:grid-cols-2 lg:min-w-[580px] lg:grid-cols-4">
         <Select value={callType} onValueChange={onCallTypeChange}>
-          <SelectTrigger className="h-9 w-full" aria-label="Call type">
+          <SelectTrigger className="h-11 w-full md:h-9" aria-label="Call type">
             <SelectValue placeholder="Call type" />
           </SelectTrigger>
           <SelectContent>
@@ -11326,7 +11326,10 @@ function HomeDashboard({
                             onClick={(event) => event.stopPropagation()}
                             onKeyDown={(event) => event.stopPropagation()}
                           >
-                            <OpenButton onClick={() => onOpportunitySelect(opportunity.id)} />
+                            <OpenButton
+                              ariaLabel={`Open ${opportunity.name}`}
+                              onClick={() => onOpportunitySelect(opportunity.id)}
+                            />
                           </td>
                         </tr>
                       )
@@ -11357,9 +11360,23 @@ function DashboardMetric({ label, value }: { label: string; value: string }) {
   )
 }
 
-function OpenButton({ onClick, label = "Open" }: { onClick: () => void; label?: string }) {
+function OpenButton({
+  ariaLabel,
+  label = "Open",
+  onClick,
+}: {
+  ariaLabel?: string
+  label?: string
+  onClick: () => void
+}) {
   return (
-    <Button size="sm" variant="outline" className="h-11 min-w-[72px] md:h-7" onClick={onClick}>
+    <Button
+      aria-label={ariaLabel}
+      size="sm"
+      variant="outline"
+      className="h-11 min-w-[72px] md:h-7"
+      onClick={onClick}
+    >
       {label}
     </Button>
   )
@@ -11797,7 +11814,7 @@ function AccountView({
                       <div className="flex min-w-0 items-start justify-between gap-3">
                         <button
                           type="button"
-                          className="min-w-0 text-left outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
+                          className="flex min-h-11 min-w-0 flex-1 flex-col justify-center text-left outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
                           aria-label={`Open ${opportunity.name}`}
                           onClick={() => onOpportunitySelect(opportunity.id)}
                         >
@@ -14329,7 +14346,7 @@ function SpeakerIdentityPanel({
 
   return (
     <details className="group rounded-lg bg-muted/20 px-3 py-2">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden md:min-h-0">
         <span className="text-xs font-medium text-muted-foreground">Speaker map</span>
         <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-200 ease-linear group-open:rotate-180" aria-hidden="true" />
       </summary>
@@ -14340,7 +14357,7 @@ function SpeakerIdentityPanel({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 gap-1.5"
+              className="h-11 gap-1.5 md:h-8"
               aria-label={`Add ${nextSpeakerLabel} to speaker map`}
               onClick={() => setAddedSpeakerLabels((labels) => [...labels, nextSpeakerLabel])}
             >
@@ -14369,7 +14386,7 @@ function SpeakerIdentityPanel({
               <Input
                 aria-label={`Name ${speaker.label}`}
                 value={draftValue}
-                className="h-8"
+                className="h-11 md:h-8"
                 placeholder={speaker.label.startsWith("Speaker") ? "Name this speaker" : `${speaker.label} name`}
                 disabled={isPending}
                 onChange={(event) => {
@@ -14396,7 +14413,7 @@ function SpeakerIdentityPanel({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-8 flex-1 gap-1.5 sm:flex-none"
+                  className="h-11 flex-1 gap-1.5 md:h-8 sm:flex-none"
                   disabled={isPending || draftValue.trim() === savedName.trim()}
                   onClick={() =>
                     void saveSpeakerIdentity({
@@ -14412,7 +14429,7 @@ function SpeakerIdentityPanel({
                   type="button"
                   variant={speaker.isMe ? "default" : "outline"}
                   size="sm"
-                  className="h-8 flex-1 gap-1.5 sm:flex-none"
+                  className="h-11 flex-1 gap-1.5 md:h-8 sm:flex-none"
                   disabled={isPending || speaker.isMe}
                   onClick={() =>
                     void saveSpeakerIdentity({
@@ -16897,7 +16914,7 @@ function PlaybooksView({
               </div>
               <div className="mt-auto flex items-center justify-between gap-3 pt-1 text-sm">
                 <span className="text-muted-foreground">{playbook.fields.length} required fields</span>
-                <OpenButton onClick={() => onNavigate(playbook.id)} />
+                <OpenButton ariaLabel={`Open ${playbook.name}`} onClick={() => onNavigate(playbook.id)} />
               </div>
             </div>
           ))}
