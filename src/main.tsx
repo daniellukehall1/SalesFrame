@@ -1,16 +1,39 @@
-import { StrictMode } from "react"
-import { createRoot } from "react-dom/client"
+import { StrictMode, type ReactNode } from "react"
+import { createRoot, hydrateRoot } from "react-dom/client"
 import "./index.css"
-import App from "./App"
 import { AppErrorBoundary } from "@/components/app-error-boundary"
 import { installGlobalClientErrorReporting } from "@/lib/client-error-reporting"
+import { normalizePublicMarketingPath } from "@/lib/public-marketing-routes"
 
 installGlobalClientErrorReporting()
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <AppErrorBoundary>
-      <App />
-    </AppErrorBoundary>
-  </StrictMode>
-)
+const rootElement = document.getElementById("root")!
+
+function withAppBoundary(content: ReactNode) {
+  return (
+    <StrictMode>
+      <AppErrorBoundary>{content}</AppErrorBoundary>
+    </StrictMode>
+  )
+}
+
+async function startSalesFrame() {
+  const publicMarketingPath = normalizePublicMarketingPath(window.location.pathname)
+
+  if (publicMarketingPath) {
+    const { PublicMarketingPage } = await import("@/components/public-marketing-page")
+    const content = withAppBoundary(<PublicMarketingPage path={publicMarketingPath} />)
+
+    if (rootElement.dataset.prerenderedPublicRoute === publicMarketingPath) {
+      hydrateRoot(rootElement, content)
+    } else {
+      createRoot(rootElement).render(content)
+    }
+    return
+  }
+
+  const { default: App } = await import("./App")
+  createRoot(rootElement).render(withAppBoundary(<App />))
+}
+
+void startSalesFrame()

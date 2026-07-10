@@ -5,6 +5,9 @@
 [build.environment]
   NODE_VERSION = "22"
 
+[build.processing.html]
+  pretty_urls = false
+
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
@@ -37,6 +40,12 @@
 
 [[headers]]
   for = "/robots.txt"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+    Content-Type = "text/plain; charset=utf-8"
+
+[[headers]]
+  for = "/llms.txt"
   [headers.values]
     Cache-Control = "public, max-age=3600"
     Content-Type = "text/plain; charset=utf-8"

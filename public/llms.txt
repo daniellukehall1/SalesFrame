@@ -1,0 +1,50 @@
+# SalesFrame
+
+SalesFrame is a real-time AI sales coach for B2B sellers. It helps sellers prepare for calls, capture live transcript context, follow selected sales methodologies, and ask one better next question while the conversation is still happening.
+
+Most tools record and analyse sales calls after the fact. SalesFrame focuses on live coaching: account context, opportunity context, selected playbooks, previous evidence, and the current conversation flow all shape the next suggested seller question.
+
+## Core pages
+
+- Homepage: https://salesframe.ai/
+- Playbooks: https://salesframe.ai/playbooks
+- Use cases: https://salesframe.ai/use-cases
+- Comparisons: https://salesframe.ai/compare
+- Resources: https://salesframe.ai/resources
+
+## Sales methodology pages
+
+- MEDDICC: https://salesframe.ai/playbooks/meddicc
+- BANT: https://salesframe.ai/playbooks/bant
+- SPIN Selling: https://salesframe.ai/playbooks/spin-selling
+- Sandler: https://salesframe.ai/playbooks/sandler
+- Challenger Sale: https://salesframe.ai/playbooks/challenger-sale
+- Gap Selling: https://salesframe.ai/playbooks/gap-selling
+- SPICED: https://salesframe.ai/playbooks/spiced
+
+## Use case pages
+
+- AI sales coach: https://salesframe.ai/ai-sales-coach
+- Real-time sales coaching: https://salesframe.ai/real-time-sales-coaching
+- Sales discovery call coach: https://salesframe.ai/sales-discovery-call-coach
+- Conversation intelligence alternative: https://salesframe.ai/conversation-intelligence-alternative
+- AI meeting notetaker for sales: https://salesframe.ai/ai-meeting-notetaker-for-sales
+- MEDDICC software: https://salesframe.ai/meddicc-software
+- Sales call coaching software: https://salesframe.ai/sales-call-coaching-software
+
+## Comparison pages
+
+- SalesFrame vs Gong: https://salesframe.ai/compare/gong
+- SalesFrame vs Clari Copilot: https://salesframe.ai/compare/clari-copilot
+- SalesFrame vs Fireflies: https://salesframe.ai/compare/fireflies
+- SalesFrame vs Fathom: https://salesframe.ai/compare/fathom
+- SalesFrame vs Outreach: https://salesframe.ai/compare/outreach
+
+## Guides
+
+- How to run a discovery call: https://salesframe.ai/resources/discovery-call-guide
+- Best MEDDICC discovery questions: https://salesframe.ai/resources/meddicc-discovery-questions
+- BANT qualification questions: https://salesframe.ai/resources/bant-qualification-questions
+- SPIN Selling questions for SaaS discovery: https://salesframe.ai/resources/spin-selling-questions-for-saas-discovery
+- Sandler upfront contract examples: https://salesframe.ai/resources/sandler-upfront-contract-examples
+- How to stop sales calls becoming checklist interviews: https://salesframe.ai/resources/stop-sales-calls-becoming-checklist-interviews

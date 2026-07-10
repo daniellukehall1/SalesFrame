@@ -6,7 +6,7 @@
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build --ssr src/prerender-public-marketing.tsx --outDir .salesframe-prerender --emptyOutDir && node scripts/prerender-public-pages.mjs",
     "check": "pnpm check:secrets && pnpm lint && pnpm test && pnpm build",
     "check:secrets": "node scripts/check-secrets.mjs",
     "lint": "tsc -b --pretty false",

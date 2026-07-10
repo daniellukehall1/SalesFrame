@@ -171,6 +171,7 @@ import { makeFailedRowsCsv, type CsvImportType } from "@/lib/csv-import"
 import { reportClientError } from "@/lib/client-error-reporting"
 import { normalizeCloseDateForPersistence } from "@/lib/date-utils"
 import { getUserFacingErrorMessage, isPermissionDeniedError } from "@/lib/user-facing-errors"
+import { normalizePublicMarketingPath } from "@/lib/public-marketing-routes"
 import { createClient } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
 import {
@@ -374,6 +375,9 @@ const LegalDocumentPage = React.lazy(() =>
 )
 const MarketingLandingPage = React.lazy(() =>
   import("@/components/marketing-landing-page").then((module) => ({ default: module.MarketingLandingPage }))
+)
+const PublicMarketingPage = React.lazy(() =>
+  import("@/components/public-marketing-page").then((module) => ({ default: module.PublicMarketingPage }))
 )
 const LiveCoachPopoutWindow = React.lazy(() => import("@/components/live-coach-popout-window"))
 const CsvImportDialog = React.lazy(() =>
@@ -612,6 +616,12 @@ function getLegalPageFromPath(): LegalPageId | null {
   return null
 }
 
+function getPublicMarketingPathFromPath(): string | null {
+  if (typeof window === "undefined") return null
+
+  return normalizePublicMarketingPath(window.location.pathname)
+}
+
 function getPublicAuthRouteFromPath(): PublicAuthRoute {
   if (typeof window === "undefined") return "landing"
   if (window.location.pathname === "/login") return "login"
@@ -620,8 +630,8 @@ function getPublicAuthRouteFromPath(): PublicAuthRoute {
   return "landing"
 }
 
-function isDevPublicLandingPreviewRoute() {
-  if (!import.meta.env.DEV || typeof window === "undefined") return false
+function isPublicLandingRouteOverride() {
+  if (typeof window === "undefined") return false
 
   return new URLSearchParams(window.location.search).has("salesframe_public_preview")
 }
@@ -2080,6 +2090,7 @@ function App() {
   const [bulkImportStatusLoading, setBulkImportStatusLoading] = React.useState(false)
   const [bulkImportStatusRefreshToken, setBulkImportStatusRefreshToken] = React.useState(0)
   const [legalPage, setLegalPage] = React.useState<LegalPageId | null>(() => getLegalPageFromPath())
+  const [publicMarketingPath, setPublicMarketingPath] = React.useState<string | null>(() => getPublicMarketingPathFromPath())
   const [loadingWorkspace, setLoadingWorkspace] = React.useState<WorkspaceNavItem | null>(null)
   const [onboardingOpen, setOnboardingOpen] = React.useState(false)
   const [workspaceSetupDraft, setWorkspaceSetupDraft] = React.useState<WorkspaceNavItem | null>(null)
@@ -2324,6 +2335,7 @@ function App() {
   React.useEffect(() => {
     const handlePopState = () => {
       setLegalPage(getLegalPageFromPath())
+      setPublicMarketingPath(getPublicMarketingPathFromPath())
       const nextRoute = getPublicAuthRouteFromPath()
       setPublicAuthRoute(nextRoute)
       if (nextRoute !== "landing") setAuthMode(nextRoute)
@@ -5013,6 +5025,7 @@ function App() {
   }
 
   const handleAuthModeChange = (mode: AuthMode) => {
+    setPublicMarketingPath(null)
     setAuthMode(mode)
     setPublicAuthRoute(mode)
     setAuthStatusTone("info")
@@ -5025,6 +5038,7 @@ function App() {
 
   const handleLandingLogin = () => {
     setLegalPage(null)
+    setPublicMarketingPath(null)
     setAuthMode("login")
     setPublicAuthRoute("login")
     setAuthStatusTone("info")
@@ -5036,6 +5050,7 @@ function App() {
 
   const handleLandingSignup = () => {
     setLegalPage(null)
+    setPublicMarketingPath(null)
     setAuthMode("signup")
     setPublicAuthRoute("signup")
     setAuthStatusTone("info")
@@ -5047,6 +5062,7 @@ function App() {
 
   const handleAuthBackHome = () => {
     setLegalPage(null)
+    setPublicMarketingPath(null)
     setPublicAuthRoute("landing")
     setAuthStatusTone("info")
     setAuthStatusMessage("")
@@ -5699,7 +5715,7 @@ function App() {
     )
   }
 
-  if (isDevPublicLandingPreviewRoute()) {
+  if (isPublicLandingRouteOverride()) {
     return (
       <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} surface="landing" />}>
         <MarketingLandingPage onLogin={handleLandingLogin} onSignup={handleLandingSignup} />
@@ -5719,6 +5735,14 @@ function App() {
           }}
           onDarkModeChange={setDarkMode}
         />
+      </React.Suspense>
+    )
+  }
+
+  if (publicMarketingPath) {
+    return (
+      <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} surface="landing" />}>
+        <PublicMarketingPage path={publicMarketingPath} />
       </React.Suspense>
     )
   }

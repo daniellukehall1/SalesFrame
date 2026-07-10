@@ -6,7 +6,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card"
 import {
   Field,
@@ -18,7 +17,7 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 
 const authTextButtonClass =
-  "inline-flex min-h-10 items-center rounded-md px-1 underline underline-offset-4 outline-none transition-[color,box-shadow,opacity] duration-150 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline sm:min-h-7"
+  "inline-flex min-h-11 items-center rounded-md px-1 underline underline-offset-4 outline-none transition-[color,box-shadow,opacity] duration-150 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline sm:min-h-7"
 
 export type LoginFormValues = {
   email: string
@@ -61,7 +60,7 @@ export function LoginForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle>Welcome back</CardTitle>
+          <h1 className="font-heading text-base leading-snug font-medium">Welcome back</h1>
           <CardDescription>
             Pick up where the last conversation left off.
           </CardDescription>

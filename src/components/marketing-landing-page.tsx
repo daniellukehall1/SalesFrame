@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { publicMarketingNavGroups } from "@/lib/public-marketing-routes"
 
 const heroVideoUrl = "/media/salesframe-hero.mp4"
 const heroFallbackImageUrl = "/media/salesframe-hero-poster.png"
@@ -26,6 +27,40 @@ const mobileTypedIntro =
   "Glad you stopped in.\nSalesFrame is built to help you sell. Now, where do you want to start?"
 const desktopTypedIntro =
   "Glad you stopped in.\nSalesFrame is built to help you sell.\nNow, where do you want to start?"
+const landingSeoTitle = "SalesFrame | Real-Time AI Sales Coach for Discovery Calls"
+const landingSeoDescription =
+  "SalesFrame is a real-time AI sales coach for B2B discovery calls. Ask better next questions across MEDDICC, BANT, SPIN, Sandler, Challenger, Gap Selling and SPICED."
+
+function setLandingMeta(selector: string, attribute: "content" | "href", value: string) {
+  const element = document.head.querySelector(selector)
+
+  if (!element) return
+
+  element.setAttribute(attribute, value)
+}
+
+function useLandingPageMetadata() {
+  React.useEffect(() => {
+    document.title = landingSeoTitle
+    setLandingMeta('meta[name="description"]', "content", landingSeoDescription)
+    setLandingMeta('link[rel="canonical"]', "href", "https://salesframe.ai/")
+    setLandingMeta('meta[property="og:url"]', "content", "https://salesframe.ai/")
+    setLandingMeta('meta[property="og:title"]', "content", landingSeoTitle)
+    setLandingMeta(
+      'meta[property="og:description"]',
+      "content",
+      "Give B2B sellers one natural next question in the moment, shaped by the live call, account context, opportunity history and selected sales methodologies."
+    )
+    setLandingMeta('meta[name="twitter:title"]', "content", landingSeoTitle)
+    setLandingMeta(
+      'meta[name="twitter:description"]',
+      "content",
+      "A live AI sales coach that helps sellers ask better discovery questions across MEDDICC, BANT, SPIN, Sandler and more."
+    )
+    document.getElementById("salesframe-public-page-schema")?.remove()
+  }, [])
+}
+
 
 const howItWorksSteps = [
   {
@@ -179,21 +214,6 @@ function useTypewriter(text: string, speed = 38, startDelay = 600, prefersReduce
   return { displayed, done }
 }
 
-function copyIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="size-3 shrink-0"
-      fill="none"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <rect x="9" y="9" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="2" />
-      <path d="M5 15V7a2 2 0 0 1 2-2h8" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
-    </svg>
-  )
-}
-
 function salesFrameWaveformMark() {
   return <AudioLinesIcon aria-hidden="true" className="size-6 shrink-0 text-black sm:size-7" />
 }
@@ -325,11 +345,100 @@ function HowItWorksDialog({
   )
 }
 
+function MarketingFooterNav() {
+  const [activeGroupId, setActiveGroupId] = React.useState<string | null>(null)
+  const activeGroup = publicMarketingNavGroups.find((group) => group.id === activeGroupId)
+
+  return (
+    <footer
+      className="fixed inset-x-0 bottom-2 z-20 flex justify-center px-4 sm:bottom-4"
+      data-public-footer-nav
+      onMouseLeave={() => setActiveGroupId(null)}
+    >
+      <nav
+        aria-label="SalesFrame public pages"
+        className="relative flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-full bg-white/50 px-3 py-1 text-[11px] leading-none text-black/58 shadow-sm backdrop-blur-md sm:gap-4 sm:bg-white/35 sm:text-xs"
+      >
+        {activeGroup ? (
+          <div
+            className="absolute bottom-full left-1/2 mb-2 w-[min(18rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl bg-white p-3 text-left shadow-lg ring-1 ring-black/10"
+            role="menu"
+          >
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <a href={activeGroup.href} className="text-xs font-medium text-black">
+                {activeGroup.label}
+              </a>
+              <button
+                type="button"
+                className="inline-flex min-h-11 items-center text-xs text-black/45 hover:text-black sm:min-h-8"
+                onClick={() => setActiveGroupId(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid gap-1">
+              {activeGroup.links.map((link) => (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  className="flex min-h-11 items-center rounded-md px-2 py-1.5 text-sm text-black/65 transition-colors hover:bg-black hover:text-white sm:min-h-8"
+                  role="menuitem"
+                >
+                  {link.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {publicMarketingNavGroups.map((group) => (
+          <button
+            key={group.id}
+            type="button"
+            aria-expanded={activeGroupId === group.id}
+            className="min-h-11 rounded-sm px-1 py-1 transition-colors hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 sm:min-h-8"
+            onClick={() => setActiveGroupId((current) => (current === group.id ? null : group.id))}
+          >
+            {group.label}
+          </button>
+        ))}
+      </nav>
+    </footer>
+  )
+}
+
+function SalesFrameSeoOverview() {
+  return (
+    <section className="sr-only" aria-label="SalesFrame sales coaching overview">
+      <h2>Real-time AI sales coaching for discovery calls</h2>
+      <p>
+        SalesFrame helps B2B sellers ask better next questions while a live sales conversation is happening. It uses the
+        account record, opportunity record, previous call evidence and selected sales methodologies to keep guidance timely
+        and human.
+      </p>
+
+      <h2>Sales methodologies supported by SalesFrame</h2>
+      <p>
+        SalesFrame supports MEDDICC, MEDDPICC, BANT, Force Management, SPIN Selling, Sandler, The Challenger Sale, Gap
+        Selling, Value Selling, Strategic Selling, SPICED and custom sales frameworks.
+      </p>
+      <p>
+        Explore SalesFrame playbook pages for MEDDICC, BANT, SPIN Selling, Sandler, Challenger Sale, Gap Selling and
+        SPICED, plus use case pages for AI sales coaching, real-time sales coaching, discovery call coaching, sales call
+        coaching software, MEDDICC software, conversation intelligence alternatives and AI meeting notes for sales.
+      </p>
+
+      <h2>Built for sellers comparing sales coaching and conversation intelligence tools</h2>
+      <p>
+        SalesFrame captures transcripts and post-call notes, but the product is built around live coaching: one natural
+        question at a time, shaped by methodology discipline, buyer context and the flow of the conversation.
+      </p>
+    </section>
+  )
+}
+
 const landingOutlineButtonClass =
   "landing-action-button border-black/15 bg-white/90 text-black shadow-sm backdrop-blur-sm hover:border-black hover:bg-black hover:text-white focus-visible:border-black/30 focus-visible:ring-black/20"
-
-const landingContactButtonClass =
-  "landing-action-button landing-contact-button gap-2 border-white/80 bg-white/10 text-white shadow-sm backdrop-blur-sm hover:border-white hover:bg-white hover:text-black focus-visible:border-white focus-visible:ring-white/30 sm:gap-3"
 
 const landingTextButtonClass =
   "inline-flex min-h-11 items-center rounded-sm outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-black/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent sm:min-h-0"
@@ -341,16 +450,16 @@ export function MarketingLandingPage({
   onLogin: () => void
   onSignup: () => void
 }) {
+  useLandingPageMetadata()
+
   const videoRef = React.useRef<HTMLVideoElement | null>(null)
   const prevXRef = React.useRef<number | null>(null)
   const targetTimeRef = React.useRef(0)
   const seekingRef = React.useRef(false)
   const videoReadyRef = React.useRef(false)
-  const copyResetTimeoutRef = React.useRef<number | null>(null)
   const isMobileLandingViewport = useIsMobileLandingViewport()
   const prefersReducedMotion = usePrefersReducedMotion()
   const [actionsVisible, setActionsVisible] = React.useState(prefersReducedMotion)
-  const [copied, setCopied] = React.useState(false)
   const [howItWorksOpen, setHowItWorksOpen] = React.useState(false)
   const [videoReady, setVideoReady] = React.useState(false)
   const [videoUnavailable, setVideoUnavailable] = React.useState(false)
@@ -420,14 +529,6 @@ export function MarketingLandingPage({
     return () => window.removeEventListener("mousemove", handleMouseMove)
   }, [prefersReducedMotion, seekToTarget])
 
-  React.useEffect(() => {
-    return () => {
-      if (copyResetTimeoutRef.current !== null) {
-        window.clearTimeout(copyResetTimeoutRef.current)
-      }
-    }
-  }, [])
-
   const handleLoadedMetadata = () => {
     const video = videoRef.current
 
@@ -452,22 +553,6 @@ export function MarketingLandingPage({
     videoReadyRef.current = false
     setVideoReady(false)
     setVideoUnavailable(true)
-  }
-
-  const handleCopyEmail = async () => {
-    try {
-      await navigator.clipboard.writeText(contactEmail)
-      setCopied(true)
-      if (copyResetTimeoutRef.current !== null) {
-        window.clearTimeout(copyResetTimeoutRef.current)
-      }
-      copyResetTimeoutRef.current = window.setTimeout(() => {
-        setCopied(false)
-        copyResetTimeoutRef.current = null
-      }, 1800)
-    } catch {
-      window.location.href = `mailto:${contactEmail}`
-    }
   }
 
   return (
@@ -524,14 +609,14 @@ export function MarketingLandingPage({
         </a>
       </header>
 
-      <section className="relative z-[2] flex h-svh flex-col justify-end overflow-hidden px-5 pb-12 sm:px-8 md:justify-center md:px-10 md:pb-0">
+      <section className="relative z-[2] flex h-svh flex-col justify-end overflow-hidden px-5 pb-20 sm:px-8 md:justify-center md:px-10 md:pb-0">
         <div className="relative z-10 max-w-xl">
           <h1 className="sr-only">
-            SalesFrame is a real-time AI sales call coach that helps sellers ask the right next question.
+            SalesFrame is a real-time AI sales coach for B2B discovery calls.
           </h1>
           <p className="sr-only">
-            SalesFrame listens to live sales calls, tracks opportunity context and selected sales playbooks, then suggests
-            one natural next question for the seller.
+            SalesFrame listens to live sales calls, tracks account context, opportunity context and selected sales
+            methodologies, then suggests one natural next question for the seller.
           </p>
           <p
             className="landing-hero-copy pointer-events-none mb-5 select-none whitespace-pre-line text-black blur-[4px] sm:mb-6"
@@ -589,21 +674,11 @@ export function MarketingLandingPage({
                 Pricing
               </a>
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="lg"
-              className={landingContactButtonClass}
-              onClick={handleCopyEmail}
-            >
-              <span>
-                Reach us: <span className="underline underline-offset-1">{copied ? "copied" : contactEmail}</span>
-              </span>
-              {copyIcon()}
-            </Button>
           </div>
         </div>
       </section>
+      <SalesFrameSeoOverview />
+      <MarketingFooterNav />
       <HowItWorksDialog open={howItWorksOpen} onOpenChange={setHowItWorksOpen} onSignup={onSignup} />
     </main>
   )

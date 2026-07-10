@@ -257,12 +257,6 @@
   line-height: 1.35;
 }
 
-.landing-contact-button {
-  grid-column: 1 / -1;
-  justify-self: start;
-  margin-top: 0.15rem;
-}
-
 @media (min-width: 640px) {
   .landing-hero-copy {
     font-size: clamp(18px, 4vw, 26px);
@@ -292,10 +286,6 @@
     font-size: 15px;
   }
 
-  .landing-contact-button {
-    grid-column: auto;
-    margin-top: 0;
-  }
 }
 
 .landing-cursor {

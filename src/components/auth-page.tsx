@@ -60,9 +60,9 @@ export function AuthPage({
 
         <div className="mt-auto grid gap-5">
           <div>
-            <h1 className="max-w-md text-3xl font-semibold tracking-tight">
+            <p className="max-w-md text-3xl font-semibold tracking-tight">
               One calm place for calls, accounts, opportunities, and the next best question.
-            </h1>
+            </p>
             <p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">
               SalesFrame keeps the sales method in the background, so the seller can stay present in the conversation.
             </p>
