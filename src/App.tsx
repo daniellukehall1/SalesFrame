@@ -171,6 +171,11 @@ import { makeFailedRowsCsv, type CsvImportType } from "@/lib/csv-import"
 import { reportClientError } from "@/lib/client-error-reporting"
 import { normalizeCloseDateForPersistence } from "@/lib/date-utils"
 import { getUserFacingErrorMessage, isPermissionDeniedError } from "@/lib/user-facing-errors"
+import {
+  liveCoachForcedRefreshTurnThreshold,
+  shouldForceLiveQuestionRefresh,
+  shouldIncludeLiveTranscriptLine,
+} from "@/lib/live-question-policy"
 import { normalizePublicMarketingPath } from "@/lib/public-marketing-routes"
 import { createClient } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
@@ -194,6 +199,7 @@ import {
   requestSellerDomainResearch,
   saveOpenAiKey,
   saveWorkspaceSessionPolicy,
+  SalesFrameFunctionError,
   type BulkImportStatusResponse,
   type OpenAiKeyStatus,
   type WorkspaceSessionPolicy,
@@ -1016,7 +1022,7 @@ type RecordSaveStatus = "idle" | "saving" | "saved" | "error"
 const LIVE_COACH_AI_RECHECK_SECONDS = 30
 const LIVE_COACH_AI_RECHECK_MS = LIVE_COACH_AI_RECHECK_SECONDS * 1000
 const LIVE_COACH_FAST_CHECK_MS = 10 * 1000
-const LIVE_COACH_FORCE_REFRESH_TURNS = 1
+const LIVE_COACH_FORCE_REFRESH_TURNS = liveCoachForcedRefreshTurnThreshold
 
 function mapAiLiveGuidanceResponse(value: unknown): LiveGuidance | null {
   const root = asRecord(value)
@@ -1715,7 +1721,10 @@ function mergeTranscriptLine(
     speakerDisplayName: nextLine.speakerDisplayName || currentLine.speakerDisplayName,
     speakerId: nextLine.speakerId || currentLine.speakerId,
     speakerLabel: nextLine.speakerLabel ?? currentLine.speakerLabel,
-    text: chooseBestTranscriptText(currentLine.text, nextLine.text),
+    text: chooseBestTranscriptText(currentLine.text, nextLine.text, {
+      currentIsPartial: currentLine.isPartial === true,
+      nextIsPartial: nextLine.isPartial === true,
+    }),
     time: currentLine.time || nextLine.time,
   }
 }
@@ -1728,9 +1737,9 @@ function isSameTranscriptLine(
   const nextPersistedId = isPersistedTranscriptSegmentId(nextLine.id)
 
   if (nextPersistedId && currentPersistedId && currentLine.id === nextLine.id) return true
+  if (nextLine.clientId && currentLine.clientId === nextLine.clientId) return true
 
   if (currentLine.isPartial || nextLine.isPartial) {
-    if (nextLine.clientId && currentLine.clientId === nextLine.clientId) return true
     if (!currentPersistedId && nextLine.clientId && currentLine.id === nextLine.clientId) return true
     if (!nextPersistedId && nextLine.id && currentLine.clientId === nextLine.id) return true
   }
@@ -1771,11 +1780,23 @@ function isDuplicateTranscriptLine(
   return longer.includes(shorter)
 }
 
-function chooseBestTranscriptText(currentText: string, nextText: string) {
+function chooseBestTranscriptText(
+  currentText: string,
+  nextText: string,
+  {
+    currentIsPartial = false,
+    nextIsPartial = false,
+  }: {
+    currentIsPartial?: boolean
+    nextIsPartial?: boolean
+  } = {}
+) {
   const current = currentText.trim()
   const next = nextText.trim()
   if (!current) return next
   if (!next) return current
+  if (currentIsPartial && !nextIsPartial) return next
+  if (!currentIsPartial && nextIsPartial) return current
   if (next.length >= current.length) return next
 
   return current
@@ -1805,10 +1826,17 @@ function areTranscriptTimesClose(firstTime: string, secondTime: string, seconds:
 
 function buildTranscriptForAi(transcript: Opportunity["transcript"]) {
   return transcript
-    .filter((line) => !line.isPartial)
-    .filter((line) => line.text.trim().split(/\s+/).length >= 4)
+    .filter(shouldIncludeLiveTranscriptLine)
+    .map((line, index) => ({ line, index }))
+    .sort((left, right) => {
+      const leftTime = parseTranscriptTime(left.line.time)
+      const rightTime = parseTranscriptTime(right.line.time)
+      if (leftTime === null || rightTime === null || leftTime === rightTime) return left.index - right.index
+
+      return leftTime - rightTime
+    })
     .slice(-28)
-    .map((line) => ({
+    .map(({ line }) => ({
       ...line,
       speakerDisplayName: getTranscriptSpeakerDisplayName(line),
       speakerLabel: getTranscriptSpeakerLabel(line),
@@ -12553,6 +12581,7 @@ function WorkspaceView({
   const liveCoachQuestionRequestRef = React.useRef(0)
   const liveCoachStateRequestRef = React.useRef(0)
   const liveCoachSignatureRef = React.useRef("")
+  const liveCoachLatestInputSignatureRef = React.useRef("")
   const liveCoachFeedbackCountRef = React.useRef(0)
   const liveCoachGuidanceTurnCountRef = React.useRef(0)
   const liveCoachHasGuidanceRef = React.useRef(false)
@@ -12822,6 +12851,7 @@ function WorkspaceView({
     setLiveCoachError("")
     setLiveCoachStatus(initialLiveGuidance ? "ready" : "idle")
     liveCoachSignatureRef.current = ""
+    liveCoachLatestInputSignatureRef.current = ""
     liveCoachFeedbackCountRef.current = 0
     liveCoachHeartbeatHandledRef.current = 0
     liveCoachRefreshHandledRef.current = 0
@@ -12877,6 +12907,7 @@ function WorkspaceView({
       opportunityId: opportunity.id,
       transcript: aiTranscript,
     })
+    liveCoachLatestInputSignatureRef.current = signature
 
     if (
       signature === liveCoachSignatureRef.current &&
@@ -12900,6 +12931,16 @@ function WorkspaceView({
             question: currentGuidanceSnapshot.displayRecommendation?.question ?? currentGuidanceSnapshot.nextQuestion,
             reason: currentGuidanceSnapshot.displayRecommendation?.reason ?? currentGuidanceSnapshot.questionReason,
             target: currentGuidanceSnapshot.displayRecommendation?.primaryIntentLabel ?? currentGuidanceSnapshot.target,
+            playbookLabel:
+              currentGuidanceSnapshot.displayRecommendation?.playbookLabel ?? currentGuidanceSnapshot.playbookLabel,
+            primaryIntentClusterId: currentGuidanceSnapshot.displayRecommendation?.primaryIntentClusterId ?? "",
+            primaryIntentLabel:
+              currentGuidanceSnapshot.displayRecommendation?.primaryIntentLabel ?? currentGuidanceSnapshot.target,
+            alsoCovers: currentGuidanceSnapshot.displayRecommendation?.alsoCovers ?? [],
+            evidenceCommit: currentGuidanceSnapshot.evidenceCommit ?? null,
+            parkedIntents: currentGuidanceSnapshot.parkedIntents ?? [],
+            softerAlternative: currentGuidanceSnapshot.displayRecommendation?.softerAlternative ?? "",
+            activeIntentStatus: currentGuidanceSnapshot.activeIntentStatus,
             questionLifecycle: currentGuidanceSnapshot.questionLifecycle,
             uiMode: currentGuidanceSnapshot.uiMode,
           }
@@ -12959,8 +13000,12 @@ function WorkspaceView({
           elapsedSinceLastQuestionDecisionMs: liveCoachLastDecisionAtRef.current
             ? Date.now() - liveCoachLastDecisionAtRef.current
             : null,
+          elapsedCallSeconds: elapsed,
+          remainingCallSeconds: Math.max(0, MAX_LIVE_CALL_SECONDS - elapsed),
           transcriptTurnCount: aiTranscript.length,
           turnsSinceLastFullGuidance,
+          latestTranscriptTurnId: aiTranscript.at(-1)?.id ?? aiTranscript.at(-1)?.clientId ?? null,
+          latestTranscriptTurnTime: aiTranscript.at(-1)?.time ?? null,
           lastDisplayedQuestion: visibleQuestion,
           latestFeedback,
           blockedQuestionTexts,
@@ -12982,6 +13027,7 @@ function WorkspaceView({
         liveCoachFullGuidanceInFlightRef.current = true
         const questionRequestId = liveCoachQuestionRequestRef.current + 1
         liveCoachQuestionRequestRef.current = questionRequestId
+        const questionInputSignature = signature
         const questionPayload = retryAvoidSameQuestion
           ? {
               ...guidancePayload,
@@ -12995,6 +13041,10 @@ function WorkspaceView({
         requestLiveQuestion(questionPayload)
           .then((response) => {
             if (questionRequestId !== liveCoachQuestionRequestRef.current) return
+            if (questionInputSignature !== liveCoachLatestInputSignatureRef.current) {
+              liveCoachPendingRefreshRef.current = true
+              return
+            }
 
             const mappedGuidance = mapAiLiveGuidanceResponse(response)
             if (!mappedGuidance) {
@@ -13005,8 +13055,28 @@ function WorkspaceView({
               return
             }
 
+            const mappedQuestion = createManualQuestionFromGuidance(mappedGuidance)
+            const shouldReplaceVisibleQuestion = Boolean(
+              visibleQuestion && mappedGuidance.questionLifecycle?.shouldReplaceQuestion
+            )
+            const repeatedVisibleQuestion = Boolean(
+              visibleQuestion &&
+              normalizeComparableText(mappedQuestion.question) === normalizeComparableText(visibleQuestion.question)
+            )
+            if (shouldReplaceVisibleQuestion && repeatedVisibleQuestion) {
+              if (!retryAvoidSameQuestion) {
+                fullGuidanceRequested = false
+                liveCoachFullGuidanceInFlightRef.current = false
+                requestLiveQuestionRefresh(true)
+                return
+              }
+
+              setLiveCoachStatus("error")
+              setLiveCoachError("SalesFrame is holding the current card while it finds a genuinely different next move.")
+              return
+            }
+
             if (shouldRejectRepeatedQuestion && latestFeedback?.question) {
-              const mappedQuestion = createManualQuestionFromGuidance(mappedGuidance)
               const actedQuestionId = createManualQuestionId(
                 "live",
                 latestFeedback.target,
@@ -13043,6 +13113,17 @@ function WorkspaceView({
           .catch((caughtError: unknown) => {
             if (questionRequestId !== liveCoachQuestionRequestRef.current) return
 
+            if (
+              caughtError instanceof SalesFrameFunctionError &&
+              caughtError.code === "live_question_repeated_replacement" &&
+              !retryAvoidSameQuestion
+            ) {
+              fullGuidanceRequested = false
+              liveCoachFullGuidanceInFlightRef.current = false
+              requestLiveQuestionRefresh(true)
+              return
+            }
+
             const existingGuidance = aiLiveGuidanceRef.current
             const refreshMessage = getUserFacingErrorMessage(
               caughtError,
@@ -13071,13 +13152,11 @@ function WorkspaceView({
           })
       }
 
-      const forceFullGuidanceRefresh =
-        feedbackCountChanged ||
-        refreshTickChanged ||
-        questionAuditDue ||
-        !liveCoachHasGuidanceRef.current ||
-        aiTranscript.length <= 1 ||
-        turnsSinceLastFullGuidance >= LIVE_COACH_FORCE_REFRESH_TURNS
+      const forceFullGuidanceRefresh = shouldForceLiveQuestionRefresh({
+        feedbackChanged: feedbackCountChanged,
+        hasGuidance: liveCoachHasGuidanceRef.current,
+        refreshRequested: refreshTickChanged,
+      })
 
       const stateRequestId = liveCoachStateRequestRef.current + 1
       liveCoachStateRequestRef.current = stateRequestId
@@ -13087,6 +13166,8 @@ function WorkspaceView({
         callId: activeCallId,
         currentGuidance: guidancePayload.currentGuidance,
         opportunityId: opportunity.id,
+        playbooks: callPlaybooks,
+        refreshContext: guidancePayload.refreshContext,
         sellerFeedback: manualCoach.feedbackSignals,
         transcript: aiTranscript,
       })
@@ -13119,6 +13200,10 @@ function WorkspaceView({
           }
         })
         .catch(() => {
+          if (!fullGuidanceRequested && turnsSinceLastFullGuidance >= LIVE_COACH_FORCE_REFRESH_TURNS) {
+            requestLiveQuestionRefresh()
+            return
+          }
           if (!fullGuidanceRequested) setLiveCoachStatus("ready")
         })
 
@@ -13524,7 +13609,17 @@ function NextQuestionCard({
           : ""
   const hasRecentManualAction = manualCoach.lastAction !== "No manual coaching actions yet."
   const cardTitle = displayedQuestion
-    ? "Ask this next"
+    ? guidance?.uiMode === "listen"
+      ? "Listen for the answer"
+      : guidance?.uiMode === "acknowledge"
+        ? "Acknowledge, then listen"
+        : guidance?.uiMode === "clarify"
+          ? "Clarify this next"
+          : guidance?.uiMode === "park_and_follow_flow"
+            ? "Follow the buyer's thread"
+            : guidance?.uiMode === "recover_before_close"
+              ? "Recover this before you wrap"
+              : "Ask this next"
     : hasRecentManualAction
       ? "Getting the next recommendation"
       : coachStatus === "thinking"

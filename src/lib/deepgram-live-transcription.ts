@@ -262,6 +262,7 @@ async function openDeepgramSocket({
   const providerSessionId = createProviderSessionId(sourceKind)
   const websocketUrls = getDeepgramWebsocketUrls(tokenResponse)
   const socket = await createOpenedDeepgramSocket(websocketUrls, tokenResponse.accessToken)
+  let transcriptEventQueue = Promise.resolve()
 
   socket.addEventListener("message", (event) => {
     const transcriptEvent = extractDeepgramTranscriptEvent({
@@ -270,7 +271,16 @@ async function openDeepgramSocket({
       sourceKind,
     })
     if (transcriptEvent) {
-      void Promise.resolve(onTranscriptEvent(transcriptEvent)).catch(onTranscriptError)
+      if (!transcriptEvent.isFinal) {
+        void Promise.resolve(onTranscriptEvent(transcriptEvent)).catch(onTranscriptError)
+        return
+      }
+
+      transcriptEventQueue = transcriptEventQueue
+        .then(() => onTranscriptEvent(transcriptEvent))
+        .catch((error) => {
+          onTranscriptError(error)
+        })
     }
   })
   socket.addEventListener("close", (event) => {

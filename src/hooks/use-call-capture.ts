@@ -444,17 +444,7 @@ export function useCallCapture() {
             speakerLabels: deepgramSpeakerLabelsRef.current,
           })
           const initialAttribution = segmentAttribution ?? getSourceAttribution(source)
-          const modelAttribution = segmentAttribution ?? await resolveTurnAttribution({
-            activeTurn,
-            config,
-            elapsedMs,
-            eventEndMs,
-            eventStartMs,
-            initialAttribution,
-            recentTranscript: recentTranscriptRef.current,
-            segmentText: finalText,
-            source,
-          })
+          const modelAttribution = segmentAttribution ?? initialAttribution
           const attribution = inferOneChannelTurnAttribution({
             activeTurn,
             attribution: modelAttribution,
@@ -482,6 +472,36 @@ export function useCallCapture() {
               source,
             }),
           ]
+          const optimisticLine: CallCaptureTranscriptLine = {
+            audioSourceKind: source.kind,
+            clientId: preferredClientId,
+            diarizationSpeaker: event.diarizationSpeaker,
+            endOfTurnConfidence: event.endOfTurnConfidence,
+            id: shouldContinueTurn && activeTurn ? activeTurn.segmentId : preferredClientId,
+            isPartial: false,
+            languageDetected: event.languageDetected,
+            providerEventId: event.providerEventId,
+            providerSessionId: event.providerSessionId,
+            providerTurnIndex: event.providerTurnIndex,
+            speaker: attribution.speakerLabel,
+            speakerAttributionReason: attribution.reason,
+            speakerConfidence: attribution.confidence,
+            speakerDisplayName: activeTurn?.displayName ?? attribution.speakerLabel,
+            speakerId: activeTurn?.speakerId,
+            speakerLabel: attribution.speakerLabel,
+            speakerNeedsReview: attribution.needsReview,
+            speakerSource: attribution.source,
+            time: formatElapsedTime(shouldContinueTurn && activeTurn ? activeTurn.startMs : eventStartMs),
+            text: shouldContinueTurn && activeTurn ? joinTranscriptText(activeTurn.text, finalText) : finalText,
+            wordConfidence: event.wordConfidence,
+          }
+          upsertRecentTranscriptLine(recentTranscriptRef.current, optimisticLine)
+          if (shouldContinueTurn || matchingPartialLine) {
+            config.onTranscriptUpdate?.(optimisticLine)
+          } else {
+            config.onTranscript?.(optimisticLine)
+          }
+
           const turn = shouldContinueTurn && activeTurn
             ? await updateTranscriptTurn({
                 attribution,
@@ -520,27 +540,27 @@ export function useCallCapture() {
 
           const line = createTranscriptLineFromTurn(turn)
           upsertRecentTranscriptLine(recentTranscriptRef.current, line)
-          if (shouldContinueTurn || matchingPartialLine) {
-            config.onTranscriptUpdate?.(line)
-          } else {
-            config.onTranscript?.(line)
-          }
+          config.onTranscriptUpdate?.(line)
           partialTranscriptLinesRef.current.delete(itemKey)
           partialTranscriptLinesRef.current.delete(transcriptEventKey)
           partialTranscriptTextRef.current.delete(itemKey)
 
           if (!shouldContinueTurn) {
-            await insertCallNote({
+            void insertCallNote({
               call_id: config.callId,
               note_type: "evidence",
               text: finalText,
-            })
+            }).catch(() => undefined)
           }
 
-          if (!shouldRefineBeforeTurn(source) || segmentAttribution) {
+          if (shouldRefineBeforeTurn(source)) {
             void refineSpeakerAttribution({
+              activeTranscriptTurnsRef,
+              activeTurn,
               config,
               elapsedMs: eventEndMs,
+              eventEndMs,
+              eventStartMs,
               line,
               recentTranscript: recentTranscriptRef.current,
               segmentId: turn.segmentId,
@@ -947,67 +967,8 @@ function getBlobContentType(blob: Blob) {
   return blob.type.split(";")[0]?.trim().toLowerCase() || "audio/webm"
 }
 
-async function resolveTurnAttribution({
-  activeTurn,
-  config,
-  elapsedMs,
-  eventEndMs,
-  eventStartMs,
-  initialAttribution,
-  recentTranscript,
-  segmentText,
-  source,
-}: {
-  activeTurn?: TranscriptTurn
-  config: StartCallCaptureConfig
-  elapsedMs: number
-  eventEndMs: number
-  eventStartMs: number
-  initialAttribution: SpeakerAttribution
-  recentTranscript: CallCaptureTranscriptLine[]
-  segmentText: string
-  source: CapturedAudioSource
-}) {
-  if (!shouldRefineBeforeTurn(source)) return initialAttribution
-
-  try {
-    const response = await requestSpeakerAttribution({
-      callId: config.callId,
-      elapsedMs,
-      priorTurn: activeTurn
-        ? {
-            endMs: activeTurn.endMs,
-            sourceKind: activeTurn.sourceKind,
-            speaker: activeTurn.attribution.speakerLabel,
-            startMs: activeTurn.startMs,
-            text: activeTurn.text,
-          }
-        : null,
-      recentTranscript,
-      segmentText,
-      segmentSignals: {
-        answerLike: isAnswerLikeTranscript(segmentText),
-        followsQuestion: Boolean(activeTurn && isQuestionLikeTranscript(activeTurn.text)),
-        oneChannel: isOneChannelAudioSource(source.kind),
-        questionLike: isQuestionLikeTranscript(segmentText),
-        sourceKind: source.kind,
-      },
-      silenceGapMs: activeTurn ? Math.max(0, eventStartMs - activeTurn.lastActivityMs, eventEndMs - activeTurn.lastActivityMs) : null,
-      sourceHint: source.kind,
-    })
-
-    return normalizeAttribution(response.attribution, source)
-  } catch {
-    return {
-      ...initialAttribution,
-      needsReview: true,
-      reason: `${initialAttribution.reason} Speaker label still needs review.`,
-    }
-  }
-}
-
 function shouldRefineBeforeTurn(source: CapturedAudioSource) {
-  return source.kind === "meeting_audio" || source.kind === "mixed_audio" || source.kind === "in_person_microphone"
+  return source.kind === "mixed_audio" || source.kind === "in_person_microphone"
 }
 
 async function createTranscriptTurn({
@@ -1313,59 +1274,116 @@ function upsertRecentTranscriptLine(
 }
 
 async function refineSpeakerAttribution({
+  activeTranscriptTurnsRef,
+  activeTurn,
   config,
   elapsedMs,
+  eventEndMs,
+  eventStartMs,
   line,
   recentTranscript,
   segmentId,
   source,
 }: {
+  activeTranscriptTurnsRef: React.MutableRefObject<Map<AudioSourceKind, TranscriptTurn>>
+  activeTurn?: TranscriptTurn
   config: StartCallCaptureConfig
   elapsedMs: number
+  eventEndMs: number
+  eventStartMs: number
   line: CallCaptureTranscriptLine
   recentTranscript: CallCaptureTranscriptLine[]
   segmentId: string
   source: CapturedAudioSource
 }) {
-  const response = await requestSpeakerAttribution({
-    callId: config.callId,
-    elapsedMs,
-    recentTranscript,
-    segmentText: line.text,
-    sourceHint: source.kind,
-  })
-  const attribution = normalizeAttribution(response.attribution, source)
+  try {
+    const response = await requestSpeakerAttribution({
+      callId: config.callId,
+      elapsedMs,
+      priorTurn: activeTurn
+        ? {
+            endMs: activeTurn.endMs,
+            sourceKind: activeTurn.sourceKind,
+            speaker: activeTurn.attribution.speakerLabel,
+            startMs: activeTurn.startMs,
+            text: activeTurn.text,
+          }
+        : null,
+      recentTranscript,
+      segmentText: line.text,
+      segmentSignals: {
+        answerLike: isAnswerLikeTranscript(line.text),
+        followsQuestion: Boolean(activeTurn && isQuestionLikeTranscript(activeTurn.text)),
+        oneChannel: isOneChannelAudioSource(source.kind),
+        questionLike: isQuestionLikeTranscript(line.text),
+        sourceKind: source.kind,
+      },
+      silenceGapMs: activeTurn
+        ? Math.max(0, eventStartMs - activeTurn.lastActivityMs, eventEndMs - activeTurn.lastActivityMs)
+        : null,
+      sourceHint: source.kind,
+    })
+    const attribution = normalizeAttribution(response.attribution, source)
 
-  const speaker = await ensureCallSpeaker({
-    call_id: config.callId,
-    label: attribution.speakerLabel,
-    display_name: attribution.speakerLabel,
-    role: getSpeakerRole(attribution.speakerLabel),
-  })
+    const speaker = await ensureCallSpeaker({
+      call_id: config.callId,
+      label: attribution.speakerLabel,
+      display_name: attribution.speakerLabel,
+      role: getSpeakerRole(attribution.speakerLabel),
+    })
 
-  await updateTranscriptSegment(segmentId, {
-    speaker_id: speaker.id,
-    speaker_attribution: attribution.source,
-    speaker_attribution_reason: attribution.reason,
-    speaker_confidence: attribution.confidence,
-    speaker_needs_review: attribution.needsReview,
-    speaker_source: source.kind,
-  })
+    await updateTranscriptSegment(segmentId, {
+      speaker_id: speaker.id,
+      speaker_attribution: attribution.source,
+      speaker_attribution_reason: attribution.reason,
+      speaker_confidence: attribution.confidence,
+      speaker_needs_review: attribution.needsReview,
+      speaker_source: source.kind,
+    })
 
-  const updatedLine: CallCaptureTranscriptLine = {
-    ...line,
-    speaker: attribution.speakerLabel,
-    speakerAttributionReason: attribution.reason,
-    speakerConfidence: attribution.confidence,
-    speakerDisplayName: speaker.display_name || speaker.label,
-    speakerId: speaker.id,
-    speakerLabel: attribution.speakerLabel,
-    speakerNeedsReview: attribution.needsReview,
-    speakerSource: attribution.source,
+    const updatedLine: CallCaptureTranscriptLine = {
+      ...line,
+      speaker: attribution.speakerLabel,
+      speakerAttributionReason: attribution.reason,
+      speakerConfidence: attribution.confidence,
+      speakerDisplayName: speaker.display_name || speaker.label,
+      speakerId: speaker.id,
+      speakerLabel: attribution.speakerLabel,
+      speakerNeedsReview: attribution.needsReview,
+      speakerSource: attribution.source,
+    }
+
+    recentTranscriptRefUpdate(recentTranscript, updatedLine)
+    const liveTurn = activeTranscriptTurnsRef.current.get(source.kind)
+    if (liveTurn?.segmentId === segmentId) {
+      activeTranscriptTurnsRef.current.set(source.kind, {
+        ...liveTurn,
+        attribution,
+        displayName: speaker.display_name || speaker.label,
+        speakerId: speaker.id,
+      })
+    }
+    config.onTranscriptUpdate?.(updatedLine)
+  } catch {
+    const reviewableLine = {
+      ...line,
+      speakerAttributionReason: `${line.speakerAttributionReason ?? "Initial speaker label used."} Speaker label still needs review.`,
+      speakerNeedsReview: true,
+    }
+    recentTranscriptRefUpdate(recentTranscript, reviewableLine)
+    const liveTurn = activeTranscriptTurnsRef.current.get(source.kind)
+    if (liveTurn?.segmentId === segmentId) {
+      activeTranscriptTurnsRef.current.set(source.kind, {
+        ...liveTurn,
+        attribution: {
+          ...liveTurn.attribution,
+          needsReview: true,
+          reason: reviewableLine.speakerAttributionReason ?? liveTurn.attribution.reason,
+        },
+      })
+    }
+    config.onTranscriptUpdate?.(reviewableLine)
   }
-
-  recentTranscriptRefUpdate(recentTranscript, updatedLine)
-  config.onTranscriptUpdate?.(updatedLine)
 }
 
 function recentTranscriptRefUpdate(

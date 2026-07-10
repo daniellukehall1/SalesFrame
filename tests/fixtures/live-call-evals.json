@@ -7,7 +7,11 @@
     "buyerAnswerToNextQuestionMedianMsMax": 3000,
     "openingHeavyQuestionRate": 0,
     "methodologyEvidenceAccuracyMin": 0.85,
-    "nextQuestionQualityMin": 0.8
+    "nextQuestionQualityMin": 0.8,
+    "unnecessaryQuestionReplacementRateMax": 0.1,
+    "staleQuestionDisplayRate": 0,
+    "shortAnswerRecognitionRateMin": 0.95,
+    "parkedIntentRecoveryRateMin": 0.8
   },
   "metrics": [
     "duplicate transcript rate",
@@ -15,7 +19,11 @@
     "average turn fragmentation",
     "median buyer-answer-to-next-question latency",
     "methodology evidence accuracy",
-    "next-question quality score"
+    "next-question quality score",
+    "unnecessary question replacement rate",
+    "stale question display rate",
+    "short answer recognition rate",
+    "parked intent recovery rate"
   ],
   "fixtures": [
     {

@@ -7,6 +7,8 @@ export type IntentClusterField = {
   playbookLabel: string
   fieldLabel: string
   fieldDescription: string
+  evidenceStandard: string
+  sortOrder: number
   status: IntentClusterStatus
   confidence?: number
   evidenceSummary?: string
@@ -172,7 +174,9 @@ export function buildPlaybookIntentClusters({
       playbookSlug,
       playbookLabel,
       fieldLabel,
-      fieldDescription: getString(field.description) || getString(field.evidence_standard),
+      fieldDescription: getString(field.description),
+      evidenceStandard: getString(field.evidence_standard),
+      sortOrder: getInteger(field.sort_order),
       status: normalizeEvidenceStatus(evidence?.status),
       confidence: getNumber(evidence?.confidence),
       evidenceSummary: getString(evidence?.evidence_summary),
@@ -310,4 +314,8 @@ function getNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.max(0, Math.min(1, value))
     : undefined
+}
+
+function getInteger(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
 }

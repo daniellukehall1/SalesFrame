@@ -4,12 +4,17 @@ import { AppError, fetchWithTimeout, upstreamFailure } from "./http"
 export type OpenAiJsonRequest = {
   apiKey: string
   input: string
+  maxOutputTokens?: number
   model?: string
+  promptCacheKey?: string
+  reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
   schema?: Record<string, unknown>
   schemaName?: string
   strictSchema?: boolean
   system: string
+  timeoutMs?: number
   useWebSearch?: boolean
+  verbosity?: "low" | "medium" | "high"
 }
 
 export type OpenAiWebSearchSource = {
@@ -32,17 +37,26 @@ function buildOpenAiSystemPrompt(system: string) {
 export async function callOpenAiJson<T>({
   apiKey,
   input,
+  maxOutputTokens,
   model = getEnv("OPENAI_TEXT_MODEL", "gpt-5.4-mini"),
+  promptCacheKey,
+  reasoningEffort,
   schema,
   schemaName = "response",
   strictSchema = true,
   system,
+  timeoutMs = getOpenAiTimeoutMs("OPENAI_REQUEST_TIMEOUT_MS", 25000),
   useWebSearch = false,
+  verbosity,
 }: OpenAiJsonRequest): Promise<T> {
   const response = await fetchOpenAiResponses({
     apiKey,
     body: {
       model,
+      max_output_tokens: maxOutputTokens,
+      prompt_cache_key: promptCacheKey,
+      reasoning: reasoningEffort ? { effort: reasoningEffort } : undefined,
+      store: false,
       input: [
         {
           role: "system",
@@ -64,6 +78,7 @@ export async function callOpenAiJson<T>({
         },
       ],
       text: {
+        verbosity,
         format: schema
           ? {
               type: "json_schema",
@@ -85,7 +100,7 @@ export async function callOpenAiJson<T>({
           ]
         : undefined,
     },
-    timeoutMs: getOpenAiTimeoutMs("OPENAI_REQUEST_TIMEOUT_MS", 25000),
+    timeoutMs,
   })
 
   const data = await readOpenAiPayload(response)
@@ -136,6 +151,7 @@ export async function callOpenAiWebSearchJson<T>({
     apiKey,
     body: {
       model,
+      store: false,
       include: ["web_search_call.action.sources"],
       input: [
         {

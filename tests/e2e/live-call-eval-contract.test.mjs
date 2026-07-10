@@ -18,6 +18,10 @@ test("live-call eval manifest covers the required elite pipeline scenarios", asy
   assert.equal(manifest.acceptanceTargets.openingHeavyQuestionRate, 0)
   assert.equal(manifest.acceptanceTargets.methodologyEvidenceAccuracyMin, 0.85)
   assert.equal(manifest.acceptanceTargets.nextQuestionQualityMin, 0.8)
+  assert.equal(manifest.acceptanceTargets.unnecessaryQuestionReplacementRateMax, 0.1)
+  assert.equal(manifest.acceptanceTargets.staleQuestionDisplayRate, 0)
+  assert.equal(manifest.acceptanceTargets.shortAnswerRecognitionRateMin, 0.95)
+  assert.equal(manifest.acceptanceTargets.parkedIntentRecoveryRateMin, 0.8)
 
   assert.deepEqual(
     [...fixtureIds].sort(),
@@ -35,10 +39,12 @@ test("live-call eval manifest covers the required elite pipeline scenarios", asy
 
 test("live-call implementation references the eval acceptance behaviors", async () => {
   const app = await read("src/App.tsx")
+  const callCapture = await read("src/hooks/use-call-capture.ts")
   const preflight = await read("src/lib/call-audio-preflight.ts")
   const deepgramClient = await read("src/lib/deepgram-live-transcription.ts")
   const assembler = await read("src/lib/turn-assembler.ts")
   const liveGuidance = await read("netlify/functions/live-guidance.ts")
+  const liveQuestionPolicy = await read("src/lib/live-question-policy.ts")
 
   assert.match(preflight, /Shared audio source connected: start call\./)
   assert.match(preflight, /Shared audio is connected, but the meter is quiet right now/)
@@ -69,11 +75,23 @@ test("live-call implementation references the eval acceptance behaviors", async 
   assert.match(deepgramClient, /endOfTurnConfidence/)
   assert.match(deepgramClient, /wordConfidence/)
   assert.match(deepgramClient, /isDelta: false/)
+  assert.match(deepgramClient, /if \(!transcriptEvent\.isFinal\) \{[\s\S]*onTranscriptEvent\(transcriptEvent\)/)
+  const optimisticLineIndex = callCapture.indexOf("const optimisticLine")
+  const persistedTurnIndex = callCapture.indexOf("const turn = shouldContinueTurn")
+  assert.notEqual(optimisticLineIndex, -1)
+  assert.notEqual(persistedTurnIndex, -1)
+  assert.ok(optimisticLineIndex < persistedTurnIndex)
+  assert.match(callCapture, /void insertCallNote\([\s\S]*\.catch\(\(\) => undefined\)/)
+  assert.match(callCapture, /if \(shouldRefineBeforeTurn\(source\)\) \{[\s\S]*void refineSpeakerAttribution/)
+  assert.match(app, /if \(nextLine\.clientId && currentLine\.clientId === nextLine\.clientId\) return true/)
   assert.match(assembler, /shouldInferOneChannelCustomerTurn/)
   assert.doesNotMatch(deepgramClient, /sourceTranscriptionDelay/)
   assert.doesNotMatch(app, /latestTurnIsSeller && !feedbackCountChanged/)
-  assert.match(app, /LIVE_COACH_FORCE_REFRESH_TURNS = 1/)
+  assert.match(app, /LIVE_COACH_FORCE_REFRESH_TURNS = liveCoachForcedRefreshTurnThreshold/)
+  assert.doesNotMatch(app, /latestTurnIsKnownBuyer: isKnownBuyerTranscriptLine/)
   assert.match(app, /turnsSinceLastFullGuidance >= LIVE_COACH_FORCE_REFRESH_TURNS/)
+  assert.match(liveQuestionPolicy, /liveCoachForcedRefreshTurnThreshold = 4/)
+  assert.match(liveQuestionPolicy, /shouldIncludeLiveTranscriptLine/)
   assert.match(app, /shouldRefreshQuestion/)
   assert.match(assembler, /duplicate_provider_turn/)
   assert.match(liveGuidance, /buyer answered/)
