@@ -921,6 +921,39 @@ test("record save feedback stays calm unless it is an error", async () => {
   assert.match(app, /<RecordStatusMessage message=\{primaryStatusMessage\.message\} status=\{primaryStatusMessage\.status\} \/>/)
 })
 
+test("routine auth token refreshes preserve the loaded workspace", async () => {
+  const app = await read("src/App.tsx")
+  const preserveIdentity = app.slice(
+    app.indexOf("function preserveAuthSessionIdentity"),
+    app.indexOf("const supportedAvatarImageTypes")
+  )
+  const authLifecycle = app.slice(
+    app.indexOf("supabase.auth.getSession()"),
+    app.indexOf("React.useEffect(() => {\n    if (!authSession) return", app.indexOf("supabase.auth.getSession()"))
+  )
+
+  assert.match(preserveIdentity, /if \(!user\) return null/)
+  assert.match(preserveIdentity, /current\?\.userId === next\.userId/)
+  assert.match(preserveIdentity, /current\.email === next\.email/)
+  assert.match(preserveIdentity, /current\.name === next\.name/)
+  assert.match(preserveIdentity, /current\.signedInAt === next\.signedInAt/)
+  assert.match(preserveIdentity, /return current/)
+  assert.match(authLifecycle, /setAuthSession\(\(current\) => preserveAuthSessionIdentity\(current, data\.session\?\.user \?\? null\)\)/)
+  assert.match(authLifecycle, /onAuthStateChange[\s\S]*setAuthSession\(\(current\) => preserveAuthSessionIdentity\(current, session\?\.user \?\? null\)\)/)
+  assert.doesNotMatch(authLifecycle, /setAuthSession\(session\?\.user \? createAuthSessionFromUser/)
+})
+
+test("search inputs consistently reserve space for the leading icon", async () => {
+  const app = await read("src/App.tsx")
+  const contacts = await read("src/components/contact-management.tsx")
+  const iconInputPattern = /<SearchIcon className="[^"]*absolute[^"]*" \/>[\s\S]{0,900}?<Input[\s\S]{0,500}?className="[^"]*!pl-10[^"]*"/g
+
+  assert.equal(app.match(iconInputPattern)?.length, 6)
+  assert.equal(contacts.match(iconInputPattern)?.length, 2)
+  assert.doesNotMatch(app, /<SearchIcon className="[^"]*absolute[^"]*" \/>[\s\S]{0,900}?<Input[\s\S]{0,500}?className="[^"]*(?<!\!)pl-9[^"]*"/)
+  assert.doesNotMatch(contacts, /<SearchIcon className="[^"]*absolute[^"]*" \/>[\s\S]{0,900}?<Input[\s\S]{0,500}?className="[^"]*(?<!\!)pl-9[^"]*"/)
+})
+
 test("auth redirects use the current deployed host", async () => {
   const app = await read("src/App.tsx")
   const authPage = await read("src/components/auth-page.tsx")
@@ -2077,7 +2110,7 @@ test("opportunity gap counts use selected playbook checklist across list and int
   assert.match(homeDashboard, /showing \$\{visibleFocusOpportunities\.length\} of \$\{filteredFocusOpportunities\.length\}/)
   assert.match(homeDashboard, /const hasFocusFilters = Boolean\(focusQuery\.trim\(\)\) \|\| focusCoverageFilter !== "all" \|\| focusSort !== "gaps"/)
   assert.match(homeDashboard, /\{hasFocusFilters \? \([\s\S]*Reset[\s\S]*\) : null\}/)
-  assert.match(homeDashboard, /className="h-11 pl-9 md:h-8"/)
+  assert.match(homeDashboard, /className="h-11 !pl-10 md:h-8"/)
   assert.match(homeDashboard, /className="min-h-11 w-full md:min-h-8"/)
   assert.match(homeDashboard, /className="h-11 gap-2 md:h-8"/)
   assert.match(homeDashboard, /data-testid="dashboard-opportunity-focus-mobile-list"/)
@@ -2889,8 +2922,8 @@ test("mobile viewport uses safe areas, scrollable tabs, and reachable call actio
   assert.match(app, /className="size-11 md:size-8"[\s\S]*aria-label="Toggle theme"/)
   assert.match(globalSearch, /className="size-11 lg:hidden"[\s\S]*aria-label="Search workspace"/)
   assert.match(globalSearch, /ref=\{desktopSearchRef\}[\s\S]*className="relative hidden w-72 lg:block"/)
-  assert.match(globalSearch, /className="h-8 pl-10 md:pl-10"/)
-  assert.match(globalSearch, /className="h-11 pl-10 md:pl-10"/)
+  assert.match(globalSearch, /className="h-8 !pl-10"/)
+  assert.match(globalSearch, /className="h-11 !pl-10"/)
   assert.match(globalSearch, /const \[mobileOpen, setMobileOpen\] = React\.useState\(false\)/)
   assert.match(globalSearch, /<Dialog[\s\S]*open=\{mobileOpen\}/)
   assert.match(globalSearch, /<DialogTitle>Search workspace<\/DialogTitle>/)
@@ -5190,6 +5223,7 @@ test("workspace session timeout is server enforced with calm client warnings", a
   const sessionStatus = await read("netlify/functions/session-status.ts")
   const sessionPolicy = await read("netlify/functions/session-policy.ts")
   const migration = await read("supabase/migrations/202607090001_workspace_session_timeout.sql")
+  const sessionWarningFixMigration = await read("supabase/migrations/202607100003_fix_workspace_session_warning_schedule.sql")
   const aiSettingsSessionMigration = await read("supabase/migrations/202607090002_require_active_session_for_ai_settings.sql")
   const liveIntentMemorySessionMigration = await read("supabase/migrations/202607090003_require_active_session_for_live_intent_memory.sql")
   const viteConfig = await read("vite.config.ts")
@@ -5204,6 +5238,8 @@ test("workspace session timeout is server enforced with calm client warnings", a
   assert.match(migration, /public\.is_workspace_member_with_active_session\(workspace_id\)/)
   assert.match(migration, /Workspace owners can update session policies/)
   assert.match(migration, /Workspace members can manage customer research runs/)
+  assert.match(sessionWarningFixMigration, /alter column warning_after_seconds set default 86100/)
+  assert.doesNotMatch(sessionWarningFixMigration, /update public\./)
   assert.match(aiSettingsSessionMigration, /drop policy if exists "Users can manage own workspace AI settings"/)
   assert.match(aiSettingsSessionMigration, /on public\.user_ai_settings for all/)
   assert.match(aiSettingsSessionMigration, /user_id = auth\.uid\(\)/)
@@ -5214,11 +5250,15 @@ test("workspace session timeout is server enforced with calm client warnings", a
   assert.match(liveIntentMemorySessionMigration, /public\.is_workspace_member_with_active_session\(public\.opportunity_stakeholders\.workspace_id\)/)
 
   assert.match(workspaceSession, /DEFAULT_IDLE_TIMEOUT_SECONDS = 3600/)
-  assert.match(workspaceSession, /DEFAULT_WARNING_AFTER_SECONDS = 2700/)
+  assert.match(workspaceSession, /SESSION_WARNING_LEAD_SECONDS = 300/)
+  assert.match(workspaceSession, /DEFAULT_WARNING_AFTER_SECONDS = ABSOLUTE_TIMEOUT_SECONDS - SESSION_WARNING_LEAD_SECONDS/)
   assert.match(workspaceSession, /ABSOLUTE_TIMEOUT_SECONDS = 86400/)
   assert.match(workspaceSession, /getJwtSessionId\(token\)/)
   assert.match(workspaceSession, /workspace_session_expired/)
   assert.match(workspaceSession, /policy\.idle_timeout_seconds === null \|\| activeCallId/)
+  assert.match(workspaceSession, /reconcileSessionExpiry/)
+  assert.match(workspaceSession, /now: new Date\(session\.last_activity_at\)/)
+  assert.match(workspaceSession, /const warningAt = addSeconds\(expiresAt, -SESSION_WARNING_LEAD_SECONDS\)/)
   assert.match(workspaceSession, /\.upsert\(\{ workspace_id: workspaceId \}, \{ onConflict: "workspace_id" \}\)/)
   assert.match(workspaceSession, /\.upsert\(row, \{ onConflict: "workspace_id,user_id,session_key" \}\)/)
 
@@ -5251,6 +5291,7 @@ test("workspace session timeout is server enforced with calm client warnings", a
   assert.match(app, /Sign in again before starting this call so SalesFrame can safely save the whole recording\./)
   assert.match(app, /Session timeout/)
   assert.match(app, /Choosing Never turns off idle sign-out/)
+  assert.match(app, /activityType: "stay_signed_in"[\s\S]*onSessionStatusChange\(status\)/)
   assert.match(app, /Workspace owners can change this setting\./)
 })
 

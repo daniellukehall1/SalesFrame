@@ -868,6 +868,25 @@ function createAuthSessionFromUser(user: User): AuthSession {
   }
 }
 
+function preserveAuthSessionIdentity(current: AuthSession | null, user: User | null): AuthSession | null {
+  if (!user) return null
+
+  const next = createAuthSessionFromUser(user)
+
+  // Supabase emits routine token refresh events when a background tab becomes visible.
+  // Keep the same state object so identity-dependent workspace effects do not reload settled data.
+  if (
+    current?.userId === next.userId &&
+    current.email === next.email &&
+    current.name === next.name &&
+    current.signedInAt === next.signedInAt
+  ) {
+    return current
+  }
+
+  return next
+}
+
 const supportedAvatarImageTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
 const maxAvatarFileSizeBytes = 5 * 1024 * 1024
 const maxAvatarSourcePixels = 16_000_000
@@ -2505,14 +2524,14 @@ function App() {
         setAuthStatusMessage(getUserFacingErrorMessage(error, "SalesFrame needs a fresh sign-in to continue."))
       }
 
-      setAuthSession(data.session?.user ? createAuthSessionFromUser(data.session.user) : null)
+      setAuthSession((current) => preserveAuthSessionIdentity(current, data.session?.user ?? null))
       setAuthLoading(false)
     })
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthSession(session?.user ? createAuthSessionFromUser(session.user) : null)
+      setAuthSession((current) => preserveAuthSessionIdentity(current, session?.user ?? null))
       setAuthLoading(false)
       if (session?.user) {
         setAuthStatusTone("info")
@@ -5721,7 +5740,7 @@ function App() {
       }
 
       if (data.user) {
-        setAuthSession(createAuthSessionFromUser(data.user))
+        setAuthSession((current) => preserveAuthSessionIdentity(current, data.user))
         if (window.location.pathname !== "/") {
           window.history.pushState(null, "", "/")
         }
@@ -5782,7 +5801,7 @@ function App() {
       }
 
       if (data.session?.user) {
-        setAuthSession(createAuthSessionFromUser(data.session.user))
+        setAuthSession((current) => preserveAuthSessionIdentity(current, data.session?.user ?? null))
         if (window.location.pathname !== "/") {
           window.history.pushState(null, "", "/")
         }
@@ -6762,6 +6781,7 @@ function App() {
                 savedKeyState={savedOpenAiKeyState}
                 onKeySaved={() => setBulkImportStatusRefreshToken((value) => value + 1)}
                 onSavedKeyStateChange={setSavedOpenAiKeyState}
+                onSessionStatusChange={handleWorkspaceSessionStatus}
                 onViewImportStatus={() => handleNavigate("profile-account")}
               />
             ) : (
@@ -7844,7 +7864,7 @@ function GlobalSearch({
           aria-expanded={showResults}
           role="combobox"
           value={query}
-          className="h-8 pl-10 md:pl-10"
+          className="h-8 !pl-10"
           placeholder="Search workspace"
           onChange={(event) => {
             setQuery(event.currentTarget.value)
@@ -7894,7 +7914,7 @@ function GlobalSearch({
               aria-expanded={mobileOpen}
               role="combobox"
               value={query}
-              className="h-11 pl-10 md:pl-10"
+              className="h-11 !pl-10"
               placeholder="Search workspace"
               onChange={(event) => {
                 setQuery(event.currentTarget.value)
@@ -12215,7 +12235,7 @@ function HomeDashboard({
               <Input
                 aria-label="Search account, opportunity, stakeholder, or gap"
                 value={focusQuery}
-                className="h-11 pl-9 md:h-8"
+                className="h-11 !pl-10 md:h-8"
                 placeholder="Search account, opportunity, stakeholder, or gap"
                 onChange={(event) => setFocusQuery(event.currentTarget.value)}
               />
@@ -12868,7 +12888,7 @@ function AccountView({
                     <Input
                       aria-label="Search this account's opportunities"
                       value={opportunityQuery}
-                      className="pl-9"
+                      className="!pl-10"
                       placeholder="Search this account's opportunities"
                       onChange={(event) => setOpportunityQuery(event.currentTarget.value)}
                     />
@@ -17308,7 +17328,7 @@ function OpportunitiesView({
               <Input
                 aria-label="Search opportunities, accounts, stakeholders, or gaps"
                 value={query}
-                className="pl-9"
+                className="!pl-10"
                 placeholder="Search opportunities"
                 onChange={(event) => setQuery(event.currentTarget.value)}
               />
@@ -17711,7 +17731,7 @@ function CallsView({
               <Input
                 aria-label="Search calls, opportunities, accounts, or status"
                 value={query}
-                className="pl-9"
+                className="!pl-10"
                 placeholder="Search calls"
                 onChange={(event) => setQuery(event.currentTarget.value)}
               />
@@ -20038,6 +20058,7 @@ function SettingsView({
   savedKeyState,
   onKeySaved,
   onSavedKeyStateChange,
+  onSessionStatusChange,
   onViewImportStatus,
 }: {
   activeView: string
@@ -20048,6 +20069,7 @@ function SettingsView({
   savedKeyState: SavedOpenAiKeyState | null
   onKeySaved: () => void
   onSavedKeyStateChange: (state: SavedOpenAiKeyState | null) => void
+  onSessionStatusChange: (status: WorkspaceSessionStatusResponse) => void
   onViewImportStatus: () => void
 }) {
   const [apiKey, setApiKey] = React.useState("")
@@ -20209,6 +20231,15 @@ function SettingsView({
     try {
       const policy = await saveWorkspaceSessionPolicy(workspaceId, idleTimeoutSeconds)
       setSessionPolicy(policy)
+      try {
+        const status = await recordWorkspaceSessionActivity({
+          activityType: "stay_signed_in",
+          workspaceId,
+        })
+        onSessionStatusChange(status)
+      } catch {
+        // The regular status poll will reconcile the open session if this immediate refresh is unavailable.
+      }
       setSessionPolicyMessage("Session timeout saved for this workspace.")
     } catch (caughtError: unknown) {
       setSessionPolicyTone("error")

@@ -5,8 +5,9 @@ import { AppError, forbidden } from "./http"
 
 export const WORKSPACE_SESSION_IDLE_TIMEOUT_OPTIONS = [3600, 14400, 28800, 86400, 604800] as const
 export const DEFAULT_IDLE_TIMEOUT_SECONDS = 3600
-export const DEFAULT_WARNING_AFTER_SECONDS = 2700
+export const SESSION_WARNING_LEAD_SECONDS = 300
 export const ABSOLUTE_TIMEOUT_SECONDS = 86400
+export const DEFAULT_WARNING_AFTER_SECONDS = ABSOLUTE_TIMEOUT_SECONDS - SESSION_WARNING_LEAD_SECONDS
 const ACTIVITY_WRITE_DEBOUNCE_SECONDS = 45
 
 export type WorkspaceSessionState = "active" | "warning" | "expired"
@@ -87,10 +88,11 @@ export async function updateWorkspaceSessionPolicy({
   workspaceId: string
 }) {
   const normalizedIdleTimeoutSeconds = normalizeIdleTimeoutSeconds(idleTimeoutSeconds)
-  const warningAfterSeconds =
-    normalizedIdleTimeoutSeconds === null
-      ? DEFAULT_WARNING_AFTER_SECONDS
-      : Math.min(DEFAULT_WARNING_AFTER_SECONDS, Math.max(60, normalizedIdleTimeoutSeconds - 300))
+  const effectiveTimeoutSeconds = Math.min(
+    normalizedIdleTimeoutSeconds ?? ABSOLUTE_TIMEOUT_SECONDS,
+    ABSOLUTE_TIMEOUT_SECONDS
+  )
+  const warningAfterSeconds = Math.max(60, effectiveTimeoutSeconds - SESSION_WARNING_LEAD_SECONDS)
 
   const { data, error } = await supabase
     .from("workspace_session_policies")
@@ -148,10 +150,15 @@ export async function getOrCreateWorkspaceSessionStatus({
     return buildWorkspaceSessionStatus({ now, policy, session: insertedSession })
   }
 
+  const reconciledSession = await reconcileSessionExpiry({
+    policy,
+    session: existingSession,
+    supabase,
+  })
   const evaluatedSession = await expireSessionIfNeeded({
     now,
     policy,
-    session: existingSession,
+    session: reconciledSession,
     supabase,
   })
 
@@ -209,10 +216,15 @@ export async function getWorkspaceSessionStatus({
     return buildWorkspaceSessionStatus({ now, policy, session: insertedSession })
   }
 
+  const reconciledSession = await reconcileSessionExpiry({
+    policy,
+    session: existingSession,
+    supabase,
+  })
   const evaluatedSession = await expireSessionIfNeeded({
     now,
     policy,
-    session: existingSession,
+    session: reconciledSession,
     supabase,
   })
 
@@ -395,6 +407,38 @@ async function expireSessionIfNeeded({
   return data
 }
 
+async function reconcileSessionExpiry({
+  policy,
+  session,
+  supabase,
+}: {
+  policy: WorkspaceSessionPolicyRow
+  session: WorkspaceSessionActivityRow
+  supabase: SupabaseClient<Database>
+}) {
+  if (session.expired_at) return session
+
+  const expectedExpiresAt = calculateExpiresAt({
+    activeCallId: session.active_call_id,
+    now: new Date(session.last_activity_at),
+    policy,
+    startedAt: new Date(session.started_at),
+  })
+
+  if (new Date(session.expires_at).getTime() === expectedExpiresAt.getTime()) return session
+
+  const { data, error } = await supabase
+    .from("workspace_session_activity")
+    .update({ expires_at: expectedExpiresAt.toISOString() })
+    .eq("id", session.id)
+    .select("*")
+    .single()
+
+  if (error) throw new Error(error.message)
+
+  return data
+}
+
 async function updateWorkspaceSessionActivity({
   activeCallId,
   now,
@@ -451,13 +495,11 @@ function buildWorkspaceSessionStatus({
   const idleDeadline = policy.idle_timeout_seconds === null
     ? null
     : addSeconds(new Date(session.last_activity_at), policy.idle_timeout_seconds)
-  const warningAt = policy.idle_timeout_seconds === null
-    ? null
-    : addSeconds(new Date(session.last_activity_at), policy.warning_after_seconds)
   const expiresAt = new Date(session.expires_at)
+  const warningAt = addSeconds(expiresAt, -SESSION_WARNING_LEAD_SECONDS)
   const state: WorkspaceSessionState = session.expired_at || now >= expiresAt || now >= absoluteDeadline
     ? "expired"
-    : warningAt && now >= warningAt
+    : now >= warningAt
       ? "warning"
       : "active"
 
@@ -474,7 +516,7 @@ function buildWorkspaceSessionStatus({
     },
     startedAt: session.started_at,
     state,
-    warningAt: warningAt ? warningAt.toISOString() : null,
+    warningAt: warningAt.toISOString(),
   }
 }
 

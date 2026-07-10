@@ -336,7 +336,7 @@ export function ContactMultiSelect({
               aria-expanded={open}
               role="combobox"
               value={query}
-              className="h-11 pl-9 md:h-9"
+              className="h-11 !pl-10 md:h-9"
               placeholder="Search contacts"
               onChange={(event) => setQuery(event.currentTarget.value)}
               onKeyDown={(event) => {
@@ -1535,7 +1535,7 @@ export function ContactsPanel({
             <Input
               aria-label="Search account contacts"
               value={query}
-              className="h-11 pl-9 md:h-9"
+              className="h-11 !pl-10 md:h-9"
               placeholder="Search name, title, email, phone or profile"
               onChange={(event) => {
                 setRevealedContactId("")
