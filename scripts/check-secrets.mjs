@@ -51,10 +51,15 @@ const binaryExtensions = new Set([
   ".woff2",
 ])
 
-function getTrackedFiles() {
-  return execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
-    .split("\0")
-    .filter(Boolean)
+function getRepositoryFiles() {
+  const trackedFiles = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
+  const untrackedFiles = execFileSync(
+    "git",
+    ["ls-files", "--others", "--exclude-standard", "-z"],
+    { encoding: "utf8" }
+  )
+
+  return [...new Set(`${trackedFiles}${untrackedFiles}`.split("\0").filter(Boolean))]
 }
 
 function getExtension(filePath) {
@@ -103,7 +108,7 @@ function findServiceRoleJwt(text) {
 
 const findings = []
 
-for (const filePath of getTrackedFiles()) {
+for (const filePath of getRepositoryFiles()) {
   if (binaryExtensions.has(getExtension(filePath))) continue
 
   let text = ""
@@ -133,7 +138,7 @@ for (const filePath of getTrackedFiles()) {
 }
 
 if (findings.length) {
-  console.error("Potential secrets were found in tracked files:")
+  console.error("Potential secrets were found in repository files:")
   for (const finding of findings) {
     console.error(`- ${finding.filePath}:${finding.line}:${finding.column} ${finding.label}`)
   }
@@ -141,4 +146,4 @@ if (findings.length) {
   process.exit(1)
 }
 
-console.log("No tracked secrets found.")
+console.log("No secrets found in tracked or untracked repository files.")

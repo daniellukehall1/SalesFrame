@@ -2,7 +2,7 @@ import type { Config } from "@netlify/functions"
 
 import { badRequest, dataResponse, errorResponse, methodNotAllowed } from "./_shared/http"
 import { authorizeWorkspace, requireUser } from "./_shared/supabase"
-import { getOrCreateWorkspaceSessionStatus } from "./_shared/workspace-session"
+import { getWorkspaceSessionStatus } from "./_shared/workspace-session"
 
 export default async (request: Request) => {
   try {
@@ -16,8 +16,7 @@ export default async (request: Request) => {
 
     await authorizeWorkspace(user.id, workspaceId, supabase, { requireActiveSession: false })
 
-    const status = await getOrCreateWorkspaceSessionStatus({
-      activityType: "app_load",
+    const status = await getWorkspaceSessionStatus({
       supabase,
       token,
       userId: user.id,

@@ -27,6 +27,85 @@ test("account contacts use the shared responsive record-management UI", async ()
   assert.match(table, /data-slot="table"/)
 })
 
+test("contact identities open a complete responsive canonical record", async () => {
+  const contacts = await read("src/components/contact-management.tsx")
+  const detailOverlay = contacts.slice(
+    contacts.indexOf("function ContactDetailsOverlay"),
+    contacts.indexOf("export function ContactsPanel")
+  )
+
+  assert.match(contacts, /const \[detailContactId, setDetailContactId\] = React\.useState\(""\)/)
+  assert.match(contacts, /const detailContact = contacts\.find\(\(contact\) => contact\.id === detailContactId\) \?\? null/)
+  assert.match(contacts, /aria-label=\{`View \$\{contact\.fullName\} contact details`\}/)
+  assert.match(detailOverlay, /if \(isMobile\)[\s\S]*<Drawer open=\{open\} onOpenChange=\{onOpenChange\}/)
+  assert.match(detailOverlay, /<Dialog open=\{open\} onOpenChange=\{onOpenChange\}>/)
+  assert.match(detailOverlay, /<dl className="grid gap-3 sm:grid-cols-2">/)
+  for (const label of [
+    "Full name",
+    "Preferred name",
+    "Job title",
+    "Department / function",
+    "Seniority",
+    "Employment status",
+    "Work email",
+    "Business phone",
+    "Professional profile",
+    "Location",
+    "Timezone",
+    "Source",
+    "Created",
+    "Last updated",
+    "Archive status",
+  ]) {
+    assert.ok(detailOverlay.includes(`label="${label}"`), `missing contact detail: ${label}`)
+  }
+  assert.match(detailOverlay, /Private seller notes/)
+  assert.match(detailOverlay, /Linked opportunities/)
+  assert.match(detailOverlay, /Primary contact/)
+  assert.match(detailOverlay, /Deal-specific notes/)
+  assert.match(detailOverlay, /Call participation/)
+  assert.match(detailOverlay, /relationship\.attendance/)
+  assert.match(detailOverlay, /Primary participant/)
+  assert.match(detailOverlay, /<ContactEnrichmentDetails contact=\{contact\} showAll \/>/)
+  assert.match(detailOverlay, /<PencilIcon \/>[\s\S]*Edit/)
+  assert.match(detailOverlay, /Refresh enrichment/)
+  assert.match(detailOverlay, /<ArchiveIcon \/>[\s\S]*Archive/)
+  assert.match(detailOverlay, /<Undo2Icon \/>[\s\S]*Restore contact/)
+  assert.match(detailOverlay, /grid-rows-\[auto_auto_minmax\(0,1fr\)_auto\]/)
+  assert.match(contacts, /const focusedContact = contacts\.find\(\(contact\) => contact\.id === focusedContactId\)/)
+  assert.match(contacts, /setEmploymentFilter\(focusedContact\.archivedAtIso \? "archived" : "all"\)/)
+  assert.match(contacts, /setDetailContactId\(focusedContactId\)/)
+  assert.match(contacts, /detailInvokerRef\.current = invoker/)
+  assert.match(contacts, /data-contact-detail-id=\{contact\.id\}/)
+  assert.match(contacts, /if \(invoker\?\.isConnected\)[\s\S]*invoker\.focus\(\)/)
+  assert.match(contacts, /visibleContactButton \?\? addContactButtonRef\.current/)
+  assert.doesNotMatch(contacts, /<TableRow[^>]*role="button"/)
+})
+
+test("opportunities expose the shared account directory beside deal-specific contact roles", async () => {
+  const app = await read("src/App.tsx")
+  const opportunityWorkspace = app.slice(
+    app.indexOf("function OpportunityWorkspace"),
+    app.indexOf("function OpportunitySummaryStrip")
+  )
+
+  assert.match(app, /opportunities=\{workspaceOpportunities\.filter\(\(item\) => item\.accountId === activeAccount\.id\)\}/)
+  assert.match(opportunityWorkspace, /<TabsTrigger className="min-w-24" value="contacts">Contacts<\/TabsTrigger>/)
+  assert.match(opportunityWorkspace, /<TabsContent value="contacts"/)
+  assert.match(opportunityWorkspace, /<OpportunityContactsCard[\s\S]*<ContactsPanel/)
+  assert.match(opportunityWorkspace, /relationship\.opportunityId === opportunity\.id/)
+  assert.match(opportunityWorkspace, /relationship\.accountId === account\.id/)
+  assert.match(opportunityWorkspace, /title="Account contact directory"/)
+  assert.match(opportunityWorkspace, /onOpenContact=\{setFocusedOpportunityContactId\}/)
+  assert.match(opportunityWorkspace, /focusedContactId=\{focusedOpportunityContactId\}/)
+  assert.match(opportunityWorkspace, /onSelectionChange=\{\(contactIds\) => replaceOpportunityContactSelection\(opportunity\.id, contactIds\)\}/)
+  assert.match(opportunityWorkspace, /updateOpportunityContactRelationship\(opportunity\.id, contactId, patch\)/)
+  assert.match(opportunityWorkspace, /onOpenOpportunity=\{onOpportunitySelect\}/)
+  assert.match(opportunityWorkspace, /onSave=\{saveContact\}/)
+  assert.match(opportunityWorkspace, /callContacts=\{callContacts\.filter\(\(relationship\) => relationship\.accountId === account\.id\)\}/)
+  assert.match(opportunityWorkspace, /calls=\{calls\}/)
+})
+
 test("contact selectors are optional, multi-select, and mobile reachable", async () => {
   const app = await read("src/App.tsx")
   const contacts = await read("src/components/contact-management.tsx")
@@ -88,15 +167,15 @@ test("contact management keeps search, forms, filters, and async saves accessibl
   const contacts = await read("src/components/contact-management.tsx")
 
   assert.match(app, /focusContact\(contact\.id\)/)
-  assert.match(contacts, /if \(!focusedContactId[\s\S]*setEmploymentFilter\("all"\)/)
+  assert.match(contacts, /const focusedContact = contacts\.find[\s\S]*setEmploymentFilter\(focusedContact\.archivedAtIso \? "archived" : "all"\)/)
   assert.match(contacts, /<form[\s\S]*onSubmit=/)
   assert.match(contacts, /<DialogContent dismissible/)
   assert.match(contacts, /id="contact-full-name"[\s\S]*aria-required="true"[\s\S]*required/)
-  assert.match(contacts, /id="contact-email"[\s\S]*type="email"[\s\S]*aria-invalid=\{invalidEmail\}/)
+  assert.match(contacts, /id="contact-email"[\s\S]*type="email"[\s\S]*aria-invalid=\{invalidEmail \|\| Boolean\(duplicateEmail\)\}/)
   assert.match(contacts, /<SelectItem value="unknown">Unknown employment<\/SelectItem>/)
   assert.match(contacts, /Undo archive/)
   assert.match(contacts, /actionKind !== "enrich"/)
-  assert.match(contacts, /await \(action === "archive" \? onArchive\(contact\) : onEnrich\(contact\)\)[\s\S]*setActionKind\(action\)/)
+  assert.match(contacts, /await \(action === "archive" \? onArchive\(contact\) : action === "restore" \? onRestore\(contact\) : onEnrich\(contact\)\)[\s\S]*setActionKind\(action\)/)
   assert.match(contacts, /role=\{\(actionMessage \? actionTone : externalStatusTone\) === "error" \? "alert" : "status"\}/)
   assert.match(contacts, /disabled=\{disabled\}[\s\S]*role="combobox"/)
   assert.match(contacts, /aria-label=\{`Buying roles for \$\{contactName\}`\}/)

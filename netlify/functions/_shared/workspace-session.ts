@@ -180,6 +180,45 @@ export async function getOrCreateWorkspaceSessionStatus({
   return buildWorkspaceSessionStatus({ now, policy, session: updatedSession })
 }
 
+export async function getWorkspaceSessionStatus({
+  supabase,
+  token,
+  userId,
+  workspaceId,
+}: {
+  supabase: SupabaseClient<Database>
+  token?: string
+  userId: string
+  workspaceId: string
+}): Promise<WorkspaceSessionStatus> {
+  const policy = await getWorkspaceSessionPolicy(supabase, workspaceId)
+  const sessionKey = getSessionKey(userId, token)
+  const existingSession = await getWorkspaceSessionActivity({ sessionKey, supabase, userId, workspaceId })
+  const now = new Date()
+
+  if (!existingSession) {
+    const insertedSession = await createWorkspaceSession({
+      now,
+      policy,
+      sessionKey,
+      supabase,
+      userId,
+      workspaceId,
+    })
+
+    return buildWorkspaceSessionStatus({ now, policy, session: insertedSession })
+  }
+
+  const evaluatedSession = await expireSessionIfNeeded({
+    now,
+    policy,
+    session: existingSession,
+    supabase,
+  })
+
+  return buildWorkspaceSessionStatus({ now, policy, session: evaluatedSession })
+}
+
 export async function requireActiveWorkspaceSession({
   activeCallId,
   activityType = "workspace_load",

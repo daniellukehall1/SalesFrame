@@ -49,6 +49,16 @@ export type BulkImportRunStatus = {
 const activeJobStatuses = new Set(["queued", "running", "retrying", "succeeded", "paused_missing_key"])
 const staleRunningWindowMs = 10 * 60 * 1000
 
+export function buildFreshEnrichmentAttemptState() {
+  return {
+    attempts: 0,
+    last_error: null,
+    locked_at: null,
+    locked_by: null,
+    run_after: new Date().toISOString(),
+  }
+}
+
 export function createImportEnrichmentSummary(enabled = true): CsvImportSummary["enrichment"] {
   return {
     alreadyTracked: 0,
@@ -142,6 +152,10 @@ export async function queueAccountEnrichmentJobs({
 }) {
   const enrichment = createImportEnrichmentSummary(enabled)
   if (!enabled) return enrichment
+  if (!importRunId) {
+    enrichment.status = "unavailable"
+    return enrichment
+  }
 
   const uniqueTargets = dedupeTargets(targets)
   const validTargets = uniqueTargets.filter((target) => normalizeImportDomain(target.website))
@@ -184,6 +198,7 @@ export async function queueAccountEnrichmentJobs({
 
     jobsToInsert.push({
       account_id: target.accountId,
+      ...buildFreshEnrichmentAttemptState(),
       created_by_user_id: userId,
       idempotency_key: idempotencyKey,
       import_run_id: importRunId,
@@ -191,6 +206,7 @@ export async function queueAccountEnrichmentJobs({
       opportunity_id: target.opportunityId ?? null,
       requested_account_name: target.name ?? null,
       requested_domain: normalizeImportDomain(target.website),
+      server_authorized_at: new Date().toISOString(),
       status,
       workspace_id: workspaceId,
     })
@@ -213,6 +229,33 @@ export async function queueAccountEnrichmentJobs({
   }
 
   return enrichment
+}
+
+async function hasTrustedJobProvenance(
+  job: Tables<"ai_enrichment_jobs">,
+  supabase: SupabaseClient<Database>
+) {
+  if (
+    !job.server_authorized_at ||
+    job.job_type !== "account_enrichment" ||
+    !job.created_by_user_id ||
+    !job.import_run_id
+  ) {
+    return false
+  }
+
+  const response = await supabase
+    .from("csv_import_runs")
+    .select("id")
+    .eq("id", job.import_run_id)
+    .eq("workspace_id", job.workspace_id)
+    .eq("created_by_user_id", job.created_by_user_id)
+    .eq("enrichment_enabled", true)
+    .maybeSingle()
+
+  if (response.error) throw new Error(response.error.message)
+
+  return Boolean(response.data)
 }
 
 export async function listBulkImportStatus({
@@ -301,6 +344,17 @@ export async function processQueuedEnrichmentJobs({
   const counts = { failed: 0, paused: 0, processed: 0, retried: 0, skipped: 0, succeeded: 0 }
 
   for (const job of jobsResponse.data ?? []) {
+    if (job.attempts >= job.max_attempts) {
+      await markJobTerminal({
+        job,
+        lastError: "The enrichment retry limit was reached.",
+        status: "failed",
+        supabase,
+      })
+      counts.failed += 1
+      continue
+    }
+
     const attemptNumber = job.attempts + 1
     const lockResponse = await supabase
       .from("ai_enrichment_jobs")
@@ -330,6 +384,17 @@ export async function processQueuedEnrichmentJobs({
     counts.processed += 1
 
     try {
+      if (!(await hasTrustedJobProvenance(lockedJob, supabase))) {
+        await markJobTerminal({
+          lastError: "The enrichment job could not be verified.",
+          status: "skipped",
+          supabase,
+          job: lockedJob,
+        })
+        counts.skipped += 1
+        continue
+      }
+
       const accountResponse = await supabase
         .from("accounts")
         .select("id")
@@ -427,10 +492,7 @@ export async function retryFailedEnrichmentJobs({
   const response = await supabase
     .from("ai_enrichment_jobs")
     .update({
-      last_error: null,
-      locked_at: null,
-      locked_by: null,
-      run_after: new Date().toISOString(),
+      ...buildFreshEnrichmentAttemptState(),
       status: nextStatus,
     })
     .eq("workspace_id", workspaceId)

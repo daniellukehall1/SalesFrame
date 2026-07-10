@@ -782,6 +782,7 @@ export function useCallCapture() {
     }
 
     setStatus(uploadFailed ? "upload-failed" : "stopped")
+    chunksRef.current = []
     stopInFlightRef.current = false
 
     return {

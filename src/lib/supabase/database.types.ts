@@ -651,6 +651,78 @@ export type Database = {
           updated_at?: string
         }
       >
+      deepgram_token_grants: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          call_id: string
+          user_id: string
+          issued_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          call_id: string
+          user_id: string
+          issued_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          call_id?: string
+          user_id?: string
+          issued_at?: string
+        }
+      >
+      recording_upload_reconciliations: TableDefinition<
+        {
+          cleanup_started_at: string | null
+          id: string
+          storage_path: string
+          workspace_id: string
+          call_id: string
+          user_id: string
+          created_at: string
+          expires_at: string
+        },
+        {
+          cleanup_started_at?: string | null
+          id?: string
+          storage_path: string
+          workspace_id: string
+          call_id: string
+          user_id: string
+          created_at?: string
+          expires_at?: string
+        },
+        {
+          cleanup_started_at?: string | null
+          id?: string
+          storage_path?: string
+          workspace_id?: string
+          call_id?: string
+          user_id?: string
+          created_at?: string
+          expires_at?: string
+        }
+      >
+      recording_upload_rollout_control: TableDefinition<
+        {
+          singleton_id: number
+          enforce_after: string
+          updated_at: string
+        },
+        {
+          singleton_id?: number
+          enforce_after?: string
+          updated_at?: string
+        },
+        {
+          singleton_id?: number
+          enforce_after?: string
+          updated_at?: string
+        }
+      >
       call_playbooks: TableDefinition<
         {
           id: string
@@ -1557,6 +1629,7 @@ export type Database = {
           locked_by: string | null
           last_error: string | null
           created_by_user_id: string | null
+          server_authorized_at: string | null
           created_at: string
           updated_at: string
         },
@@ -1579,6 +1652,7 @@ export type Database = {
           locked_by?: string | null
           last_error?: string | null
           created_by_user_id?: string | null
+          server_authorized_at?: string | null
           created_at?: string
           updated_at?: string
         },
@@ -1601,6 +1675,7 @@ export type Database = {
           locked_by?: string | null
           last_error?: string | null
           created_by_user_id?: string | null
+          server_authorized_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -1730,6 +1805,45 @@ export type Database = {
       can_access_contact: {
         Args: { target_contact_id: string }
         Returns: boolean
+      }
+      claim_deepgram_token_grant: {
+        Args: {
+          target_user_id: string
+          target_workspace_id: string
+          target_call_id: string
+          grant_limit?: number
+          window_seconds?: number
+        }
+        Returns: boolean
+      }
+      register_call_recording_upload: {
+        Args: {
+          target_workspace_id: string
+          target_call_id: string
+          target_storage_path: string
+        }
+        Returns: boolean
+      }
+      has_active_recording_upload_registration: {
+        Args: { object_name: string }
+        Returns: boolean
+      }
+      is_recording_upload_registration_enforced: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
+      claim_expired_recording_upload_reconciliations: {
+        Args: {
+          batch_limit?: number
+          stale_claim_seconds?: number
+        }
+        Returns: {
+          id: string
+          workspace_id: string
+          call_id: string
+          storage_path: string
+          cleanup_started_at: string
+        }[]
       }
       normalize_linkedin_contact_url: {
         Args: { value: string }

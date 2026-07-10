@@ -149,12 +149,17 @@ export async function connectDeepgramLiveTranscription({
             void connectSocket(deepgramReconnectAttempts)
               .then((socket) => {
                 reconnecting = false
+                if (closedByClient) {
+                  audioBacklog = []
+                  socket.close(1000, "call_stopped")
+                  return
+                }
                 activeSocket = socket
                 drainBufferedAudio()
               })
               .catch((error) => {
                 reconnecting = false
-                onTranscriptError(error)
+                if (!closedByClient) onTranscriptError(error)
               })
           },
           sourceKind,
@@ -220,6 +225,7 @@ export async function connectDeepgramLiveTranscription({
   return {
     close: () => {
       closedByClient = true
+      audioBacklog = []
       if (bufferDrainTimer) window.clearTimeout(bufferDrainTimer)
       if (keepAliveTimer) window.clearInterval(keepAliveTimer)
       audioPipeline.stop()

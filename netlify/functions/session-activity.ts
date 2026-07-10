@@ -1,7 +1,7 @@
 import type { Config } from "@netlify/functions"
 
-import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson } from "./_shared/http"
-import { authorizeWorkspace, requireUser } from "./_shared/supabase"
+import { badRequest, dataResponse, errorResponse, forbidden, methodNotAllowed, readJson } from "./_shared/http"
+import { assertCallIsLive, authorizeCall, authorizeWorkspace, requireUser } from "./_shared/supabase"
 import {
   getOrCreateWorkspaceSessionStatus,
   type WorkspaceSessionActivityType,
@@ -13,6 +13,19 @@ type SessionActivityPayload = {
   workspaceId?: string
 }
 
+const workspaceSessionActivityTypes = new Set<WorkspaceSessionActivityType>([
+  "app_load",
+  "workspace_load",
+  "workspace_switch",
+  "route_change",
+  "user_activity",
+  "data_save",
+  "file_upload",
+  "live_call_heartbeat",
+  "start_call_check",
+  "stay_signed_in",
+])
+
 export default async (request: Request) => {
   try {
     if (request.method !== "POST") throw methodNotAllowed()
@@ -20,14 +33,34 @@ export default async (request: Request) => {
     const { supabase, token, user } = await requireUser(request)
     const payload = await readJson<SessionActivityPayload>(request)
     const workspaceId = payload.workspaceId?.trim()
+    const activityType = payload.activityType ?? "user_activity"
 
     if (!workspaceId) throw badRequest("workspaceId is required.", "workspace_id_required")
+    if (!workspaceSessionActivityTypes.has(activityType)) {
+      throw badRequest("activityType is not recognized.", "session_activity_type_invalid")
+    }
 
-    await authorizeWorkspace(user.id, workspaceId, supabase, { requireActiveSession: false })
+    let activeCallId: string | null = null
+    if (payload.activeCallId) {
+      const activeCall = await authorizeCall(user.id, payload.activeCallId, supabase, {
+        requireActiveSession: false,
+        token,
+      })
+      if (activeCall.workspace_id !== workspaceId) {
+        throw forbidden("The active call does not belong to this workspace.")
+      }
+      assertCallIsLive(activeCall, {
+        code: "session_call_not_active",
+        message: "This call is no longer live and cannot extend the workspace session.",
+      })
+      activeCallId = activeCall.id
+    } else {
+      await authorizeWorkspace(user.id, workspaceId, supabase, { requireActiveSession: false })
+    }
 
     const status = await getOrCreateWorkspaceSessionStatus({
-      activeCallId: payload.activeCallId ?? null,
-      activityType: payload.activityType ?? "user_activity",
+      activeCallId,
+      activityType,
       force: true,
       supabase,
       token,

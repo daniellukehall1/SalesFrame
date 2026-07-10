@@ -402,7 +402,8 @@ test("expensive AI functions enforce authenticated rate limits", async () => {
   assert.match(liveQuestion, /authorizedCall\.account_id !== accountId/)
   assert.match(liveQuestion, /authorizedCall\.opportunity_id !== opportunityId/)
   assert.match(liveQuestion, /\.eq\("workspace_id", authorizedCall\.workspace_id\)/)
-  assert.match(deepgramToken, /authorizeCall\(user\.id, payload\.callId, undefined, \{ token: authToken \}\)/)
+  assert.match(deepgramToken, /authorizeCall\(user\.id, payload\.callId, supabase, \{ token: authToken \}\)/)
+  assert.match(deepgramToken, /supabase\.rpc\("claim_deepgram_token_grant"/)
   assert.match(deepgramToken, /assertCallIsLive\(call/)
   assert.match(deepgramToken, /deepgram_call_not_active/)
   assert.match(deepgramToken, /createDeepgramTemporaryToken/)
@@ -469,7 +470,7 @@ test("scheduled service-role workers require scheduled POST payloads before work
   assert.match(retentionCleanup, /if \(request\.method !== "POST"\) throw methodNotAllowed\(\)/)
   assert.ok(retentionCleanup.indexOf("assertScheduledPayload") < retentionCleanup.indexOf("const supabase = getSupabaseAdmin()"))
   assert.match(retentionCleanup, /method: \["POST"\]/)
-  assert.match(retentionCleanup, /schedule: "@daily"/)
+  assert.match(retentionCleanup, /schedule: "@hourly"/)
 
   assert.match(importEnrichmentWorker, /methodNotAllowed/)
   assert.match(importEnrichmentWorker, /readJson<ScheduledImportEnrichmentPayload>/)
@@ -616,7 +617,8 @@ test("call recording and artifact storage policies require active workspace and 
   }
 
   assert.match(tightenedArtifactMigration, /bucket_id = 'call-artifacts'[\s\S]*public\.is_workspace_member_with_active_session\(public\.workspace_id_from_storage_path\(name\)\)[\s\S]*public\.storage_path_matches_call_workspace\(name\)[\s\S]*public\.can_access_call\(public\.call_id_from_storage_path\(name\)\)/)
-  assert.match(data, /return `\$\{workspaceId\}\/\$\{callId\}\/\$\{sanitizedFileName \|\| "recording\.webm"\}`/)
+  assert.match(data, /const objectId = crypto\.randomUUID\(\)[\s\S]*return `\$\{workspaceId\}\/\$\{callId\}\/\$\{objectId\}-\$\{sanitizedFileName \|\| "recording\.webm"\}`/)
+  assert.match(data, /\.upload\(path, file,[\s\S]*upsert: false/)
 })
 
 test("CSV import functions authorize the active workspace and reject cross-workspace writes", async () => {

@@ -2149,8 +2149,9 @@ function getLiveCallRemainingSeconds(elapsedSeconds: number, durationLimitSecond
 function getLiveCallLimitNotice(elapsedSeconds: number, durationLimitSeconds = MAX_LIVE_CALL_SECONDS) {
   const remainingSeconds = getLiveCallRemainingSeconds(elapsedSeconds, durationLimitSeconds)
 
-  if (remainingSeconds <= LIVE_CALL_FINAL_WARNING_SECONDS) return "Wrapping up soon"
-  if (remainingSeconds <= LIVE_CALL_WARNING_SECONDS) return `${Math.ceil(remainingSeconds / 60)} min left`
+  if (remainingSeconds <= 0) return "Call limit reached. SalesFrame is stopping the call automatically."
+  if (remainingSeconds <= LIVE_CALL_FINAL_WARNING_SECONDS) return "Less than 1 minute left. The call will stop automatically."
+  if (remainingSeconds <= LIVE_CALL_WARNING_SECONDS) return `${Math.ceil(remainingSeconds / 60)} min left. The call will stop automatically at the limit.`
 
   return ""
 }
@@ -2805,6 +2806,9 @@ function App() {
     const recordBroadcastActivity = () => {
       void sendWorkspaceSessionActivity("user_activity").catch(() => undefined)
     }
+    const recordVisibleActivity = () => {
+      if (document.visibilityState === "visible") recordActivity()
+    }
     const activityEvents: Array<keyof WindowEventMap> = [
       "keydown",
       "pointerdown",
@@ -2813,13 +2817,13 @@ function App() {
 
     activityEvents.forEach((eventName) => window.addEventListener(eventName, recordActivity, { passive: true }))
     window.addEventListener("focus", recordActivity)
-    window.addEventListener("visibilitychange", recordActivity)
+    window.addEventListener("visibilitychange", recordVisibleActivity)
     broadcastChannel?.addEventListener("message", recordBroadcastActivity)
 
     return () => {
       activityEvents.forEach((eventName) => window.removeEventListener(eventName, recordActivity))
       window.removeEventListener("focus", recordActivity)
-      window.removeEventListener("visibilitychange", recordActivity)
+      window.removeEventListener("visibilitychange", recordVisibleActivity)
       broadcastChannel?.removeEventListener("message", recordBroadcastActivity)
       broadcastChannel?.close()
     }
@@ -2885,6 +2889,11 @@ function App() {
     scrollAppContentToTop()
     pendingNavigationScrollResetRef.current = false
     lastScrolledNavigationKeyRef.current = activeNavigationKey
+    const focusFrame = window.requestAnimationFrame(() => {
+      appMainScrollRef.current?.focus({ preventScroll: true })
+    })
+
+    return () => window.cancelAnimationFrame(focusFrame)
   }, [
     activeNavigationKey,
     loadingWorkspace,
@@ -6512,6 +6521,8 @@ function App() {
           />
           <main
             ref={appMainScrollRef}
+            aria-label={viewLabels[activeView] ?? "SalesFrame workspace"}
+            tabIndex={-1}
             data-navigation-key={activeNavigationKey}
             data-navigation-reset={navigationScrollResetNonce}
             className={cn(
@@ -6613,6 +6624,7 @@ function App() {
                 opportunity={activeOpportunity}
                 opportunityDraft={activeOpportunityDraft}
                 opportunityDrafts={opportunityDrafts}
+                opportunities={workspaceOpportunities.filter((item) => item.accountId === activeAccount.id)}
                 playbookFields={workspacePlaybookFields}
                 playbookRows={workspacePlaybooks}
                 postCallFocusCallId={postCallFocusCallId}
@@ -6634,6 +6646,7 @@ function App() {
                 onOpportunityDraftChange={(field, value) =>
                   updateOpportunityDraft(activeOpportunity.id, field, value)
                 }
+                onOpportunitySelect={handleOpportunitySelect}
                 onArchiveOpportunity={handleRequestArchiveOpportunity}
                 onDeleteOpportunity={handleRequestDeleteOpportunity}
                 onSaveOpportunityDraft={handleSaveActiveOpportunityDraft}
@@ -6657,6 +6670,7 @@ function App() {
                 accountEnrichmentSaveMessage={accountEnrichmentSaveMessage}
                 accountEnrichmentSaveStatus={accountEnrichmentSaveStatus}
                 accountResearchById={accountResearchById}
+                calls={workspaceCalls}
                 opportunityDrafts={opportunityDrafts}
                 opportunities={workspaceOpportunities.filter((opportunity) => opportunity.accountId === activeAccount.id)}
                 playbookFields={workspacePlaybookFields}
@@ -7560,6 +7574,11 @@ function GlobalSearch({
   const [query, setQuery] = React.useState("")
   const [focused, setFocused] = React.useState(false)
   const [mobileOpen, setMobileOpen] = React.useState(false)
+  const desktopSearchRef = React.useRef<HTMLDivElement | null>(null)
+  const desktopInputRef = React.useRef<HTMLInputElement | null>(null)
+  const suppressDesktopFocusOpenRef = React.useRef(false)
+  const desktopListboxId = React.useId()
+  const mobileListboxId = React.useId()
   const accountById = React.useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
   const opportunityById = React.useMemo(
     () => new Map(opportunities.map((opportunity) => [opportunity.id, opportunity])),
@@ -7685,6 +7704,26 @@ function GlobalSearch({
     setMobileOpen(false)
   }
 
+  const moveResultFocus = (
+    currentTarget: HTMLButtonElement,
+    direction: "first" | "last" | "next" | "previous"
+  ) => {
+    const listbox = currentTarget.closest<HTMLElement>('[role="listbox"]')
+    const options = Array.from(listbox?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])
+    if (!options.length) return
+
+    const currentIndex = options.indexOf(currentTarget)
+    const nextIndex = direction === "first"
+      ? 0
+      : direction === "last"
+        ? options.length - 1
+        : direction === "next"
+          ? Math.min(options.length - 1, currentIndex + 1)
+          : Math.max(0, currentIndex - 1)
+
+    options[nextIndex]?.focus()
+  }
+
   const renderResults = (mode: "desktop" | "mobile") => {
     const hasQuery = normalizeSearchText(query).length > 0
 
@@ -7724,9 +7763,42 @@ function GlobalSearch({
       <button
         key={`${mode}-${result.type}-${result.id}`}
         type="button"
+        role="option"
+        aria-selected="false"
         className="grid min-h-11 grid-cols-[28px_1fr_auto] items-center gap-3 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-accent"
-        onMouseDown={(event) => event.preventDefault()}
         onClick={() => handleSelect(result)}
+        onKeyDown={(event) => {
+          const direction = event.key === "ArrowDown"
+            ? "next"
+            : event.key === "ArrowUp"
+              ? "previous"
+              : event.key === "Home"
+                ? "first"
+                : event.key === "End"
+                  ? "last"
+                  : null
+
+          if (direction) {
+            event.preventDefault()
+            moveResultFocus(event.currentTarget, direction)
+          } else if (event.key === "Escape") {
+            event.preventDefault()
+
+            if (mode === "mobile") {
+              setMobileOpen(false)
+              setFocused(false)
+              setQuery("")
+              return
+            }
+
+            suppressDesktopFocusOpenRef.current = true
+            desktopInputRef.current?.focus()
+            setFocused(false)
+            queueMicrotask(() => {
+              suppressDesktopFocusOpenRef.current = false
+            })
+          }
+        }}
       >
         <span className="flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground [&_svg]:size-4">
           {result.icon}
@@ -7751,22 +7823,47 @@ function GlobalSearch({
       >
         <SearchIcon />
       </Button>
-      <div className="relative hidden w-72 lg:block">
+      <div
+        ref={desktopSearchRef}
+        className="relative hidden w-72 lg:block"
+        onBlur={(event) => {
+          const nextTarget = event.relatedTarget
+          if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+          setFocused(false)
+        }}
+        onFocusCapture={() => {
+          if (!suppressDesktopFocusOpenRef.current) setFocused(true)
+        }}
+      >
         <SearchIcon className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
+          ref={desktopInputRef}
           aria-label="Search workspace"
+          aria-autocomplete="list"
+          aria-controls={desktopListboxId}
+          aria-expanded={showResults}
+          role="combobox"
           value={query}
           className="h-8 pl-10 md:pl-10"
           placeholder="Search workspace"
-          onBlur={() => window.setTimeout(() => setFocused(false), 120)}
           onChange={(event) => {
             setQuery(event.currentTarget.value)
             setFocused(true)
           }}
-          onFocus={() => setFocused(true)}
+          onFocus={() => {
+            if (!suppressDesktopFocusOpenRef.current) setFocused(true)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" && showResults && results.length) {
+              event.preventDefault()
+              desktopSearchRef.current?.querySelector<HTMLButtonElement>('[role="option"]')?.focus()
+            } else if (event.key === "Escape") {
+              setFocused(false)
+            }
+          }}
         />
         {showResults ? (
-          <div className="absolute right-0 z-40 mt-2 grid w-[420px] max-w-[calc(100vw-2rem)] gap-1 rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg">
+          <div id={desktopListboxId} role="listbox" aria-label="Workspace search results" className="absolute right-0 z-40 mt-2 grid w-[420px] max-w-[calc(100vw-2rem)] gap-1 rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg">
             {renderResults("desktop")}
           </div>
         ) : null}
@@ -7792,6 +7889,10 @@ function GlobalSearch({
             <Input
               autoFocus
               aria-label="Search workspace"
+              aria-autocomplete="list"
+              aria-controls={mobileListboxId}
+              aria-expanded={mobileOpen}
+              role="combobox"
               value={query}
               className="h-11 pl-10 md:pl-10"
               placeholder="Search workspace"
@@ -7801,7 +7902,7 @@ function GlobalSearch({
               }}
             />
           </div>
-          <div className="grid max-h-[min(24rem,calc(100svh-14rem))] gap-1 overflow-y-auto overscroll-contain rounded-lg bg-muted/30 p-1">
+          <div id={mobileListboxId} role="listbox" aria-label="Workspace search results" className="grid max-h-[min(24rem,calc(100svh-14rem))] gap-1 overflow-y-auto overscroll-contain rounded-lg bg-muted/30 p-1">
             {renderResults("mobile")}
           </div>
           <DialogActions
@@ -7884,7 +7985,7 @@ function CommandBar({
             <p className={cn(
               "px-1 text-xs font-medium",
               isFinalLimitNotice ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"
-            )}>
+            )} role="status" aria-live={isFinalLimitNotice ? "assertive" : "polite"}>
               {limitNotice}
             </p>
           ) : null}
@@ -8290,6 +8391,9 @@ function getAudioDeviceDisplayName(deviceId: string, devices: AudioDeviceOption[
   return device?.label || fallback
 }
 
+const microphonePreviewPermissionTimeoutMs = 10_000
+const microphonePreviewTimeoutCode = "microphone_preview_timeout"
+
 function StartRecordingDialog({
   accounts,
   accountResearchById,
@@ -8690,8 +8794,10 @@ function StartRecordingDialog({
     }
 
     let cancelled = false
+    let permissionRequestTimedOut = false
     let previewStream: MediaStream | null = null
     let previewAudioTrack: MediaStreamTrack | null = null
+    let permissionTimeoutId: number | null = null
 
     const handlePreviewTrackEnded = () => {
       if (cancelled || microphonePreviewStreamRef.current !== previewStream) return
@@ -8713,13 +8819,28 @@ function StartRecordingDialog({
       setMicrophonePreviewError("")
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const permissionRequest = navigator.mediaDevices.getUserMedia({
           audio: getMicrophoneAudioConstraints({
             deviceId: selectedAudioInputDeviceId,
             hasMeetingAudio: selectedAudioSourceChoice === "two_channels",
             mode: audioCaptureMode,
           }),
         })
+        void permissionRequest
+          .then((lateStream) => {
+            if (cancelled || permissionRequestTimedOut) stopMediaStream(lateStream)
+          })
+          .catch(() => undefined)
+
+        const stream = await Promise.race([
+          permissionRequest,
+          new Promise<never>((_, reject) => {
+            permissionTimeoutId = window.setTimeout(() => {
+              permissionRequestTimedOut = true
+              reject(new Error(microphonePreviewTimeoutCode))
+            }, microphonePreviewPermissionTimeoutMs)
+          }),
+        ])
 
         if (cancelled) {
           stopMediaStream(stream)
@@ -8737,12 +8858,15 @@ function StartRecordingDialog({
         if (cancelled) return
 
         setMicrophonePreviewError(
-          getUserFacingErrorMessage(error, "SalesFrame cannot access that microphone. Choose another input or check browser permissions.")
+          error instanceof Error && error.message === microphonePreviewTimeoutCode
+            ? "Microphone access is still waiting. Allow access in the browser, then choose the microphone again."
+            : getUserFacingErrorMessage(error, "SalesFrame cannot access that microphone. Choose another input or check browser permissions.")
         )
         stopMediaStream(microphonePreviewStreamRef.current)
         microphonePreviewStreamRef.current = null
         setMicrophonePreviewStream(null)
       } finally {
+        if (permissionTimeoutId !== null) window.clearTimeout(permissionTimeoutId)
         if (!cancelled) setMicrophonePreviewChecking(false)
       }
     }
@@ -12459,6 +12583,7 @@ function AccountView({
   accountEnrichmentSaveMessage,
   accountEnrichmentSaveStatus,
   accountResearchById,
+  calls,
   opportunityDrafts,
   opportunities,
   playbookFields,
@@ -12490,6 +12615,7 @@ function AccountView({
   accountEnrichmentSaveMessage: string
   accountEnrichmentSaveStatus: RecordSaveStatus
   accountResearchById: Record<string, CustomerResearchConfig>
+  calls: CallSummary[]
   opportunityDrafts: Record<string, OpportunityDraft>
   opportunities: Opportunity[]
   playbookFields: PlaybookFieldRow[]
@@ -12515,6 +12641,7 @@ function AccountView({
 }) {
   const {
     accountTab,
+    callContacts,
     clearFocusedContact,
     contacts,
     focusedContactId,
@@ -12567,7 +12694,7 @@ function AccountView({
               size="md"
             />
             <div className="min-w-0">
-              <CardTitle className="truncate text-2xl">{accountDraft.accountName}</CardTitle>
+              <h1 className="truncate font-heading text-2xl leading-snug font-medium">{accountDraft.accountName}</h1>
               <div className="mt-3 flex flex-wrap gap-2">
                 <CoverageBadge value={averageCoverage} />
               </div>
@@ -12702,6 +12829,8 @@ function AccountView({
         <TabsContent value="contacts" className="m-0 w-full min-w-0">
           <ContactsPanel
             accountWebsite={accountDraft.website || account.website}
+            callContacts={callContacts.filter((relationship) => relationship.accountId === account.id)}
+            calls={calls}
             contacts={contacts.filter((contact) => contact.accountId === account.id)}
             focusedContactId={focusedContactId}
             externalStatusMessage={contactStatusMessage}
@@ -13381,6 +13510,7 @@ function WorkspaceView({
   opportunity,
   opportunityDraft,
   opportunityDrafts,
+  opportunities,
   playbookFields,
   playbookRows,
   postCallFocusCallId,
@@ -13400,6 +13530,7 @@ function WorkspaceView({
   onNavigate,
   onOpenSettings,
   onOpportunityDraftChange,
+  onOpportunitySelect,
   onArchiveOpportunity,
   onDeleteOpportunity,
   onSaveOpportunityDraft,
@@ -13435,6 +13566,7 @@ function WorkspaceView({
   opportunity: Opportunity
   opportunityDraft: OpportunityDraft
   opportunityDrafts: Record<string, OpportunityDraft>
+  opportunities: Opportunity[]
   playbookFields: PlaybookFieldRow[]
   playbookRows: PlaybookRow[]
   postCallFocusCallId: string
@@ -13454,6 +13586,7 @@ function WorkspaceView({
   onNavigate: (view: string) => void
   onOpenSettings: () => void
   onOpportunityDraftChange: (field: keyof OpportunityDraft, value: string) => void
+  onOpportunitySelect: (id: string) => void
   onArchiveOpportunity: (id: string) => void
   onDeleteOpportunity: (id: string) => void
   onSaveOpportunityDraft: () => void
@@ -13475,6 +13608,7 @@ function WorkspaceView({
   const [coachPopoutMessage, setCoachPopoutMessage] = React.useState("")
   const liveCoachQuestionRequestRef = React.useRef(0)
   const liveCoachStateRequestRef = React.useRef(0)
+  const liveCoachStateAbortControllerRef = React.useRef<AbortController | null>(null)
   const liveCoachSignatureRef = React.useRef("")
   const liveCoachLatestInputSignatureRef = React.useRef("")
   const liveCoachFeedbackCountRef = React.useRef(0)
@@ -13754,6 +13888,8 @@ function WorkspaceView({
     liveCoachPendingRefreshRef.current = false
     liveCoachQuestionRequestRef.current = 0
     liveCoachStateRequestRef.current = 0
+    liveCoachStateAbortControllerRef.current?.abort()
+    liveCoachStateAbortControllerRef.current = null
     liveCoachLastDecisionAtRef.current = initialLiveGuidance ? Date.now() : 0
     setLiveCoachHeartbeatTick(0)
     setLiveCoachRefreshTick(0)
@@ -13776,6 +13912,7 @@ function WorkspaceView({
   }, [activeCallId, captureStatus, isRecording])
 
   React.useEffect(() => {
+    let stateAbortController: AbortController | null = null
     const aiTranscript = buildTranscriptForAi(transcript)
     const feedbackCountChanged = manualCoach.feedbackSignals.length !== liveCoachFeedbackCountRef.current
     const heartbeatTickChanged =
@@ -14055,6 +14192,9 @@ function WorkspaceView({
 
       const stateRequestId = liveCoachStateRequestRef.current + 1
       liveCoachStateRequestRef.current = stateRequestId
+      liveCoachStateAbortControllerRef.current?.abort()
+      stateAbortController = new AbortController()
+      liveCoachStateAbortControllerRef.current = stateAbortController
 
       void requestLiveState({
         accountId: account.id,
@@ -14065,7 +14205,7 @@ function WorkspaceView({
         refreshContext: guidancePayload.refreshContext,
         sellerFeedback: manualCoach.feedbackSignals,
         transcript: aiTranscript,
-      })
+      }, { signal: stateAbortController.signal })
         .then((response) => {
           if (stateRequestId !== liveCoachStateRequestRef.current) return
 
@@ -14095,17 +14235,26 @@ function WorkspaceView({
           }
         })
         .catch(() => {
+          if (stateAbortController?.signal.aborted) return
           if (!fullGuidanceRequested && turnsSinceLastFullGuidance >= LIVE_COACH_FORCE_REFRESH_TURNS) {
             requestLiveQuestionRefresh()
             return
           }
           if (!fullGuidanceRequested) setLiveCoachStatus("ready")
         })
+        .finally(() => {
+          if (liveCoachStateAbortControllerRef.current === stateAbortController) {
+            liveCoachStateAbortControllerRef.current = null
+          }
+        })
 
       if (forceFullGuidanceRefresh) requestLiveQuestionRefresh()
     }, delay)
 
-    return () => window.clearTimeout(timeoutId)
+    return () => {
+      window.clearTimeout(timeoutId)
+      stateAbortController?.abort()
+    }
   }, [
     account,
     accountDraft,
@@ -14182,6 +14331,7 @@ function WorkspaceView({
             coachError={liveCoachError}
             coachStatus={liveCoachStatus}
             guidance={liveGuidance}
+            isCallLive={isRecording}
             manualCoach={manualCoach}
             onCoachFeedback={onCoachFeedback}
             onMarkQuestionAsked={onMarkQuestionAsked}
@@ -14239,6 +14389,7 @@ function WorkspaceView({
           opportunity={opportunity}
           opportunityDraft={opportunityDraft}
           opportunityDrafts={opportunityDrafts}
+          opportunities={opportunities}
           playbookFields={playbookFields}
           playbookRows={playbookRows}
           savedOpenAiKeyState={savedOpenAiKeyState}
@@ -14251,6 +14402,7 @@ function WorkspaceView({
           onNavigate={onNavigate}
           onOpenSettings={onOpenSettings}
           onOpportunityDraftChange={onOpportunityDraftChange}
+          onOpportunitySelect={onOpportunitySelect}
           onSaveOpportunityDraft={onSaveOpportunityDraft}
           onScrollToTop={onScrollToTop}
           onStartRecording={onStartRecording}
@@ -14286,6 +14438,7 @@ function OpportunityWorkspace({
   opportunity,
   opportunityDraft,
   opportunityDrafts,
+  opportunities,
   playbookFields,
   playbookRows,
   savedOpenAiKeyState,
@@ -14298,6 +14451,7 @@ function OpportunityWorkspace({
   onNavigate,
   onOpenSettings,
   onOpportunityDraftChange,
+  onOpportunitySelect,
   onSaveOpportunityDraft,
   onScrollToTop,
   onStartRecording,
@@ -14313,6 +14467,7 @@ function OpportunityWorkspace({
   opportunity: Opportunity
   opportunityDraft: OpportunityDraft
   opportunityDrafts: Record<string, OpportunityDraft>
+  opportunities: Opportunity[]
   playbookFields: PlaybookFieldRow[]
   playbookRows: PlaybookRow[]
   savedOpenAiKeyState: SavedOpenAiKeyState | null
@@ -14325,6 +14480,7 @@ function OpportunityWorkspace({
   onNavigate: (view: string) => void
   onOpenSettings: () => void
   onOpportunityDraftChange: (field: keyof OpportunityDraft, value: string) => void
+  onOpportunitySelect: (id: string) => void
   onSaveOpportunityDraft: () => void
   onScrollToTop: () => void
   onStartRecording: StartRecordingHandler
@@ -14332,11 +14488,20 @@ function OpportunityWorkspace({
   opportunitySaveStatus: RecordSaveStatus
 }) {
   const {
+    archiveContact,
+    callContacts,
+    contactStatusMessage,
+    contactStatusTone,
     contacts,
+    enrichContact,
     opportunityContacts,
     replaceOpportunityContactSelection,
+    restoreContact,
+    saveContact,
     updateOpportunityContactRelationship,
   } = React.useContext(ContactWorkspaceContext)
+  const [focusedOpportunityContactId, setFocusedOpportunityContactId] = React.useState("")
+  React.useEffect(() => setFocusedOpportunityContactId(""), [opportunity.id])
   const defaultTab =
     activeView === "methodology" ? "methodology" : activeView === "opportunity-intelligence" ? "intelligence" : "record"
 
@@ -14362,11 +14527,12 @@ function OpportunityWorkspace({
           ) : null
         }
       />
-      <TabsList className="grid w-full grid-cols-4 md:w-fit">
-        <TabsTrigger value="record">Record</TabsTrigger>
-        <TabsTrigger value="intelligence">Intel</TabsTrigger>
-        <TabsTrigger value="methodology">Methodology</TabsTrigger>
-        <TabsTrigger value="history">History</TabsTrigger>
+      <TabsList className="w-full md:w-fit">
+        <TabsTrigger className="min-w-24" value="record">Record</TabsTrigger>
+        <TabsTrigger className="min-w-24" value="contacts">Contacts</TabsTrigger>
+        <TabsTrigger className="min-w-24" value="intelligence">Intel</TabsTrigger>
+        <TabsTrigger className="min-w-24" value="methodology">Methodology</TabsTrigger>
+        <TabsTrigger className="min-w-24" value="history">History</TabsTrigger>
       </TabsList>
       <TabsContent value="record" className="m-0 grid w-full min-w-0 gap-4" data-testid="opportunity-record-stack">
         <OpportunityProfile
@@ -14379,17 +14545,39 @@ function OpportunityWorkspace({
           saveMessage={opportunitySaveMessage}
           saveStatus={opportunitySaveStatus}
         />
+        <AccountRecordPanel account={account} accountDraft={accountDraft} onNavigate={onNavigate} />
+      </TabsContent>
+      <TabsContent value="contacts" className="m-0 grid w-full min-w-0 gap-4">
         <OpportunityContactsCard
           contacts={contacts.filter((contact) => contact.accountId === account.id)}
           opportunityContacts={opportunityContacts.filter(
             (relationship) => relationship.opportunityId === opportunity.id
           )}
+          onOpenContact={setFocusedOpportunityContactId}
           onSelectionChange={(contactIds) => replaceOpportunityContactSelection(opportunity.id, contactIds)}
           onRelationshipChange={(contactId, patch) =>
             updateOpportunityContactRelationship(opportunity.id, contactId, patch)
           }
         />
-        <AccountRecordPanel account={account} accountDraft={accountDraft} onNavigate={onNavigate} />
+        <ContactsPanel
+          accountWebsite={accountDraft.website || account.website}
+          callContacts={callContacts.filter((relationship) => relationship.accountId === account.id)}
+          calls={calls}
+          contacts={contacts.filter((contact) => contact.accountId === account.id)}
+          description="View and maintain every contact on the parent account without leaving this opportunity."
+          externalStatusMessage={contactStatusMessage}
+          externalStatusTone={contactStatusTone}
+          focusedContactId={focusedOpportunityContactId}
+          opportunities={opportunities}
+          opportunityContacts={opportunityContacts.filter((relationship) => relationship.accountId === account.id)}
+          title="Account contact directory"
+          onArchive={archiveContact}
+          onEnrich={enrichContact}
+          onFocusedContactHandled={() => setFocusedOpportunityContactId("")}
+          onOpenOpportunity={onOpportunitySelect}
+          onRestore={restoreContact}
+          onSave={saveContact}
+        />
       </TabsContent>
       <TabsContent value="intelligence" className="m-0 w-full min-w-0">
         <OpportunityIntelligence
@@ -14472,6 +14660,7 @@ function NextQuestionCard({
   coachError,
   coachStatus,
   guidance,
+  isCallLive,
   manualCoach,
   onCoachFeedback,
   onMarkQuestionAsked,
@@ -14482,6 +14671,7 @@ function NextQuestionCard({
   coachError: string
   coachStatus: LiveCoachStatus
   guidance: LiveGuidance | null
+  isCallLive: boolean
   manualCoach: ManualCoachState
   onCoachFeedback: (action: LiveSellerFeedbackAction, question: ManualQuestion) => void
   onMarkQuestionAsked: (question: ManualQuestion) => void
@@ -14519,6 +14709,8 @@ function NextQuestionCard({
           ? `Best move right now: ${guidance.conversationState.naturalnessGuidance}`
           : ""
   const hasRecentManualAction = manualCoach.lastAction !== "No manual coaching actions yet."
+  const isLiveWithoutQuestion = isCallLive && !displayedQuestion
+  const isLiveGuidanceRecovery = isLiveWithoutQuestion && coachStatus === "error"
   const cardTitle = displayedQuestion
     ? guidance?.uiMode === "listen"
       ? "Listen for the answer"
@@ -14533,17 +14725,29 @@ function NextQuestionCard({
               : "Ask this next"
     : hasRecentManualAction
       ? "Getting the next recommendation"
-      : coachStatus === "thinking"
-        ? "Reading the conversation"
-        : coachStatus === "checking"
-          ? "Checking if this still fits"
-          : "Ready for your next call"
+      : isLiveGuidanceRecovery
+        ? "Stay with the buyer"
+        : coachStatus === "thinking"
+          ? "Reading the conversation"
+          : coachStatus === "checking"
+            ? "Checking if this still fits"
+            : isLiveWithoutQuestion
+              ? "Listening to the conversation"
+              : "Ready for your next call"
   const emptyGuidanceTitle = hasRecentManualAction
     ? "Finding the next move"
-    : "Start a call when you are ready"
+    : isLiveGuidanceRecovery
+      ? "Live guidance needs another moment"
+      : isLiveWithoutQuestion
+        ? "Listening for the next useful question"
+        : "Start a call when you are ready"
   const emptyGuidanceDescription = hasRecentManualAction
     ? "SalesFrame heard that signal and is checking the flow before it shows the next question."
-    : "SalesFrame will check audio, use the account context, opportunity history, call type, and selected playbooks, then bring back the first natural seller move before recording begins."
+    : isLiveGuidanceRecovery
+      ? "Keep listening and use your judgement. SalesFrame will keep checking the conversation for the next useful question."
+      : isLiveWithoutQuestion
+        ? "SalesFrame is following the conversation and will show a question when the timing is right."
+        : "SalesFrame will check audio, use the account context, opportunity history, call type, and selected playbooks, then bring back the first natural seller move before recording begins."
   return (
     <Card>
       <CardHeader>
@@ -16743,7 +16947,7 @@ function PostCallPanel({
           </CardHeader>
           <CardContent>
             <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-              SalesFrame is still preparing the notes and next-call brief. You can keep using the recording and transcript while it catches up.
+              SalesFrame did not finish the notes and next-call brief in this attempt. Your recording and transcript are safe. Reopen this call later; if it still fails, contact support.
             </div>
           </CardContent>
         </Card>
@@ -20023,6 +20227,10 @@ function SettingsView({
 
   return (
     <div className="grid gap-4">
+      <div>
+        <h1 className="font-heading text-2xl leading-tight font-semibold">Settings</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Manage AI, session, and call capture preferences for this workspace.</p>
+      </div>
       <div className="grid gap-4">
         <Card>
           <CardHeader>

@@ -3,6 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/client"
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types"
 import { buildAccountLogoMetadata } from "@/lib/account-logo"
+import {
+  getRecordingUploadRecoveryAction,
+  type RecordingPointerSnapshot,
+} from "@/lib/supabase/recording-upload-integrity"
 
 export type SalesFrameClient = SupabaseClient<Database>
 
@@ -1508,7 +1512,13 @@ export function createCallStoragePath({
     .replace(/[^a-z0-9.]+/g, "-")
     .replace(/(^-|-$)/g, "")
 
-  return `${workspaceId}/${callId}/${sanitizedFileName || "recording.webm"}`
+  if (typeof crypto === "undefined" || typeof crypto.randomUUID !== "function") {
+    throw new Error("Secure recording storage is unavailable in this browser.")
+  }
+
+  const objectId = crypto.randomUUID()
+
+  return `${workspaceId}/${callId}/${objectId}-${sanitizedFileName || "recording.webm"}`
 }
 
 function getRecordingContentType(file: File | Blob) {
@@ -1551,6 +1561,20 @@ export async function uploadCallRecording({
   const path = createCallStoragePath({ callId, fileName, workspaceId })
   const sizeBytes = file.size
 
+  const existingPointerResponse = await supabase
+    .from("calls")
+    .select("recording_storage_path")
+    .eq("id", callId)
+    .maybeSingle()
+
+  if (existingPointerResponse.error) throw new Error(existingPointerResponse.error.message)
+  if (!existingPointerResponse.data) throw new Error("The call is no longer available for this recording.")
+
+  const existingRecordingPath = existingPointerResponse.data.recording_storage_path
+  if (existingRecordingPath) {
+    throw new Error("This call already has a recording attached.")
+  }
+
   if (sizeBytes <= 0) {
     await updateCall(callId, {
       recording_error: "Recording was empty.",
@@ -1561,23 +1585,97 @@ export async function uploadCallRecording({
     throw new Error("Recording was empty.")
   }
 
+  const registrationResponse = await supabase.rpc("register_call_recording_upload", {
+    target_call_id: callId,
+    target_storage_path: path,
+    target_workspace_id: workspaceId,
+  })
+
+  if (registrationResponse.error || registrationResponse.data !== true) {
+    throw new Error("SalesFrame could not secure this recording upload. Try again.")
+  }
+
   const uploadResponse = await supabase.storage
     .from("call-recordings")
     .upload(path, file, {
       cacheControl: "3600",
       contentType,
-      upsert: true,
+      upsert: false,
     })
 
   if (uploadResponse.error) throw new Error(uploadResponse.error.message)
 
-  await updateCall(callId, {
-    recording_error: null,
-    recording_mime_type: contentType,
-    recording_size_bytes: sizeBytes,
-    recording_status: "processing",
-    recording_storage_path: path,
-  }, supabase)
+  let pointerUpdateFailure = new Error("The recording upload could not be linked to its call.")
+  let pointerUpdateLinked = false
+
+  try {
+    const pointerUpdateResponse = await supabase
+      .from("calls")
+      .update({
+        recording_error: null,
+        recording_mime_type: contentType,
+        recording_size_bytes: sizeBytes,
+        recording_status: "processing",
+        recording_storage_path: path,
+      })
+      .eq("id", callId)
+      .is("recording_storage_path", null)
+      .select("recording_storage_path")
+      .maybeSingle()
+
+    if (pointerUpdateResponse.error) {
+      pointerUpdateFailure = new Error(pointerUpdateResponse.error.message)
+    } else {
+      pointerUpdateLinked = pointerUpdateResponse.data?.recording_storage_path === path
+    }
+  } catch (error) {
+    pointerUpdateFailure = error instanceof Error ? error : pointerUpdateFailure
+  }
+
+  if (!pointerUpdateLinked) {
+    let pointerSnapshot: RecordingPointerSnapshot = { status: "read-failed" }
+
+    try {
+      const currentPointerResponse = await supabase
+        .from("calls")
+        .select("recording_storage_path")
+        .eq("id", callId)
+        .maybeSingle()
+
+      if (!currentPointerResponse.error) {
+        pointerSnapshot = currentPointerResponse.data
+          ? { status: "found", path: currentPointerResponse.data.recording_storage_path }
+          : { status: "call-missing" }
+      }
+    } catch {
+      // Preserve the immutable upload when the pointer cannot be read safely.
+    }
+
+    const recoveryAction = getRecordingUploadRecoveryAction({
+      pointer: pointerSnapshot,
+      uploadedPath: path,
+    })
+
+    if (recoveryAction === "linked") {
+      pointerUpdateLinked = true
+    } else if (recoveryAction === "remove-upload") {
+      const cleanupResponse = await supabase.storage
+        .from("call-recordings")
+        .remove([path])
+
+      if (cleanupResponse.error) {
+        throw new Error("The recording upload could not be linked to its call, and secure cleanup needs another attempt.")
+      }
+
+      throw pointerUpdateFailure
+    }
+
+    if (!pointerUpdateLinked) {
+      throw new Error(
+        "SalesFrame could not confirm the recording link. The uploaded audio was preserved to avoid data loss."
+      )
+    }
+  }
 
   return {
     ...uploadResponse.data,

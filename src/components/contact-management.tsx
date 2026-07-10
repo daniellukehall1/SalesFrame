@@ -11,6 +11,7 @@ import {
   PlusIcon,
   SearchIcon,
   SparklesIcon,
+  Undo2Icon,
   UserRoundIcon,
   UsersRoundIcon,
   XIcon,
@@ -23,6 +24,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -31,6 +33,7 @@ import {
   Drawer,
   DrawerContent,
   DrawerDescription,
+  DrawerFooter,
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer"
@@ -57,6 +60,8 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
+  type CallContact,
+  type CallSummary,
   contactBuyingRoles,
   type Contact,
   type ContactBuyingRole,
@@ -441,6 +446,7 @@ function ContactEditor({
   const [status, setStatus] = React.useState<"idle" | "saving" | "error">("idle")
   const [message, setMessage] = React.useState("")
   const [confirmDiscard, setConfirmDiscard] = React.useState(false)
+  const discardHeadingRef = React.useRef<HTMLHeadingElement | null>(null)
 
   React.useEffect(() => {
     if (!open) return
@@ -453,6 +459,13 @@ function ContactEditor({
     setMessage("")
     setConfirmDiscard(false)
   }, [contact, open])
+
+  React.useEffect(() => {
+    if (!confirmDiscard) return
+
+    const focusFrame = window.requestAnimationFrame(() => discardHeadingRef.current?.focus())
+    return () => window.cancelAnimationFrame(focusFrame)
+  }, [confirmDiscard])
 
   const isDirty = JSON.stringify(draft) !== JSON.stringify(savedDraft) || enrichAfterSave
   const canEnrich = Boolean(draft.fullName.trim() && (accountWebsite.trim() || draft.linkedinUrl.trim()))
@@ -515,7 +528,7 @@ function ContactEditor({
           <PencilIcon className="size-5" />
         </span>
         <div>
-          <p className="font-medium">Discard unsaved contact changes?</p>
+          <h3 ref={discardHeadingRef} tabIndex={-1} className="font-medium outline-none">Discard unsaved contact changes?</h3>
           <p className="mt-1 text-sm text-muted-foreground">Your edits have not been saved to this account.</p>
         </div>
         <div className="grid w-full gap-2 sm:grid-cols-2">
@@ -605,12 +618,16 @@ function ContactEditor({
               id="contact-email"
               type="email"
               value={draft.workEmail}
-              aria-invalid={invalidEmail}
+              aria-describedby={[
+                invalidEmail ? "contact-email-error" : "",
+                duplicateEmail ? "contact-duplicate-error" : "",
+              ].filter(Boolean).join(" ") || undefined}
+              aria-invalid={invalidEmail || Boolean(duplicateEmail)}
               autoComplete="email"
               onChange={(event) => updateDraft("workEmail", event.currentTarget.value)}
             />
             {invalidEmail ? (
-              <p className="text-sm text-destructive" role="alert">Enter a valid work email address.</p>
+              <p id="contact-email-error" className="text-sm text-destructive" role="alert">Enter a valid work email address.</p>
             ) : null}
           </div>
           <div className="grid gap-2">
@@ -629,11 +646,16 @@ function ContactEditor({
               id="contact-linkedin"
               type="url"
               value={draft.linkedinUrl}
+              aria-describedby={[
+                invalidLinkedInUrl ? "contact-linkedin-error" : "",
+                duplicateLinkedIn ? "contact-duplicate-error" : "",
+              ].filter(Boolean).join(" ") || undefined}
+              aria-invalid={invalidLinkedInUrl || Boolean(duplicateLinkedIn)}
               placeholder="https://www.linkedin.com/in/..."
               onChange={(event) => updateDraft("linkedinUrl", event.currentTarget.value)}
             />
             {invalidLinkedInUrl ? (
-              <p className="text-sm text-destructive" role="alert">Use a full http:// or https:// professional profile URL.</p>
+              <p id="contact-linkedin-error" className="text-sm text-destructive" role="alert">Use a full http:// or https:// professional profile URL.</p>
             ) : null}
           </div>
           <div className="grid gap-2">
@@ -674,7 +696,7 @@ function ContactEditor({
       </section>
 
       {blockingDuplicate ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+        <div id="contact-duplicate-error" className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
           A contact with this {duplicateEmail ? "work email" : "profile URL"} already exists: {blockingDuplicate.fullName}.
         </div>
       ) : possibleNameMatch ? (
@@ -707,65 +729,7 @@ function ContactEditor({
             Add a full name plus either the account domain or a professional profile URL to enrich this contact.
           </p>
         ) : null}
-        {contact?.enrichment?.status === "failed" || contact?.enrichment?.status === "ambiguous" ? (
-          <p className="rounded-md bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300" role="alert">
-            {contact.enrichment.statusMessage || (contact.enrichment.status === "ambiguous"
-              ? "SalesFrame needs more identifying detail before enrichment can finish."
-              : "Enrichment needs another attempt. Use Retry from the contact actions.")}
-          </p>
-        ) : null}
-        {contact?.enrichment?.professionalSummary ? (
-          <div className="grid gap-3 rounded-lg bg-muted/30 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">Professional summary</p>
-              <Badge variant="outline">{Math.round((contact.enrichment.confidence ?? 0) * 100)}% confidence</Badge>
-            </div>
-            <p className="text-sm leading-relaxed text-muted-foreground">{contact.enrichment.professionalSummary}</p>
-            {contact.enrichment.roleScope ? (
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Role scope</p>
-                <p className="mt-1 text-sm leading-relaxed">{contact.enrichment.roleScope}</p>
-              </div>
-            ) : null}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <ContactInsightList title="Likely priorities" items={contact.enrichment.priorities} />
-              <ContactInsightList title="Likely KPIs" items={contact.enrichment.kpis} />
-              <ContactInsightList title="Relevant experience" items={contact.enrichment.relevantExperience} />
-              <ContactInsightList title="Recent professional signals" items={contact.enrichment.recentSignals} />
-              <ContactInsightList title="Discovery angles" items={contact.enrichment.discoveryAngles} />
-              <ContactInsightList title="Caveats" items={contact.enrichment.caveats} tone="caution" />
-            </div>
-            {contact.enrichment.sources.some((source) => getSafeProfessionalProfileUrl(source.url)) ? (
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Public sources</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {contact.enrichment.sources.map((source) => {
-                    const safeUrl = getSafeProfessionalProfileUrl(source.url)
-                    return safeUrl ? (
-                      <a
-                        key={`${source.title}-${safeUrl}`}
-                        className="inline-flex min-h-11 items-center gap-1.5 rounded-md border bg-background px-3 text-sm text-primary underline-offset-4 hover:underline md:min-h-8"
-                        href={safeUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <ExternalLinkIcon className="size-3.5" />
-                        {source.title}
-                      </a>
-                    ) : null
-                  })}
-                </div>
-              </div>
-            ) : null}
-            {contact.enrichment.lastEnrichedAt ? (
-              <p className="text-xs text-muted-foreground">Last enriched {contact.enrichment.lastEnrichedAt}</p>
-            ) : null}
-          </div>
-        ) : (
-          <div className="rounded-lg bg-muted/20 p-3 text-sm text-muted-foreground">
-            No AI insights yet. Enrichment is always optional and never overwrites seller-entered contact data.
-          </div>
-        )}
+        <ContactEnrichmentDetails contact={contact} />
       </section>
       {message ? (
         <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive" role="alert">{message}</p>
@@ -837,20 +801,24 @@ function ContactEditor({
 
 function ContactInsightList({
   items,
+  maxItems = 5,
   title,
   tone = "default",
 }: {
   items: string[]
+  maxItems?: number | null
   title: string
   tone?: "default" | "caution"
 }) {
   if (!items.length) return null
 
+  const visibleItems = maxItems === null ? items : items.slice(0, maxItems)
+
   return (
     <div className={cn("rounded-md bg-background/70 p-3", tone === "caution" && "bg-amber-500/10")}>
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
       <ul className="mt-2 grid gap-1.5 text-sm">
-        {items.slice(0, 5).map((item) => (
+        {visibleItems.map((item) => (
           <li key={item} className="flex gap-2">
             <span className={cn("mt-2 size-1.5 shrink-0 rounded-full bg-primary", tone === "caution" && "bg-amber-600")} />
             <span>{item}</span>
@@ -858,6 +826,103 @@ function ContactInsightList({
         ))}
       </ul>
     </div>
+  )
+}
+
+function ContactEnrichmentDetails({
+  contact,
+  showAll = false,
+}: {
+  contact: Contact | null
+  showAll?: boolean
+}) {
+  const enrichment = contact?.enrichment
+  const maxItems = showAll ? null : 5
+  const hasInsights = Boolean(
+    enrichment && (
+      enrichment.professionalSummary ||
+      enrichment.roleScope ||
+      enrichment.priorities.length ||
+      enrichment.kpis.length ||
+      enrichment.relevantExperience.length ||
+      enrichment.recentSignals.length ||
+      enrichment.discoveryAngles.length ||
+      enrichment.caveats.length ||
+      enrichment.sources.some((source) => getSafeProfessionalProfileUrl(source.url))
+    )
+  )
+
+  return (
+    <>
+      {enrichment?.status === "failed" || enrichment?.status === "ambiguous" ? (
+        <p className="rounded-md bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300" role="alert">
+          {enrichment.statusMessage || (enrichment.status === "ambiguous"
+            ? "SalesFrame needs more identifying detail before enrichment can finish."
+            : "Enrichment needs another attempt. Use Retry from the contact actions.")}
+        </p>
+      ) : null}
+      {enrichment && hasInsights ? (
+        <div className="grid gap-3 rounded-lg bg-muted/30 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">Professional insights</p>
+            <Badge variant="outline">
+              {enrichment.confidence === null
+                ? "Confidence not scored"
+                : `${Math.round(enrichment.confidence * 100)}% confidence`}
+            </Badge>
+          </div>
+          {enrichment.professionalSummary ? (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Professional summary</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{enrichment.professionalSummary}</p>
+            </div>
+          ) : null}
+          {enrichment.roleScope ? (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Role scope</p>
+              <p className="mt-1 text-sm leading-relaxed">{enrichment.roleScope}</p>
+            </div>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ContactInsightList title="Likely priorities" items={enrichment.priorities} maxItems={maxItems} />
+            <ContactInsightList title="Likely KPIs" items={enrichment.kpis} maxItems={maxItems} />
+            <ContactInsightList title="Relevant experience" items={enrichment.relevantExperience} maxItems={maxItems} />
+            <ContactInsightList title="Recent professional signals" items={enrichment.recentSignals} maxItems={maxItems} />
+            <ContactInsightList title="Discovery angles" items={enrichment.discoveryAngles} maxItems={maxItems} />
+            <ContactInsightList title="Caveats" items={enrichment.caveats} maxItems={maxItems} tone="caution" />
+          </div>
+          {enrichment.sources.some((source) => getSafeProfessionalProfileUrl(source.url)) ? (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Public sources</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {enrichment.sources.map((source) => {
+                  const safeUrl = getSafeProfessionalProfileUrl(source.url)
+                  return safeUrl ? (
+                    <a
+                      key={`${source.title}-${safeUrl}`}
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-md border bg-background px-3 text-sm text-primary underline-offset-4 hover:underline md:min-h-8"
+                      href={safeUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLinkIcon className="size-3.5" />
+                      {source.title}
+                    </a>
+                  ) : null
+                })}
+              </div>
+            </div>
+          ) : null}
+          {enrichment.lastEnrichedAt ? (
+            <p className="text-xs text-muted-foreground">Last enriched {enrichment.lastEnrichedAt}</p>
+          ) : null}
+        </div>
+      ) : (
+        <div className="rounded-lg bg-muted/20 p-3 text-sm text-muted-foreground">
+          No AI insights yet. Enrichment is always optional and never overwrites seller-entered contact data.
+        </div>
+      )}
+    </>
   )
 }
 
@@ -871,12 +936,358 @@ function EnrichmentBadge({ status }: { status: ContactEnrichmentStatus }) {
           ? "border-primary/30 bg-primary/10 text-primary"
           : "text-muted-foreground"
 
-  return <Badge variant="outline" className={className} role="status" aria-live="polite">{formatStatusLabel(status)}</Badge>
+  return <Badge variant="outline" className={className}>{formatStatusLabel(status)}</Badge>
+}
+
+type ContactAction = "archive" | "enrich" | "restore"
+
+type LinkedOpportunityDetail = {
+  opportunity: Opportunity | null
+  relationship: OpportunityContact
+}
+
+type LinkedCallDetail = {
+  call: CallSummary | null
+  opportunity: Opportunity | null
+  relationship: CallContact
+}
+
+function formatContactTimestamp(value: string | null, fallback = "Not recorded") {
+  if (!value) return fallback
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return fallback
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date)
+}
+
+function ContactDetailField({
+  label,
+  value,
+}: {
+  label: string
+  value: React.ReactNode
+}) {
+  return (
+    <div className="grid min-w-0 gap-1 rounded-lg bg-muted/20 p-3">
+      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words text-sm">{value || "Not captured"}</dd>
+    </div>
+  )
+}
+
+function ContactDetailsOverlay({
+  accountWebsite,
+  actionMessage,
+  actionTone,
+  contact,
+  linkedCalls,
+  linkedOpportunities,
+  onAction,
+  onEdit,
+  onOpenChange,
+  onOpenOpportunity,
+  open,
+  pending,
+}: {
+  accountWebsite: string
+  actionMessage: string
+  actionTone: "status" | "error"
+  contact: Contact | null
+  linkedCalls: LinkedCallDetail[]
+  linkedOpportunities: LinkedOpportunityDetail[]
+  onAction: (contact: Contact, action: ContactAction) => Promise<void>
+  onEdit: (contact: Contact) => void
+  onOpenChange: (open: boolean) => void
+  onOpenOpportunity: (opportunityId: string) => void
+  open: boolean
+  pending: boolean
+}) {
+  const isMobile = useIsMobile()
+  const contactDetailsHeadingId = React.useId()
+  const opportunityHeadingId = React.useId()
+  const callHeadingId = React.useId()
+  const insightHeadingId = React.useId()
+
+  if (!contact) return null
+
+  const professionalProfileUrl = getSafeProfessionalProfileUrl(contact.linkedinUrl)
+  const enrichmentStatus = getEnrichmentStatus(contact)
+  const enrichmentInProgress = enrichmentStatus === "queued" || enrichmentStatus === "running"
+  const canEnrich = Boolean(contact.fullName.trim() && (accountWebsite.trim() || professionalProfileUrl))
+  const createdAt = formatContactTimestamp(contact.createdAtIso, contact.createdAt || "Not recorded")
+  const updatedAt = formatContactTimestamp(contact.updatedAtIso)
+  const archivedAt = formatContactTimestamp(contact.archivedAtIso)
+
+  const body = (
+    <div className="grid min-h-0 gap-5 overflow-y-auto overscroll-contain pr-1">
+      <div className="flex min-w-0 flex-col gap-3 rounded-lg border bg-background p-3 sm:flex-row sm:items-start sm:justify-between">
+        <ContactIdentity contact={contact} />
+        <div className="flex flex-wrap gap-2">
+          <EnrichmentBadge status={enrichmentStatus} />
+          <Badge variant="outline">{formatStatusLabel(contact.employmentStatus)}</Badge>
+          {contact.archivedAtIso ? <Badge variant="outline">Archived</Badge> : null}
+        </div>
+      </div>
+
+      <section className="grid gap-3" aria-labelledby={contactDetailsHeadingId}>
+        <div>
+          <h3 id={contactDetailsHeadingId} className="text-sm font-medium">Contact details</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Reusable professional context stored on the account.</p>
+        </div>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <ContactDetailField label="Full name" value={contact.fullName} />
+          <ContactDetailField label="Preferred name" value={contact.preferredName} />
+          <ContactDetailField label="Job title" value={contact.jobTitle} />
+          <ContactDetailField label="Department / function" value={contact.department} />
+          <ContactDetailField label="Seniority" value={contact.seniority} />
+          <ContactDetailField label="Employment status" value={formatStatusLabel(contact.employmentStatus)} />
+          <ContactDetailField label="Work email" value={contact.workEmail} />
+          <ContactDetailField label="Business phone" value={contact.businessPhone} />
+          <ContactDetailField
+            label="Professional profile"
+            value={professionalProfileUrl ? (
+              <a
+                className="inline-flex min-h-11 max-w-full items-center gap-2 text-primary underline-offset-4 hover:underline md:min-h-8"
+                href={professionalProfileUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <ExternalLinkIcon className="size-4 shrink-0" />
+                <span className="truncate">Open professional profile</span>
+              </a>
+            ) : null}
+          />
+          <ContactDetailField label="Location" value={contact.location} />
+          <ContactDetailField label="Timezone" value={contact.timezone} />
+          <ContactDetailField label="Source" value={contact.source ? formatStatusLabel(contact.source) : ""} />
+          <ContactDetailField label="Created" value={createdAt} />
+          <ContactDetailField label="Last updated" value={updatedAt} />
+          <ContactDetailField label="Archive status" value={contact.archivedAtIso ? `Archived ${archivedAt}` : "Active record"} />
+          <div className="grid min-w-0 gap-1 rounded-lg bg-muted/20 p-3 sm:col-span-2">
+            <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Private seller notes</dt>
+            <dd className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+              {contact.privateNotes || "No private notes captured."}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <Separator />
+      <section className="grid gap-3" aria-labelledby={opportunityHeadingId}>
+        <div>
+          <h3 id={opportunityHeadingId} className="text-sm font-medium">Linked opportunities</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Deal-specific roles and relationship context remain separate from the contact record.</p>
+        </div>
+        {linkedOpportunities.length ? (
+          <div className="grid gap-3">
+            {linkedOpportunities.map(({ opportunity, relationship }) => (
+              <article key={relationship.id || `${relationship.opportunityId}-${relationship.contactId}`} className="grid gap-3 rounded-lg border bg-background p-3">
+                <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{opportunity?.name || "Linked opportunity unavailable"}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {opportunity ? `${opportunity.stage} · ${opportunity.coverage}% covered` : "The relationship is retained for historical context."}
+                    </p>
+                  </div>
+                  {opportunity ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 shrink-0 gap-2 md:min-h-8"
+                      onClick={() => onOpenOpportunity(opportunity.id)}
+                    >
+                      <ExternalLinkIcon />
+                      Open opportunity
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {relationship.isPrimary ? <Badge>Primary contact</Badge> : null}
+                  {relationship.buyingRoles.map((role) => <Badge key={role} variant="secondary">{formatBuyingRole(role)}</Badge>)}
+                  {!relationship.buyingRoles.length ? <Badge variant="outline">Role not captured</Badge> : null}
+                </div>
+                <dl className="grid gap-2 sm:grid-cols-3">
+                  <ContactDetailField label="Influence" value={formatStatusLabel(relationship.influence)} />
+                  <ContactDetailField label="Relationship" value={formatStatusLabel(relationship.relationshipStrength)} />
+                  <ContactDetailField label="Stance" value={formatStatusLabel(relationship.stance)} />
+                </dl>
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Deal-specific notes</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                    {relationship.notes || "No deal-specific notes captured."}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            This contact is not linked to an opportunity yet.
+          </div>
+        )}
+      </section>
+
+      <Separator />
+      <section className="grid gap-3" aria-labelledby={callHeadingId}>
+        <div>
+          <h3 id={callHeadingId} className="text-sm font-medium">Call participation</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Expected and attended call relationships retained for this contact.</p>
+        </div>
+        {linkedCalls.length ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {linkedCalls.map(({ call, opportunity, relationship }) => (
+              <article key={relationship.id || `${relationship.callId}-${relationship.contactId}`} className="grid gap-3 rounded-lg border bg-background p-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{call?.title || "Historical call participation"}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {call
+                      ? [call.date, call.type, call.duration].filter(Boolean).join(" · ")
+                      : "The participant relationship is retained even though the call summary is unavailable."}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline">{formatStatusLabel(relationship.attendance)}</Badge>
+                  {relationship.isPrimary ? <Badge variant="secondary">Primary participant</Badge> : null}
+                </div>
+                {opportunity ? (
+                  <div className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-muted/20 p-2">
+                    <p className="truncate text-xs text-muted-foreground">{opportunity.name}</p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-11 shrink-0 gap-2 md:min-h-8"
+                      onClick={() => onOpenOpportunity(opportunity.id)}
+                    >
+                      <ExternalLinkIcon />
+                      Open
+                    </Button>
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            No calls are linked to this contact yet.
+          </div>
+        )}
+      </section>
+
+      <Separator />
+      <section className="grid gap-3" aria-labelledby={insightHeadingId}>
+        <div>
+          <h3 id={insightHeadingId} className="flex items-center gap-2 text-sm font-medium">
+            <SparklesIcon className="size-4 text-primary" />
+            AI insights
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">Public professional research that can shape preparation without overwriting seller-entered details.</p>
+        </div>
+        <ContactEnrichmentDetails contact={contact} showAll />
+      </section>
+
+      {actionMessage ? (
+        <p
+          className={cn(
+            "rounded-lg p-3 text-sm",
+            actionTone === "error" ? "bg-destructive/10 text-destructive" : "bg-muted/30 text-muted-foreground"
+          )}
+          role={actionTone === "error" ? "alert" : "status"}
+        >
+          {actionMessage}
+        </p>
+      ) : null}
+    </div>
+  )
+
+  const actions = (
+    <div className="grid w-full gap-2 sm:grid-cols-[auto_1fr] sm:items-center">
+      <Button type="button" variant="outline" className="min-h-11 sm:w-fit md:min-h-8" disabled={pending} onClick={() => onOpenChange(false)}>
+        Close
+      </Button>
+      <div className="grid gap-2 sm:flex sm:justify-end">
+        {contact.archivedAtIso ? (
+          <Button type="button" className="min-h-11 gap-2 md:min-h-8" disabled={pending} onClick={() => void onAction(contact, "restore")}>
+            <Undo2Icon />
+            {pending ? "Restoring…" : "Restore contact"}
+          </Button>
+        ) : (
+          <>
+            <Button type="button" variant="outline" className="min-h-11 gap-2 md:min-h-8" disabled={pending} onClick={() => onEdit(contact)}>
+              <PencilIcon />
+              Edit
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 gap-2 md:min-h-8"
+              disabled={!canEnrich || pending || enrichmentInProgress}
+              onClick={() => void onAction(contact, "enrich")}
+            >
+              <SparklesIcon />
+              {enrichmentInProgress
+                ? "Enrichment in progress"
+                : enrichmentStatus === "completed"
+                  ? "Refresh enrichment"
+                  : enrichmentStatus === "failed" || enrichmentStatus === "ambiguous"
+                    ? "Retry enrichment"
+                    : "Enrich contact"}
+            </Button>
+            <Button type="button" variant="destructive" className="min-h-11 gap-2 md:min-h-8" disabled={pending} onClick={() => void onAction(contact, "archive")}>
+              <ArchiveIcon />
+              Archive
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+
+  const title = contact.preferredName.trim() || contact.fullName
+  const description = `Contact profile and available relationship context for ${contact.fullName}.`
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange} showSwipeHandle>
+        <DrawerContent className="grid max-h-[94svh] min-h-[min(680px,94svh)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden px-3 pb-[env(safe-area-inset-bottom)] [&_[data-slot=button]]:min-h-11">
+          <DrawerHeader className="px-0 text-left">
+            <DrawerTitle>{title}</DrawerTitle>
+            <DrawerDescription>{description}</DrawerDescription>
+          </DrawerHeader>
+          {body}
+          <DrawerFooter className="-mx-3 mt-2 border-t bg-muted/50 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3">
+            {actions}
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent dismissible className="grid max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        {body}
+        <DialogFooter>{actions}</DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 export function ContactsPanel({
   accountWebsite,
+  callContacts = [],
+  calls = [],
   contacts,
+  description = "People linked to this account, with opportunity-specific buying roles managed separately.",
   externalStatusMessage,
   externalStatusTone = "status",
   focusedContactId = "",
@@ -888,9 +1299,13 @@ export function ContactsPanel({
   onSave,
   opportunities,
   opportunityContacts,
+  title = "Account contacts",
 }: {
   accountWebsite: string
+  callContacts?: CallContact[]
+  calls?: CallSummary[]
   contacts: Contact[]
+  description?: string
   externalStatusMessage?: string
   externalStatusTone?: "status" | "error"
   focusedContactId?: string
@@ -902,29 +1317,70 @@ export function ContactsPanel({
   onSave: ContactSaveHandler
   opportunities: Opportunity[]
   opportunityContacts: OpportunityContact[]
+  title?: string
 }) {
   const [query, setQuery] = React.useState("")
-  const [employmentFilter, setEmploymentFilter] = React.useState<"all" | "active" | "former" | "unknown">("active")
+  const [employmentFilter, setEmploymentFilter] = React.useState<"all" | "active" | "former" | "unknown" | "archived">("active")
   const [enrichmentFilter, setEnrichmentFilter] = React.useState<"all" | "enriched" | "needs-enrichment">("all")
   const [editorOpen, setEditorOpen] = React.useState(false)
   const [editingContact, setEditingContact] = React.useState<Contact | null>(null)
+  const [detailContactId, setDetailContactId] = React.useState("")
   const [actionMessage, setActionMessage] = React.useState("")
-  const [actionKind, setActionKind] = React.useState<"archive" | "enrich" | "">("")
+  const [actionKind, setActionKind] = React.useState<"archive" | "enrich" | "restore" | "">("")
   const [actionTone, setActionTone] = React.useState<"status" | "error">("status")
   const [lastArchivedContactId, setLastArchivedContactId] = React.useState("")
   const [pendingContactId, setPendingContactId] = React.useState("")
   const [revealedContactId, setRevealedContactId] = React.useState("")
+  const panelRef = React.useRef<HTMLDivElement | null>(null)
+  const addContactButtonRef = React.useRef<HTMLButtonElement | null>(null)
+  const detailInvokerRef = React.useRef<HTMLElement | null>(null)
+  const detailFocusFrameRef = React.useRef<number | null>(null)
+  const deferredEditFrameRef = React.useRef<number | null>(null)
   const activeContactCount = contacts.filter((contact) => !contact.archivedAtIso).length
+  const archivedContactCount = contacts.filter((contact) => Boolean(contact.archivedAtIso)).length
   const opportunityById = React.useMemo(
     () => new Map(opportunities.map((opportunity) => [opportunity.id, opportunity])),
     [opportunities]
   )
+  const callById = React.useMemo(
+    () => new Map(calls.map((call) => [call.id, call])),
+    [calls]
+  )
+  const detailContact = contacts.find((contact) => contact.id === detailContactId) ?? null
+  const detailLinkedOpportunities = detailContact
+    ? opportunityContacts
+        .filter((relationship) => relationship.contactId === detailContact.id)
+        .map((relationship) => ({
+          opportunity: opportunityById.get(relationship.opportunityId) ?? null,
+          relationship,
+        }))
+    : []
+  const detailLinkedCalls = detailContact
+    ? callContacts
+        .filter((relationship) => relationship.contactId === detailContact.id)
+        .map((relationship) => ({
+          call: callById.get(relationship.callId) ?? null,
+          opportunity: opportunityById.get(relationship.opportunityId) ?? null,
+          relationship,
+        }))
+    : []
+  React.useEffect(() => () => {
+    if (detailFocusFrameRef.current !== null) {
+      window.cancelAnimationFrame(detailFocusFrameRef.current)
+    }
+    if (deferredEditFrameRef.current !== null) {
+      window.cancelAnimationFrame(deferredEditFrameRef.current)
+    }
+  }, [])
   React.useEffect(() => {
-    if (!focusedContactId || !contacts.some((contact) => contact.id === focusedContactId && !contact.archivedAtIso)) return
+    const focusedContact = contacts.find((contact) => contact.id === focusedContactId)
+    if (!focusedContact) return
+    detailInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setRevealedContactId(focusedContactId)
     setQuery("")
-    setEmploymentFilter("all")
+    setEmploymentFilter(focusedContact.archivedAtIso ? "archived" : "all")
     setEnrichmentFilter("all")
+    setDetailContactId(focusedContactId)
     onFocusedContactHandled?.()
   }, [focusedContactId, onFocusedContactHandled])
   React.useEffect(() => {
@@ -936,9 +1392,13 @@ export function ContactsPanel({
   const visibleContacts = React.useMemo(
     () => contacts
       .filter((contact) => {
-        if (contact.archivedAtIso) return false
+        if (employmentFilter === "archived") {
+          if (!contact.archivedAtIso) return false
+        } else {
+          if (contact.archivedAtIso) return false
+          if (employmentFilter !== "all" && contact.employmentStatus !== employmentFilter) return false
+        }
         if (!matchesContact(contact, query)) return false
-        if (employmentFilter !== "all" && contact.employmentStatus !== employmentFilter) return false
         const status = getEnrichmentStatus(contact)
         if (enrichmentFilter === "enriched" && status !== "completed") return false
         if (enrichmentFilter === "needs-enrichment" && status === "completed") return false
@@ -954,20 +1414,23 @@ export function ContactsPanel({
       .map((relationship) => opportunityById.get(relationship.opportunityId)?.name)
       .filter(Boolean) as string[]
 
-  const runContactAction = async (contact: Contact, action: "archive" | "enrich") => {
+  const runContactAction = async (contact: Contact, action: ContactAction) => {
     setPendingContactId(contact.id)
     setActionMessage("")
     setActionKind(action)
     setActionTone("status")
     try {
-      await (action === "archive" ? onArchive(contact) : onEnrich(contact))
+      await (action === "archive" ? onArchive(contact) : action === "restore" ? onRestore(contact) : onEnrich(contact))
       setActionKind(action)
       setLastArchivedContactId(action === "archive" ? contact.id : "")
       setActionMessage(
         action === "archive"
           ? `${contact.fullName} was archived. Historical opportunity and call links are preserved.`
-          : `Enrichment for ${contact.fullName} is queued. You can keep working while it runs.`
+          : action === "restore"
+            ? `${contact.fullName} was restored and is available in contact selectors again.`
+            : `Enrichment for ${contact.fullName} is queued. You can keep working while it runs.`
       )
+      if (action === "restore") setEmploymentFilter("all")
     } catch (error: unknown) {
       setActionTone("error")
       setActionMessage(error instanceof Error ? error.message : "Contact action needs another attempt.")
@@ -1004,15 +1467,57 @@ export function ContactsPanel({
     setEditorOpen(true)
   }
 
+  const openContactDetails = (contact: Contact, invoker?: HTMLElement | null) => {
+    setActionMessage("")
+    setActionKind("")
+    setActionTone("status")
+    detailInvokerRef.current = invoker ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    setDetailContactId(contact.id)
+  }
+
+  const closeContactDetails = () => {
+    const closingContactId = detailContactId
+    const invoker = detailInvokerRef.current
+    setDetailContactId("")
+    detailInvokerRef.current = null
+    if (detailFocusFrameRef.current !== null) {
+      window.cancelAnimationFrame(detailFocusFrameRef.current)
+    }
+    detailFocusFrameRef.current = window.requestAnimationFrame(() => {
+      detailFocusFrameRef.current = null
+      if (invoker?.isConnected) {
+        invoker.focus()
+        return
+      }
+
+      const visibleContactButton = Array.from(
+        panelRef.current?.querySelectorAll<HTMLButtonElement>("[data-contact-detail-id]") ?? []
+      ).find((button) => button.dataset.contactDetailId === closingContactId && button.getClientRects().length > 0)
+      const focusTarget = visibleContactButton ?? addContactButtonRef.current
+      focusTarget?.focus()
+    })
+  }
+
+  const editContactFromDetails = (contact: Contact) => {
+    setDetailContactId("")
+    if (deferredEditFrameRef.current !== null) {
+      window.cancelAnimationFrame(deferredEditFrameRef.current)
+    }
+    deferredEditFrameRef.current = window.requestAnimationFrame(() => {
+      deferredEditFrameRef.current = null
+      openEditContact(contact)
+    })
+  }
+
   return (
-    <Card className="w-full min-w-0">
+    <Card ref={panelRef} className="w-full min-w-0">
       <CardHeader>
         <div>
-          <CardTitle>Account contacts</CardTitle>
-          <CardDescription>People linked to this account, with opportunity-specific buying roles managed separately.</CardDescription>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
         </div>
         <CardAction>
-          <Button type="button" size="sm" className="min-h-11 w-full gap-2 md:min-h-8 sm:w-auto" onClick={openNewContact}>
+          <Button ref={addContactButtonRef} type="button" size="sm" className="min-h-11 w-full gap-2 md:min-h-8 sm:w-auto" onClick={openNewContact}>
             <PlusIcon />
             Add contact
           </Button>
@@ -1045,6 +1550,7 @@ export function ContactsPanel({
               <SelectItem value="former">Former contacts</SelectItem>
               <SelectItem value="unknown">Unknown employment</SelectItem>
               <SelectItem value="all">All contacts</SelectItem>
+              <SelectItem value="archived">Archived contacts</SelectItem>
             </SelectContent>
           </Select>
           <Select value={enrichmentFilter} onValueChange={(value) => {
@@ -1094,7 +1600,15 @@ export function ContactsPanel({
                   className={cn("grid gap-3 rounded-lg border bg-background p-3", contact.id === highlightedContactId && "ring-2 ring-primary/30")}
                 >
                   <div className="flex min-w-0 items-start justify-between gap-3">
-                    <ContactIdentity contact={contact} />
+                    <button
+                      type="button"
+                      className="min-h-11 min-w-0 flex-1 rounded-md text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+                      data-contact-detail-id={contact.id}
+                      aria-label={`View ${contact.fullName} contact details`}
+                      onClick={(event) => openContactDetails(contact, event.currentTarget)}
+                    >
+                      <ContactIdentity contact={contact} />
+                    </button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button type="button" variant="outline" size="icon" className="size-11 shrink-0" aria-label={`Actions for ${contact.fullName}`}>
@@ -1102,7 +1616,7 @@ export function ContactsPanel({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => openEditContact(contact)}><PencilIcon />Edit</DropdownMenuItem>
+                        {!contact.archivedAtIso ? <DropdownMenuItem onSelect={() => openEditContact(contact)}><PencilIcon />Edit</DropdownMenuItem> : null}
                         {opportunityContacts
                           .filter((relationship) => relationship.contactId === contact.id)
                           .map((relationship) => opportunityById.get(relationship.opportunityId))
@@ -1112,12 +1626,20 @@ export function ContactsPanel({
                               <ExternalLinkIcon />Open {opportunity!.name}
                             </DropdownMenuItem>
                           ))}
-                        <DropdownMenuItem disabled={!canEnrich || pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "enrich")}>
-                          <SparklesIcon />{getEnrichmentStatus(contact) === "completed" ? "Refresh enrichment" : "Enrich contact"}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem variant="destructive" disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "archive")}>
-                          <ArchiveIcon />Archive
-                        </DropdownMenuItem>
+                        {contact.archivedAtIso ? (
+                          <DropdownMenuItem disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "restore")}>
+                            <Undo2Icon />Restore contact
+                          </DropdownMenuItem>
+                        ) : (
+                          <>
+                            <DropdownMenuItem disabled={!canEnrich || pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "enrich")}>
+                              <SparklesIcon />{getEnrichmentStatus(contact) === "completed" ? "Refresh enrichment" : "Enrich contact"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem variant="destructive" disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "archive")}>
+                              <ArchiveIcon />Archive
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -1133,6 +1655,7 @@ export function ContactsPanel({
                   <div className="flex flex-wrap gap-2">
                     <EnrichmentBadge status={getEnrichmentStatus(contact)} />
                     <Badge variant="outline">{formatStatusLabel(contact.employmentStatus)}</Badge>
+                    {contact.archivedAtIso ? <Badge variant="outline">Archived</Badge> : null}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {opportunityNames.length ? opportunityNames.join(" · ") : "Not linked to an opportunity"} · Created {contact.createdAt}
@@ -1161,11 +1684,20 @@ export function ContactsPanel({
                 {visibleContacts.map((contact) => {
                   const opportunityNames = linkedOpportunityNames(contact.id)
                   const canEnrich = Boolean(contact.fullName && (accountWebsite || contact.linkedinUrl))
+                  const professionalProfileUrl = getSafeProfessionalProfileUrl(contact.linkedinUrl)
 
                   return (
                     <TableRow key={contact.id} data-focused={contact.id === highlightedContactId || undefined} className={contact.id === highlightedContactId ? "bg-primary/5 ring-1 ring-inset ring-primary/20" : undefined}>
                       <TableCell className="max-w-0 pl-3 whitespace-normal">
-                        <ContactIdentity contact={contact} compact />
+                        <button
+                          type="button"
+                          className="min-h-11 w-full min-w-0 rounded-md text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+                          data-contact-detail-id={contact.id}
+                          aria-label={`View ${contact.fullName} contact details`}
+                          onClick={(event) => openContactDetails(contact, event.currentTarget)}
+                        >
+                          <ContactIdentity contact={contact} compact />
+                        </button>
                       </TableCell>
                       <TableCell className="max-w-0 whitespace-normal">
                         <p className="truncate">{contact.jobTitle || "Not captured"}</p>
@@ -1173,7 +1705,11 @@ export function ContactsPanel({
                       </TableCell>
                       <TableCell className="max-w-0 whitespace-normal">
                         <p className="truncate text-sm">{contact.workEmail || contact.businessPhone || "Not captured"}</p>
-                        {contact.linkedinUrl ? <p className="truncate text-xs text-muted-foreground">Professional profile saved</p> : null}
+                        {professionalProfileUrl ? (
+                          <a className="inline-flex min-h-11 items-center gap-1 truncate text-xs text-primary underline-offset-4 hover:underline" href={professionalProfileUrl} target="_blank" rel="noreferrer">
+                            <ExternalLinkIcon className="size-3.5 shrink-0" />Professional profile
+                          </a>
+                        ) : null}
                       </TableCell>
                       <TableCell className="max-w-0 whitespace-normal">
                         <p className="line-clamp-2 text-sm">{opportunityNames.length ? opportunityNames.join(", ") : "None"}</p>
@@ -1183,12 +1719,12 @@ export function ContactsPanel({
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button type="button" size="icon-sm" variant="ghost" aria-label={`Actions for ${contact.fullName}`}>
+                            <Button type="button" size="icon" variant="ghost" className="size-11" aria-label={`Actions for ${contact.fullName}`}>
                               <MoreHorizontalIcon />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onSelect={() => openEditContact(contact)}><PencilIcon />Edit</DropdownMenuItem>
+                            {!contact.archivedAtIso ? <DropdownMenuItem onSelect={() => openEditContact(contact)}><PencilIcon />Edit</DropdownMenuItem> : null}
                             {opportunityContacts
                               .filter((relationship) => relationship.contactId === contact.id)
                               .map((relationship) => opportunityById.get(relationship.opportunityId))
@@ -1198,12 +1734,20 @@ export function ContactsPanel({
                                   <ExternalLinkIcon />Open {opportunity!.name}
                                 </DropdownMenuItem>
                               ))}
-                            <DropdownMenuItem disabled={!canEnrich || pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "enrich")}>
-                              <SparklesIcon />{getEnrichmentStatus(contact) === "completed" ? "Refresh enrichment" : "Enrich contact"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem variant="destructive" disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "archive")}>
-                              <ArchiveIcon />Archive
-                            </DropdownMenuItem>
+                            {contact.archivedAtIso ? (
+                              <DropdownMenuItem disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "restore")}>
+                                <Undo2Icon />Restore contact
+                              </DropdownMenuItem>
+                            ) : (
+                              <>
+                                <DropdownMenuItem disabled={!canEnrich || pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "enrich")}>
+                                  <SparklesIcon />{getEnrichmentStatus(contact) === "completed" ? "Refresh enrichment" : "Enrich contact"}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem variant="destructive" disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "archive")}>
+                                  <ArchiveIcon />Archive
+                                </DropdownMenuItem>
+                              </>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -1218,16 +1762,41 @@ export function ContactsPanel({
             <div className="grid max-w-sm justify-items-center gap-3">
               <span className="flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground"><UsersRoundIcon className="size-5" /></span>
               <div>
-                <p className="font-medium">{activeContactCount ? "No contacts match these filters" : "No active contacts"}</p>
+                <p className="font-medium">
+                  {employmentFilter === "archived"
+                    ? archivedContactCount ? "No archived contacts match these filters" : "No archived contacts"
+                    : activeContactCount ? "No contacts match these filters" : "No active contacts"}
+                </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {activeContactCount ? "Try a broader search or filter." : "Add a contact, or use Undo immediately after archiving one."}
+                  {employmentFilter === "archived"
+                    ? archivedContactCount ? "Try a broader search or enrichment filter." : "Archived contacts will appear here and can be restored later."
+                    : activeContactCount ? "Try a broader search or filter." : "Add a contact to start building the account's buying group."}
                 </p>
               </div>
-              {!activeContactCount ? <Button type="button" className="min-h-11 gap-2" onClick={openNewContact}><PlusIcon />Add contact</Button> : null}
+              {!activeContactCount && employmentFilter !== "archived" ? <Button type="button" className="min-h-11 gap-2" onClick={openNewContact}><PlusIcon />Add contact</Button> : null}
             </div>
           </div>
         )}
       </CardContent>
+      <ContactDetailsOverlay
+        accountWebsite={accountWebsite}
+        actionMessage={actionMessage}
+        actionTone={actionTone}
+        contact={detailContact}
+        linkedCalls={detailLinkedCalls}
+        linkedOpportunities={detailLinkedOpportunities}
+        open={Boolean(detailContact)}
+        pending={pendingContactId === detailContact?.id}
+        onAction={runContactAction}
+        onEdit={editContactFromDetails}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeContactDetails()
+        }}
+        onOpenOpportunity={(opportunityId) => {
+          setDetailContactId("")
+          onOpenOpportunity(opportunityId)
+        }}
+      />
       <ContactEditor
         accountWebsite={accountWebsite}
         contact={editingContact}
@@ -1331,11 +1900,13 @@ function BuyingRoleMultiSelect({
 
 export function OpportunityContactsCard({
   contacts,
+  onOpenContact,
   onRelationshipChange,
   onSelectionChange,
   opportunityContacts,
 }: {
   contacts: Contact[]
+  onOpenContact?: (contactId: string) => void
   onRelationshipChange: (contactId: string, patch: OpportunityContactPatch) => Promise<void>
   onSelectionChange: (contactIds: string[]) => Promise<void>
   opportunityContacts: OpportunityContact[]
@@ -1411,7 +1982,18 @@ export function OpportunityContactsCard({
               <article key={relationship.id || relationship.contactId} className="grid gap-3 rounded-lg bg-muted/20 p-3">
                 <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <ContactIdentity contact={contact} />
+                    {onOpenContact ? (
+                      <button
+                        type="button"
+                        className="min-h-11 min-w-0 rounded-md text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={`View ${contact.fullName} contact details`}
+                        onClick={() => onOpenContact(contact.id)}
+                      >
+                        <ContactIdentity contact={contact} />
+                      </button>
+                    ) : (
+                      <ContactIdentity contact={contact} />
+                    )}
                     {contact.archivedAtIso ? <Badge variant="outline">Archived</Badge> : null}
                   </div>
                   <div className="flex min-h-11 items-center justify-between gap-3 sm:min-h-0 sm:justify-end">

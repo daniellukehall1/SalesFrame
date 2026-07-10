@@ -230,7 +230,7 @@ export function LiveCoachPopoutWindow({ darkMode }: { darkMode: boolean }) {
               {formatPopoutTime(snapshot.elapsedSeconds)}
             </div>
             {snapshot.limitNotice ? (
-              <p className="text-[0.7rem] font-medium text-amber-700 dark:text-amber-300">
+              <p className="text-[0.7rem] font-medium text-amber-700 dark:text-amber-300" role="status" aria-live="polite">
                 {snapshot.limitNotice}
               </p>
             ) : null}
