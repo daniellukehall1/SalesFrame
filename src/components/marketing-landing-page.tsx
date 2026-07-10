@@ -347,13 +347,40 @@ function HowItWorksDialog({
 
 function MarketingFooterNav() {
   const [activeGroupId, setActiveGroupId] = React.useState<string | null>(null)
+  const footerRef = React.useRef<HTMLElement | null>(null)
+  const triggerRefs = React.useRef(new Map<string, HTMLButtonElement>())
   const activeGroup = publicMarketingNavGroups.find((group) => group.id === activeGroupId)
+
+  React.useEffect(() => {
+    if (!activeGroupId) return
+
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !footerRef.current?.contains(event.target)) {
+        setActiveGroupId(null)
+      }
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+
+      const activeTrigger = triggerRefs.current.get(activeGroupId)
+      setActiveGroupId(null)
+      activeTrigger?.focus()
+    }
+
+    document.addEventListener("pointerdown", handleOutsidePointerDown, true)
+    document.addEventListener("keydown", handleEscape)
+
+    return () => {
+      document.removeEventListener("pointerdown", handleOutsidePointerDown, true)
+      document.removeEventListener("keydown", handleEscape)
+    }
+  }, [activeGroupId])
 
   return (
     <footer
+      ref={footerRef}
       className="fixed inset-x-0 bottom-2 z-20 flex justify-center px-4 sm:bottom-4"
       data-public-footer-nav
-      onMouseLeave={() => setActiveGroupId(null)}
     >
       <nav
         aria-label="SalesFrame public pages"
@@ -361,8 +388,10 @@ function MarketingFooterNav() {
       >
         {activeGroup ? (
           <div
+            id={`salesframe-footer-menu-${activeGroup.id}`}
             className="absolute bottom-full left-1/2 mb-2 w-[min(18rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl bg-white p-3 text-left shadow-lg ring-1 ring-black/10"
             role="menu"
+            aria-label={`${activeGroup.label} links`}
           >
             <div className="mb-2 flex items-center justify-between gap-3">
               <a href={activeGroup.href} className="text-xs font-medium text-black">
@@ -395,7 +424,13 @@ function MarketingFooterNav() {
           <button
             key={group.id}
             type="button"
+            ref={(node) => {
+              if (node) triggerRefs.current.set(group.id, node)
+              else triggerRefs.current.delete(group.id)
+            }}
+            aria-controls={`salesframe-footer-menu-${group.id}`}
             aria-expanded={activeGroupId === group.id}
+            aria-haspopup="menu"
             className="min-h-11 rounded-sm px-1 py-1 transition-colors hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 sm:min-h-8"
             onClick={() => setActiveGroupId((current) => (current === group.id ? null : group.id))}
           >

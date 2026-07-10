@@ -27,11 +27,7 @@ export function getDefaultAudioDeviceId() {
 }
 
 export function getPreferredAudioInputDeviceId(currentDeviceId: string | undefined, devices: AudioDeviceOption[]) {
-  if (
-    currentDeviceId &&
-    currentDeviceId !== defaultDeviceId &&
-    devices.some((device) => device.deviceId === currentDeviceId)
-  ) {
+  if (currentDeviceId && devices.some((device) => device.deviceId === currentDeviceId)) {
     return currentDeviceId
   }
 

@@ -4,7 +4,11 @@ import {
   isLikelySafariBrowser,
   resolveConstrainedAudioDeviceId,
 } from "@/lib/audio-device-setup"
-import { audibleAudioLevelThreshold } from "@/lib/audio-level-meter"
+import {
+  audibleAudioLevelThreshold,
+  calculateAudioRms,
+  calculateRepresentativeAudioLevel,
+} from "@/lib/audio-level-meter"
 import type { CallAudioCaptureMode, TranscriptSpeaker } from "@/lib/salesframe-core"
 
 export type AudioSourceKind = "meeting_audio" | "seller_mic" | "mixed_audio" | "in_person_microphone"
@@ -450,14 +454,14 @@ export async function measureStreamVoiceLevel(stream: MediaStream) {
   analyser.fftSize = 1024
   sourceNode.connect(analyser)
 
-  const samples = new Uint8Array(analyser.fftSize)
-  let maxLevel = 0
+  const samples = new Float32Array(analyser.fftSize)
+  const measuredLevels: number[] = []
   const startedAt = Date.now()
 
   await new Promise<void>((resolve) => {
     const timer = window.setInterval(() => {
-      analyser.getByteTimeDomainData(samples)
-      maxLevel = Math.max(maxLevel, calculateAudioRms(samples))
+      analyser.getFloatTimeDomainData(samples)
+      measuredLevels.push(calculateAudioRms(samples))
       if (Date.now() - startedAt >= preflightSampleMs) {
         window.clearInterval(timer)
         resolve()
@@ -473,15 +477,5 @@ export async function measureStreamVoiceLevel(stream: MediaStream) {
     // The stream can be closed by browser permissions while preflight exits.
   }
 
-  return Number(maxLevel.toFixed(4))
-}
-
-export function calculateAudioRms(samples: Uint8Array) {
-  const sumSquares = samples.reduce((sum, sample) => {
-    const centeredSample = (sample - 128) / 128
-
-    return sum + centeredSample * centeredSample
-  }, 0)
-
-  return Math.sqrt(sumSquares / samples.length)
+  return Number(calculateRepresentativeAudioLevel(measuredLevels).toFixed(4))
 }

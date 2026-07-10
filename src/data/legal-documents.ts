@@ -160,7 +160,7 @@ export const privacySections: LegalSection[] = [
     bullets: [
       "Account and identity details, such as name, email address, profile information, avatar, authentication identifiers, workspace membership, and support communications.",
       "Workspace records, such as workspace names, company details, seller profile, company domain, product context, currency, settings, and OpenAI key connection status.",
-      "Customer and deal information entered by users, such as account names, websites, industry, profile notes, stakeholders, opportunity names, amount, stage, close date, methodology fields, risks, and next steps.",
+      "Customer and deal information entered by users, such as account names, websites, industry, profile notes, contact names, professional roles, business contact details, relationship notes, stakeholders, opportunity names, amount, stage, close date, methodology fields, risks, and next steps.",
       "Call content and metadata, such as audio recordings, transcripts, speaker labels, timestamps, call type, selected playbooks, audio preflight results, notes, methodology evidence, and post-call outputs.",
       "AI inputs and outputs, such as customer research requests, prompts, model responses, follow-up drafts, next-call briefs, live guidance events, and evidence mappings.",
       "Technical and usage information, such as browser type, device information, IP address, logs, diagnostics, errors, security events, performance data, and feature usage.",
@@ -179,7 +179,7 @@ export const privacySections: LegalSection[] = [
       "Directly from users when they create accounts, enter workspace data, connect an API key, upload or edit records, start calls, or contact support.",
       "Through browser and application features when users capture audio, generate transcripts, use live guidance, or create post-call outputs.",
       "From connected third-party services and subprocessors where needed to provide the service.",
-      "From public sources selected for customer research, such as company websites, LinkedIn, investor pages, regulator or registry pages, reputable business media, and other trusted public sources.",
+      "From public professional sources selected for account or contact enrichment, such as company websites, LinkedIn and other professional profile pages, investor pages, regulator or registry pages, reputable business media, and other trusted public sources.",
     ],
   },
   {
@@ -187,7 +187,7 @@ export const privacySections: LegalSection[] = [
     bullets: [
       "To provide, operate, secure, troubleshoot, improve, and support SalesFrame.",
       "To authenticate users and enforce workspace access controls.",
-      "To save and display account, opportunity, call, transcript, recording, methodology, research, and post-call data.",
+      "To save and display account, contact, opportunity, call, transcript, recording, methodology, research, and post-call data, including relationships between contacts, opportunities, calls, and seller-confirmed speakers.",
       "To process AI-powered features using the OpenAI API key connected by the user or workspace.",
       "To generate live question guidance, summaries, evidence mappings, follow-up drafts, next-call briefs, and research outputs.",
       "To detect misuse, investigate incidents, protect rights and safety, comply with law, and enforce terms.",
@@ -198,8 +198,16 @@ export const privacySections: LegalSection[] = [
     title: "6. OpenAI API keys",
     paragraphs: [
       "SalesFrame stores OpenAI API keys in encrypted form server-side and does not expose saved key values back to the browser after saving.",
-      "When AI features are used, relevant inputs may be sent to OpenAI so the requested feature can work. This may include account context, opportunity context, seller profile, customer research inputs, transcript excerpts, notes, selected playbooks, and prior evidence.",
+      "When AI features are used, relevant inputs may be sent to OpenAI so the requested feature can work. This may include account context, selected contact names and professional roles, opportunity context, seller profile, customer research inputs, transcript excerpts, notes, selected playbooks, and prior evidence. Contact enrichment excludes stored email addresses, phone numbers, profile URLs, private seller notes, database identifiers, and ownership metadata from model prompts.",
       "Users are responsible for ensuring their OpenAI account, API key, model use, data processing settings, and OpenAI terms are appropriate for the information they process through SalesFrame.",
+    ],
+  },
+  {
+    title: "6A. Customer contacts and public professional enrichment",
+    paragraphs: [
+      "Workspace users may store business contact records for customer personnel and link those records to accounts, opportunities, calls, and seller-confirmed transcript speakers. Users must have a lawful business purpose and the authority to add, update, enrich, and use those records.",
+      "Optional contact enrichment uses public professional sources to suggest role-related business context. It is designed to avoid protected characteristics, private facts, sensitive information, personality profiling, and generated contact details. Suggested information may be incomplete, outdated, or refer to the wrong person, so users must review it before relying on it.",
+      "Archived contacts remain connected to historical opportunity and call records unless those records are separately deleted or a retention rule applies.",
     ],
   },
   {

@@ -1,19 +1,22 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 import { createClient } from "@/lib/supabase/client"
-import type { Database, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types"
+import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types"
 import { buildAccountLogoMetadata } from "@/lib/account-logo"
 
 export type SalesFrameClient = SupabaseClient<Database>
 
 export type WorkspaceRow = Tables<"workspaces">
 export type AccountRow = Tables<"accounts">
+export type ContactRow = Tables<"contacts">
 export type OpportunityRow = Tables<"opportunities">
+export type OpportunityContactRow = Tables<"opportunity_contacts">
 export type PlaybookRow = Tables<"playbooks">
 export type PlaybookFieldRow = Tables<"playbook_fields">
 export type OpportunityPlaybookRow = Tables<"opportunity_playbooks">
 export type CallPlaybookRow = Tables<"call_playbooks">
 export type CallRow = Tables<"calls">
+export type CallContactRow = Tables<"call_contacts">
 export type CallSpeakerRow = Tables<"call_speakers">
 export type TranscriptSegmentRow = Tables<"transcript_segments">
 export type CallNoteRow = Tables<"call_notes">
@@ -25,8 +28,20 @@ export type SellerResearchProfileRow = Tables<"seller_research_profiles">
 export type CustomerResearchRunRow = Tables<"customer_research_runs">
 export type AccountEnrichmentProfileRow = Tables<"account_enrichment_profiles">
 export type AccountEnrichmentRunRow = Tables<"account_enrichment_runs">
+export type ContactEnrichmentProfileRow = Tables<"contact_enrichment_profiles">
+export type ContactEnrichmentRunRow = Tables<"contact_enrichment_runs">
 export type PostCallOutputRow = Tables<"post_call_outputs">
 export type NextCallBriefRow = Tables<"next_call_briefs">
+
+export type OpportunityContactAssignment = Pick<
+  TablesInsert<"opportunity_contacts">,
+  "contact_id" | "buying_roles" | "influence" | "relationship_strength" | "stance" | "is_primary" | "notes"
+>
+
+export type CallContactAssignment = Pick<
+  TablesInsert<"call_contacts">,
+  "contact_id" | "attendance_status" | "is_primary"
+>
 
 const transcriptDuplicateRecoveryDelaysMs = [0, 50, 150, 300]
 
@@ -286,6 +301,179 @@ export async function upsertAccountEnrichmentProfile(
   }
 
   return requireData(response, "Account enrichment profile was not saved.")
+}
+
+export async function listWorkspaceContacts(workspaceId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("contacts")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("full_name", { ascending: true })
+
+  return requireData(response, "No contacts returned.")
+}
+
+export async function listArchivedWorkspaceContacts(workspaceId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("contacts")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .not("archived_at", "is", null)
+    .order("archived_at", { ascending: false, nullsFirst: false })
+
+  return requireData(response, "No archived contacts returned.")
+}
+
+export async function listAccountContacts(accountId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("contacts")
+    .select("*")
+    .eq("account_id", accountId)
+    .is("archived_at", null)
+    .order("full_name", { ascending: true })
+
+  return requireData(response, "No contacts returned.")
+}
+
+export async function listArchivedAccountContacts(accountId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("contacts")
+    .select("*")
+    .eq("account_id", accountId)
+    .not("archived_at", "is", null)
+    .order("archived_at", { ascending: false, nullsFirst: false })
+
+  return requireData(response, "No archived contacts returned.")
+}
+
+export async function getContact(contactId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("contacts")
+    .select("*")
+    .eq("id", contactId)
+    .maybeSingle()
+
+  if (response.error) throw new Error(response.error.message)
+
+  return response.data
+}
+
+export async function createContact(values: TablesInsert<"contacts">, client?: SalesFrameClient) {
+  const userId = await getCurrentUserId(client)
+  const response = await getSupabase(client)
+    .from("contacts")
+    .insert({
+      ...values,
+      created_by_user_id: userId,
+      updated_by_user_id: userId,
+    })
+    .select("*")
+    .single()
+
+  return requireData(response, "Contact was not created.")
+}
+
+export async function updateContact(
+  contactId: string,
+  values: TablesUpdate<"contacts">,
+  client?: SalesFrameClient
+) {
+  const userId = await getCurrentUserId(client)
+  const response = await getSupabase(client)
+    .from("contacts")
+    .update({
+      ...values,
+      updated_by_user_id: userId,
+    })
+    .eq("id", contactId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Contact was not updated.")
+}
+
+export async function archiveContact(contactId: string, reason = "", client?: SalesFrameClient) {
+  const userId = await getCurrentUserId(client)
+  const response = await getSupabase(client)
+    .from("contacts")
+    .update({
+      archived_at: new Date().toISOString(),
+      archived_by: userId,
+      archive_reason: reason.trim() || null,
+      updated_by_user_id: userId,
+    })
+    .eq("id", contactId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Contact was not archived.")
+}
+
+export async function restoreContact(contactId: string, client?: SalesFrameClient) {
+  const userId = await getCurrentUserId(client)
+  const response = await getSupabase(client)
+    .from("contacts")
+    .update({
+      archived_at: null,
+      archived_by: null,
+      archive_reason: null,
+      updated_by_user_id: userId,
+    })
+    .eq("id", contactId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Contact was not restored.")
+}
+
+export const unarchiveContact = restoreContact
+
+export async function listContactEnrichmentProfiles(
+  contactIds: string | string[],
+  client?: SalesFrameClient
+) {
+  const ids = Array.isArray(contactIds) ? contactIds : [contactIds]
+  if (ids.length === 0) return []
+
+  const response = await getSupabase(client)
+    .from("contact_enrichment_profiles")
+    .select("*")
+    .in("contact_id", ids)
+
+  return requireData(response, "Contact enrichment profiles were not returned.")
+}
+
+export async function getContactEnrichmentProfile(contactId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("contact_enrichment_profiles")
+    .select("*")
+    .eq("contact_id", contactId)
+    .maybeSingle()
+
+  if (response.error) throw new Error(response.error.message)
+
+  return response.data
+}
+
+export async function listContactEnrichmentRuns(
+  contactIds: string | string[],
+  client?: SalesFrameClient
+) {
+  const ids = Array.isArray(contactIds) ? contactIds : [contactIds]
+  if (ids.length === 0) return []
+
+  const response = await getSupabase(client).rpc("get_latest_contact_enrichment_runs", {
+    target_contact_ids: ids,
+  })
+
+  return requireData(response, "Contact enrichment runs were not returned.")
+}
+
+export async function listContactEnrichmentRunsForContacts(
+  contactIds: string[],
+  client?: SalesFrameClient
+) {
+  return listContactEnrichmentRuns(contactIds, client)
 }
 
 export async function deleteAccount(accountId: string, client?: SalesFrameClient) {
@@ -557,6 +745,83 @@ export async function listOpportunityPlaybookAssignments(
   return requireData(response, "Opportunity playbook assignments were not returned.")
 }
 
+export async function listOpportunityContacts(
+  opportunityIds: string | string[],
+  client?: SalesFrameClient
+) {
+  const ids = Array.isArray(opportunityIds) ? opportunityIds : [opportunityIds]
+  if (ids.length === 0) return []
+
+  const response = await getSupabase(client)
+    .from("opportunity_contacts")
+    .select("*")
+    .in("opportunity_id", ids)
+    .order("is_primary", { ascending: false })
+    .order("updated_at", { ascending: false })
+
+  return requireData(response, "Opportunity contacts were not returned.")
+}
+
+export async function upsertOpportunityContact(
+  values: TablesInsert<"opportunity_contacts">,
+  client?: SalesFrameClient
+) {
+  const response = await getSupabase(client)
+    .from("opportunity_contacts")
+    .upsert(values, { onConflict: "opportunity_id,contact_id" })
+    .select("*")
+    .single()
+
+  return requireData(response, "Opportunity contact was not saved.")
+}
+
+export async function updateOpportunityContact(
+  relationshipId: string,
+  values: TablesUpdate<"opportunity_contacts">,
+  client?: SalesFrameClient
+) {
+  const response = await getSupabase(client)
+    .from("opportunity_contacts")
+    .update(values)
+    .eq("id", relationshipId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Opportunity contact was not updated.")
+}
+
+export async function removeOpportunityContact(relationshipId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("opportunity_contacts")
+    .delete()
+    .eq("id", relationshipId)
+
+  if (response.error) throw new Error(response.error.message)
+}
+
+export async function replaceOpportunityContacts(
+  opportunityId: string,
+  assignments: OpportunityContactAssignment[],
+  client?: SalesFrameClient
+) {
+  const payload = assignments.map((assignment) => ({
+    contact_id: assignment.contact_id,
+    buying_roles: assignment.buying_roles ?? [],
+    influence: assignment.influence ?? "unknown",
+    relationship_strength: assignment.relationship_strength ?? "unknown",
+    stance: assignment.stance ?? "unknown",
+    is_primary: assignment.is_primary ?? false,
+    notes: assignment.notes ?? null,
+  })) as Json
+
+  const response = await getSupabase(client).rpc("replace_opportunity_contacts", {
+    assignments: payload,
+    target_opportunity_id: opportunityId,
+  })
+
+  return requireData(response, "Opportunity contacts were not saved.")
+}
+
 export async function listWorkspaceCalls(workspaceId: string, client?: SalesFrameClient) {
   const supabase = getSupabase(client)
   const response = await supabase
@@ -713,6 +978,76 @@ export async function replaceCallPlaybooks(callId: string, playbookIds: string[]
   return requireData(response, "Call playbooks were not saved.")
 }
 
+export async function listCallContacts(callIds: string | string[], client?: SalesFrameClient) {
+  const ids = Array.isArray(callIds) ? callIds : [callIds]
+  if (ids.length === 0) return []
+
+  const response = await getSupabase(client)
+    .from("call_contacts")
+    .select("*")
+    .in("call_id", ids)
+    .order("is_primary", { ascending: false })
+    .order("created_at", { ascending: true })
+
+  return requireData(response, "Call contacts were not returned.")
+}
+
+export async function upsertCallContact(
+  values: TablesInsert<"call_contacts">,
+  client?: SalesFrameClient
+) {
+  const response = await getSupabase(client)
+    .from("call_contacts")
+    .upsert(values, { onConflict: "call_id,contact_id" })
+    .select("*")
+    .single()
+
+  return requireData(response, "Call contact was not saved.")
+}
+
+export async function updateCallContact(
+  relationshipId: string,
+  values: TablesUpdate<"call_contacts">,
+  client?: SalesFrameClient
+) {
+  const response = await getSupabase(client)
+    .from("call_contacts")
+    .update(values)
+    .eq("id", relationshipId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Call contact was not updated.")
+}
+
+export async function removeCallContact(relationshipId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("call_contacts")
+    .delete()
+    .eq("id", relationshipId)
+
+  if (response.error) throw new Error(response.error.message)
+}
+
+export async function replaceCallContacts(
+  callId: string,
+  assignments: CallContactAssignment[],
+  client?: SalesFrameClient
+) {
+  const payload = assignments.map((assignment) => ({
+    contact_id: assignment.contact_id,
+    attendance_status: assignment.attendance_status ?? "expected",
+    is_primary: assignment.is_primary ?? false,
+  })) as Json
+
+  const response = await getSupabase(client).rpc("replace_call_contacts", {
+    assignments: payload,
+    target_call_id: callId,
+  })
+
+  return requireData(response, "Call contacts were not saved.")
+}
+
 export async function updateCall(callId: string, values: TablesUpdate<"calls">, client?: SalesFrameClient) {
   const response = await getSupabase(client)
     .from("calls")
@@ -751,13 +1086,78 @@ export async function deleteCall(callId: string, client?: SalesFrameClient) {
 }
 
 export async function upsertCallSpeaker(values: TablesInsert<"call_speakers">, client?: SalesFrameClient) {
-  const response = await getSupabase(client)
+  const supabase = getSupabase(client)
+  const existingSpeaker = await getCallSpeaker(values.call_id, values.label, supabase)
+
+  if (existingSpeaker) {
+    const speakerUpdates: TablesUpdate<"call_speakers"> = {}
+    if ("display_name" in values) speakerUpdates.display_name = values.display_name
+    if ("role" in values) speakerUpdates.role = values.role
+
+    if (Object.keys(speakerUpdates).length === 0) return existingSpeaker
+
+    const updateResponse = await supabase
+      .from("call_speakers")
+      .update(speakerUpdates)
+      .eq("id", existingSpeaker.id)
+      .select("*")
+      .single()
+
+    return requireData(updateResponse, "Call speaker was not updated.")
+  }
+
+  const response = await supabase
     .from("call_speakers")
-    .upsert(values, { onConflict: "call_id,label" })
+    .insert(values)
     .select("*")
     .single()
 
+  if (isDuplicateKeyError(response.error)) {
+    const concurrentSpeaker = await getCallSpeaker(values.call_id, values.label, supabase)
+    if (concurrentSpeaker) return concurrentSpeaker
+  }
+
   return requireData(response, "Call speaker was not saved.")
+}
+
+export async function confirmCallSpeakerContact(
+  speakerId: string,
+  contactId: string | null,
+  client?: SalesFrameClient
+) {
+  const userId = contactId ? await getCurrentUserId(client) : null
+  const response = await getSupabase(client)
+    .from("call_speakers")
+    .update({
+      contact_id: contactId,
+      contact_confirmed_at: contactId ? new Date().toISOString() : null,
+      contact_confirmed_by: userId,
+    })
+    .eq("id", speakerId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Speaker contact was not confirmed.")
+}
+
+export async function confirmOpportunityStakeholderContact(
+  stakeholderId: string,
+  contactId: string | null,
+  client?: SalesFrameClient
+) {
+  const userId = contactId ? await getCurrentUserId(client) : null
+  const response = await getSupabase(client)
+    .from("opportunity_stakeholders")
+    .update({
+      contact_id: contactId,
+      contact_confirmed_at: contactId ? new Date().toISOString() : null,
+      contact_confirmed_by: userId,
+    })
+    .eq("id", stakeholderId)
+    .select("*")
+    .single()
+
+  return requireData(response, "Stakeholder contact was not confirmed.")
 }
 
 export async function getCallSpeaker(callId: string, label: string, client?: SalesFrameClient) {
@@ -777,13 +1177,7 @@ export async function ensureCallSpeaker(values: TablesInsert<"call_speakers">, c
   const existingSpeaker = await getCallSpeaker(values.call_id, values.label, client)
   if (existingSpeaker) return existingSpeaker
 
-  const response = await getSupabase(client)
-    .from("call_speakers")
-    .upsert(values, { onConflict: "call_id,label" })
-    .select("*")
-    .single()
-
-  return requireData(response, "Call speaker was not saved.")
+  return upsertCallSpeaker(values, client)
 }
 
 export async function insertTranscriptSegment(

@@ -139,6 +139,29 @@ export async function authorizeAccount(
   return account
 }
 
+export async function authorizeContact(
+  userId: string,
+  contactId: string,
+  supabase: SupabaseClient<Database> = getSupabaseAdmin(),
+  options: { activeCallId?: string | null; requireActiveSession?: boolean; token?: string } = {}
+) {
+  const { data: contact, error } = await supabase
+    .from("contacts")
+    .select("id,workspace_id,account_id,archived_at")
+    .eq("id", contactId)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+  if (!contact) throw notFound("Contact was not found.")
+
+  const account = await authorizeAccount(userId, contact.account_id, supabase, options)
+  if (account.workspace_id !== contact.workspace_id) {
+    throw forbidden("Contact does not belong to this account workspace.")
+  }
+
+  return contact
+}
+
 export async function authorizeOpportunity(
   userId: string,
   opportunityId: string,

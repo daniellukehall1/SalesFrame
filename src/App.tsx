@@ -46,10 +46,18 @@ import {
   Undo2Icon,
   UserRoundCheckIcon,
   UsersRoundIcon,
+  XIcon,
 } from "lucide-react"
 
 import { AppSidebar } from "@/components/app-sidebar"
 import { AccountLogoAvatar } from "@/components/account-logo-avatar"
+import {
+  ContactMultiSelect,
+  ContactsPanel,
+  OpportunityContactsCard,
+  type ContactSaveHandler,
+  type OpportunityContactPatch,
+} from "@/components/contact-management"
 import type { AuthMode } from "@/components/auth-page"
 import type { LoginFormValues } from "@/components/login-form"
 import { type AccountNavItem } from "@/components/nav-projects"
@@ -141,7 +149,13 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { PlaybookIcon } from "@/data/playbook-icons"
 import { playbooks } from "@/data/playbook-reference-data"
 import type { LegalPageId } from "@/data/legal-documents"
-import { calculateAudioMeterPercent, smoothAudioMeterLevel } from "@/lib/audio-level-meter"
+import {
+  calculateAudioPeak,
+  calculateAudioRms,
+  createAudioMeterReading,
+  smoothAudioMeterLevel,
+  type AudioMeterReading,
+} from "@/lib/audio-level-meter"
 import {
   useCallCapture,
   type CallCapturePermissionState,
@@ -149,7 +163,6 @@ import {
 } from "@/hooks/use-call-capture"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
-  calculateAudioRms,
   getMeetingAudioDisplayOptions,
   getMicrophoneAudioConstraints,
   type AudioPreflightResult,
@@ -191,6 +204,7 @@ import {
   recordWorkspaceSessionActivity,
   retryFailedBulkEnrichment,
   requestAccountEnrichment,
+  requestContactEnrichment,
   requestCustomerResearch,
   requestLiveGuidance,
   requestLiveQuestion,
@@ -211,9 +225,12 @@ import {
   mapAccountRowToDraft,
   mapAccountRowsToNavItems,
   mapCallRowsToSummaries,
+  mapCallContactRowsToUi,
+  mapContactRowsToUi,
   mapCustomerResearchRunsToAccountConfig,
   mapOpportunityRowToDraft,
   mapOpportunityRowToUi,
+  mapOpportunityContactRowsToUi,
   mapOpportunityRowsToDrafts,
   mapOpportunityRowsToUi,
   mapSellerResearchProfileRow,
@@ -221,8 +238,10 @@ import {
 } from "@/lib/supabase/salesframe-adapters"
 import {
   archiveAccount as archiveSupabaseAccount,
+  archiveContact as archiveSupabaseContact,
   archiveOpportunity as archiveSupabaseOpportunity,
   createAccount as createSupabaseAccount,
+  createContact as createSupabaseContact,
   createCall as createSupabaseCall,
   createCallRecordingSignedUrl,
   createOpportunity as createSupabaseOpportunity,
@@ -232,44 +251,61 @@ import {
   deleteOpportunity as deleteSupabaseOpportunity,
   deleteWorkspace as deleteSupabaseWorkspace,
   getCurrentUserProfile,
+  getContact,
+  getContactEnrichmentProfile,
   getSellerResearchProfile,
   insertLiveGuidanceFeedback,
   listAccountEnrichmentProfiles,
+  listContactEnrichmentProfiles,
+  listContactEnrichmentRunsForContacts,
+  listContactEnrichmentRuns,
   listArchivedAccounts,
   listArchivedOpportunities,
   listCallNotes,
+  listCallContacts,
   listCallSpeakers,
   listCustomerResearchRunsForAccounts,
   listNextCallBriefs,
   listOpportunityFieldEvidence,
+  listOpportunityContacts,
   listOpportunityPlaybookAssignments,
   listPlaybookFields,
   listPostCallOutputs,
   listTranscriptSegments,
   listWorkspaceAccounts,
+  listWorkspaceContacts,
   listWorkspaceCalls,
   listWorkspaceOpportunities,
   listWorkspacePlaybooks,
   listWorkspaces,
   markWorkspaceOnboardingComplete,
   replaceCallPlaybooks,
+  replaceCallContacts,
+  replaceOpportunityContacts,
   replaceOpportunityPlaybooks,
   replacePlaybookFields,
   updateAccount as updateSupabaseAccount,
+  updateContact as updateSupabaseContact,
   updateCall as updateSupabaseCall,
   updateCurrentUserProfile,
   updateOpportunity as updateSupabaseOpportunity,
   updateTranscriptSegment,
   updateWorkspace as updateSupabaseWorkspace,
+  restoreContact as restoreSupabaseContact,
   unarchiveAccount as unarchiveSupabaseAccount,
   unarchiveOpportunity as unarchiveSupabaseOpportunity,
   upsertAccountEnrichmentProfile,
   upsertWorkspaceCustomPlaybook,
   upsertCallSpeaker,
+  confirmCallSpeakerContact,
   upsertSellerResearchProfile,
   type AccountEnrichmentProfileRow,
   type AccountRow,
+  type CallContactRow,
   type CallSpeakerRow,
+  type ContactEnrichmentProfileRow,
+  type ContactRow,
+  type OpportunityContactRow,
   type OpportunityRow,
   type PlaybookFieldRow,
   type PlaybookRow,
@@ -344,8 +380,11 @@ import {
   type CallEndedReason,
   type CallSummary,
   type CallAudioCaptureMode,
+  type CallContact,
   type CallPlaybook,
   type CurrencyCode,
+  type Contact,
+  type ContactDraft,
   type CreateAccountPayload,
   type CreateOpportunityPayload,
   type CustomerResearchConfig,
@@ -357,6 +396,7 @@ import {
   type ManualQuestion,
   type NextCallBrief,
   type Opportunity,
+  type OpportunityContact,
   type OpportunityCoverageFilter,
   type OpportunityDraft,
   type OpportunitySort,
@@ -438,6 +478,50 @@ type SpeakerIdentityChangeResult = {
   message: string
   persistence: "saved" | "local"
 }
+
+type ContactWorkspaceContextValue = {
+  accountTab: "record" | "contacts" | "opportunities" | "intelligence"
+  focusedContactId: string
+  contacts: Contact[]
+  opportunityContacts: OpportunityContact[]
+  callContacts: CallContact[]
+  contactStatusMessage: string
+  contactStatusTone: "status" | "error"
+  archiveContact: (contact: Contact) => Promise<void>
+  enrichContact: (contact: Contact) => Promise<void>
+  restoreContact: (contact: Contact) => Promise<void>
+  saveContact: ContactSaveHandler
+  replaceOpportunityContactSelection: (opportunityId: string, contactIds: string[]) => Promise<void>
+  updateOpportunityContactRelationship: (
+    opportunityId: string,
+    contactId: string,
+    patch: OpportunityContactPatch
+  ) => Promise<void>
+  confirmSpeakerContact: (speakerId: string, contactId: string | null) => Promise<void>
+  clearFocusedContact: () => void
+  focusContact: (contactId: string) => void
+  setAccountTab: (tab: "record" | "contacts" | "opportunities" | "intelligence") => void
+}
+
+const ContactWorkspaceContext = React.createContext<ContactWorkspaceContextValue>({
+  accountTab: "record",
+  focusedContactId: "",
+  contacts: [],
+  opportunityContacts: [],
+  callContacts: [],
+  contactStatusMessage: "",
+  contactStatusTone: "status",
+  archiveContact: async () => undefined,
+  enrichContact: async () => undefined,
+  restoreContact: async () => undefined,
+  saveContact: async () => undefined,
+  replaceOpportunityContactSelection: async () => undefined,
+  updateOpportunityContactRelationship: async () => undefined,
+  confirmSpeakerContact: async () => undefined,
+  clearFocusedContact: () => undefined,
+  focusContact: () => undefined,
+  setAccountTab: () => undefined,
+})
 
 type PublicAuthRoute = "landing" | "login" | "signup"
 
@@ -533,6 +617,7 @@ const minimumPageLoadMs = 700
 const sellerDomainLookupDebounceMs = 2000
 const colorModeStorageKey = "salesframe.color-mode"
 const captureSettingsStorageKey = "salesframe.capture-settings"
+const quickContactPrimaryToken = "__quick_contact_draft__"
 
 type CaptureSettings = {
   browserTab: boolean
@@ -1881,6 +1966,8 @@ function mapTranscriptSegmentsByCallId({
 
       transcript.push({
         audioSourceKind: segment.audio_source_kind ?? undefined,
+        contactConfirmedAt: speaker?.contact_confirmed_at ?? undefined,
+        contactId: speaker?.contact_id ?? undefined,
         id: segment.id,
         diarizationSpeaker: segment.diarization_speaker ?? undefined,
         endOfTurnConfidence: segment.end_of_turn_confidence ?? undefined,
@@ -2081,9 +2168,18 @@ function App() {
   const [transcriptsByCallId, setTranscriptsByCallId] = React.useState<Record<string, Opportunity["transcript"]>>({})
   const [workspaceAccounts, setWorkspaceAccounts] = React.useState<AccountNavItem[]>([])
   const [workspaceOpportunities, setWorkspaceOpportunities] = React.useState<Opportunity[]>([])
+  const [workspaceContacts, setWorkspaceContacts] = React.useState<Contact[]>([])
+  const [workspaceOpportunityContacts, setWorkspaceOpportunityContacts] = React.useState<OpportunityContact[]>([])
+  const [workspaceCallContacts, setWorkspaceCallContacts] = React.useState<CallContact[]>([])
+  const [contactStatusMessage, setContactStatusMessage] = React.useState("")
+  const [contactStatusTone, setContactStatusTone] = React.useState<"status" | "error">("status")
+  const [persistentAppAlert, setPersistentAppAlert] = React.useState("")
   const [archivedAccountRows, setArchivedAccountRows] = React.useState<AccountRow[]>([])
   const [archivedOpportunityRows, setArchivedOpportunityRows] = React.useState<OpportunityRow[]>([])
   const [activeAccountId, setActiveAccountId] = React.useState("")
+  const [accountDetailTab, setAccountDetailTab] = React.useState<"record" | "contacts" | "opportunities" | "intelligence">("record")
+  const [focusedContactId, setFocusedContactId] = React.useState("")
+  const clearFocusedContact = React.useCallback(() => setFocusedContactId(""), [])
   const [activeOpportunityId, setActiveOpportunityId] = React.useState("")
   const [activeCallId, setActiveCallId] = React.useState("")
   const [postCallFocusCallId, setPostCallFocusCallId] = React.useState("")
@@ -2205,6 +2301,21 @@ function App() {
   const workspaceSessionActivitySentAtRef = React.useRef(0)
   const workspaceSessionStatusRef = React.useRef<WorkspaceSessionStatusResponse | null>(null)
   const handleWorkspaceSessionExpiredRef = React.useRef<((message?: string) => void) | null>(null)
+  const contactEnrichmentPollTimersRef = React.useRef(new Map<string, number>())
+  const contactEnrichmentPollGenerationRef = React.useRef(0)
+
+  React.useLayoutEffect(() => {
+    const generation = contactEnrichmentPollGenerationRef.current + 1
+    contactEnrichmentPollGenerationRef.current = generation
+
+    return () => {
+      if (contactEnrichmentPollGenerationRef.current === generation) {
+        contactEnrichmentPollGenerationRef.current += 1
+      }
+      contactEnrichmentPollTimersRef.current.forEach((timerId) => window.clearTimeout(timerId))
+      contactEnrichmentPollTimersRef.current.clear()
+    }
+  }, [activeWorkspaceId])
 
   const activeOpportunity =
     workspaceOpportunities.find((opportunity) => opportunity.id === activeOpportunityId) ??
@@ -2872,6 +2983,7 @@ function App() {
         sellerResearchProfileRow,
         archivedAccounts,
         archivedOpportunities,
+        contactRows,
       ] = await Promise.all([
         listWorkspaceAccounts(activeWorkspaceId),
         listWorkspaceOpportunities(activeWorkspaceId),
@@ -2880,6 +2992,7 @@ function App() {
         getSellerResearchProfile(activeWorkspaceId),
         listArchivedAccounts(activeWorkspaceId),
         listArchivedOpportunities(activeWorkspaceId),
+        listWorkspaceContacts(activeWorkspaceId),
       ])
       const activeAccountIds = new Set(accountRows.map((account) => account.id))
       const activeOpportunityRows = opportunityRows.filter((opportunity) => activeAccountIds.has(opportunity.account_id))
@@ -2887,16 +3000,28 @@ function App() {
       const activeCallRows = callRows.filter(
         (call) => !call.opportunity_id || activeOpportunityIds.has(call.opportunity_id)
       )
-      const [playbookAssignments, customerResearchRuns, playbookFieldRows, enrichmentProfiles] = await Promise.all([
+      const [
+        playbookAssignments,
+        customerResearchRuns,
+        playbookFieldRows,
+        enrichmentProfiles,
+        contactEnrichmentProfiles,
+        contactEnrichmentRuns,
+        opportunityContactRows,
+      ] = await Promise.all([
         listOpportunityPlaybookAssignments(activeOpportunityRows.map((opportunity) => opportunity.id)),
         listCustomerResearchRunsForAccounts(accountRows.map((account) => account.id)),
         listPlaybookFields(playbookRows.map((playbook) => playbook.id)),
         listAccountEnrichmentProfiles(accountRows.map((account) => account.id)),
+        listContactEnrichmentProfiles(contactRows.map((contact) => contact.id)),
+        listContactEnrichmentRunsForContacts(contactRows.map((contact) => contact.id)),
+        listOpportunityContacts(activeOpportunityRows.map((opportunity) => opportunity.id)),
       ])
       const callIds = activeCallRows.map((call) => call.id)
       const opportunityIds = activeOpportunityRows.map((opportunity) => opportunity.id)
       const [
         callNotes,
+        callContactRows,
         callSpeakers,
         nextCallBriefs,
         opportunityFieldEvidence,
@@ -2904,6 +3029,7 @@ function App() {
         transcriptSegments,
       ] = await Promise.all([
         listCallNotes(callIds),
+        listCallContacts(callIds),
         listCallSpeakers(callIds),
         listNextCallBriefs(opportunityIds),
         listOpportunityFieldEvidence(opportunityIds),
@@ -2934,6 +3060,13 @@ function App() {
       setTranscriptsByCallId(mapTranscriptSegmentsByCallId({ callSpeakers, transcriptSegments }))
       setWorkspaceAccounts(nextAccounts)
       setWorkspaceOpportunities(nextOpportunities)
+      setWorkspaceContacts(mapContactRowsToUi({
+        contacts: contactRows,
+        enrichmentProfiles: contactEnrichmentProfiles,
+        enrichmentRuns: contactEnrichmentRuns,
+      }))
+      setWorkspaceOpportunityContacts(mapOpportunityContactRowsToUi(opportunityContactRows))
+      setWorkspaceCallContacts(mapCallContactRowsToUi(callContactRows))
       setArchivedAccountRows(archivedAccounts)
       setArchivedOpportunityRows(archivedOpportunities)
       const nextAccountDrafts = mapAccountRowsToDrafts(accountRows)
@@ -3019,6 +3152,7 @@ function App() {
     setAccountEnrichmentSaveMessage("")
     setAccountEnrichmentRunStatus("idle")
     setAccountEnrichmentRunMessage("")
+    setContactStatusMessage("")
   }, [activeAccount.id])
 
   React.useEffect(() => {
@@ -3108,6 +3242,8 @@ function App() {
   const handleAccountSelect = (accountId: string) => {
     requestNavigationScrollReset()
     setActiveAccountId(accountId)
+    setAccountDetailTab("record")
+    setFocusedContactId("")
     setPostCallFocusCallId("")
     const firstOpportunity = workspaceOpportunities.find((opportunity) => opportunity.accountId === accountId)
     if (firstOpportunity) {
@@ -3842,6 +3978,315 @@ function App() {
     }
   }
 
+  const scheduleContactEnrichmentPoll = (
+    contactId: string,
+    attempt = 0,
+    generation = contactEnrichmentPollGenerationRef.current
+  ) => {
+    if (generation !== contactEnrichmentPollGenerationRef.current) return
+    const delays = [3000, 8000, 20000, 45000, 90000, 180000, 300000]
+    const delay = delays[attempt]
+    if (delay === undefined) return
+
+    const existingTimer = contactEnrichmentPollTimersRef.current.get(contactId)
+    if (existingTimer) window.clearTimeout(existingTimer)
+
+    const timerId = window.setTimeout(() => {
+      contactEnrichmentPollTimersRef.current.delete(contactId)
+      if (generation !== contactEnrichmentPollGenerationRef.current) return
+      void Promise.all([
+        getContact(contactId),
+        getContactEnrichmentProfile(contactId),
+        listContactEnrichmentRuns(contactId),
+      ])
+        .then(([contactRow, profile, runs]) => {
+          if (generation !== contactEnrichmentPollGenerationRef.current) return
+          if (!contactRow) return
+          const mappedContact = mapContactRowsToUi({
+            contacts: [contactRow],
+            enrichmentProfiles: profile ? [profile] : [],
+            enrichmentRuns: runs,
+          })[0]
+          setWorkspaceContacts((contacts) =>
+            contacts.map((contact) => contact.id === contactId ? mappedContact : contact)
+          )
+
+          const enrichmentStatus = mappedContact.enrichment?.status ?? ""
+          if (enrichmentStatus === "completed") {
+            setContactStatusTone("status")
+            setContactStatusMessage(`${mappedContact.fullName}'s AI insights are ready.`)
+          } else if (enrichmentStatus === "failed") {
+            setContactStatusTone("error")
+            setContactStatusMessage(`${mappedContact.fullName}'s contact details are saved; enrichment needs Retry.`)
+          } else if (enrichmentStatus === "ambiguous") {
+            setContactStatusTone("error")
+            setContactStatusMessage(`SalesFrame needs more detail to confidently match ${mappedContact.fullName}. Review the profile URL, then Retry.`)
+          }
+
+          if (!["completed", "failed", "ambiguous"].includes(enrichmentStatus)) {
+            scheduleContactEnrichmentPoll(contactId, attempt + 1, generation)
+          }
+        })
+        .catch(() => scheduleContactEnrichmentPoll(contactId, attempt + 1, generation))
+    }, delay)
+
+    contactEnrichmentPollTimersRef.current.set(contactId, timerId)
+  }
+
+  React.useEffect(() => {
+    workspaceContacts.forEach((contact) => {
+      const status = contact.enrichment?.status
+      if ((status === "queued" || status === "running") && !contactEnrichmentPollTimersRef.current.has(contact.id)) {
+        scheduleContactEnrichmentPoll(contact.id)
+      }
+    })
+  }, [activeWorkspaceId, workspaceContacts])
+
+  const handleSaveContact: ContactSaveHandler = async (contactId, draft, enrichAfterSave) => {
+    if (!activeWorkspaceId || !activeAccount.id) throw new Error("Choose an account before saving a contact.")
+    setContactStatusMessage("")
+    setContactStatusTone("status")
+
+    const values = {
+      full_name: draft.fullName.trim(),
+      preferred_name: draft.preferredName.trim() || null,
+      job_title: draft.jobTitle.trim() || null,
+      department: draft.department.trim() || null,
+      seniority: draft.seniority.trim() || null,
+      work_email: draft.workEmail.trim() || null,
+      business_phone: draft.businessPhone.trim() || null,
+      linkedin_url: draft.linkedinUrl.trim() || null,
+      location: draft.location.trim() || null,
+      timezone: draft.timezone.trim() || null,
+      employment_status: draft.employmentStatus,
+      private_notes: draft.privateNotes.trim() || null,
+    }
+    const savedRow = contactId
+      ? await updateSupabaseContact(contactId, values)
+      : await createSupabaseContact({
+          ...values,
+          workspace_id: activeWorkspaceId,
+          account_id: activeAccount.id,
+          source: "manual",
+        })
+    const savedContact = mapContactRowsToUi({ contacts: [savedRow] })[0]
+
+    setWorkspaceContacts((contacts) =>
+      contacts.some((contact) => contact.id === savedContact.id)
+        ? contacts.map((contact) => (contact.id === savedContact.id ? { ...savedContact, enrichment: contact.enrichment } : contact))
+        : [...contacts, savedContact].sort((left, right) => left.fullName.localeCompare(right.fullName))
+    )
+
+    if (enrichAfterSave) {
+      void handleQueueContactEnrichment(savedContact.id).catch((error: unknown) => {
+        setWorkspaceContacts((contacts) =>
+          contacts.map((contact) => contact.id === savedContact.id
+            ? {
+                ...contact,
+                enrichment: {
+                  contactId: contact.id,
+                  professionalSummary: contact.enrichment?.professionalSummary ?? "",
+                  roleScope: contact.enrichment?.roleScope ?? "",
+                  priorities: contact.enrichment?.priorities ?? [],
+                  kpis: contact.enrichment?.kpis ?? [],
+                  relevantExperience: contact.enrichment?.relevantExperience ?? [],
+                  recentSignals: contact.enrichment?.recentSignals ?? [],
+                  discoveryAngles: contact.enrichment?.discoveryAngles ?? [],
+                  confidence: contact.enrichment?.confidence ?? null,
+                  caveats: contact.enrichment?.caveats ?? [],
+                  sources: contact.enrichment?.sources ?? [],
+                  lastEnrichedAt: contact.enrichment?.lastEnrichedAt ?? null,
+                  status: "failed" as const,
+                  statusMessage: "Enrichment needs another attempt.",
+                },
+              }
+            : contact)
+        )
+        setContactStatusMessage("Contact saved; enrichment needs Retry.")
+        setContactStatusTone("error")
+        void reportClientError({
+          error,
+          eventName: "contact_enrichment_queue_failed_after_save",
+          metadata: { contactId: savedContact.id },
+        })
+      })
+    } else {
+      setContactStatusMessage("Contact saved.")
+      setContactStatusTone("status")
+    }
+  }
+
+  const handleQueueContactEnrichment = async (contactId: string) => {
+    const generation = contactEnrichmentPollGenerationRef.current
+    const response = await requestContactEnrichment(contactId)
+    if (generation !== contactEnrichmentPollGenerationRef.current) return
+    setWorkspaceContacts((contacts) =>
+      contacts.map((contact) =>
+        contact.id === contactId
+          ? {
+              ...contact,
+              enrichment: {
+                contactId,
+                professionalSummary: contact.enrichment?.professionalSummary ?? "",
+                roleScope: contact.enrichment?.roleScope ?? "",
+                priorities: contact.enrichment?.priorities ?? [],
+                kpis: contact.enrichment?.kpis ?? [],
+                relevantExperience: contact.enrichment?.relevantExperience ?? [],
+                recentSignals: contact.enrichment?.recentSignals ?? [],
+                discoveryAngles: contact.enrichment?.discoveryAngles ?? [],
+                confidence: contact.enrichment?.confidence ?? null,
+                caveats: contact.enrichment?.caveats ?? [],
+                sources: contact.enrichment?.sources ?? [],
+                lastEnrichedAt: contact.enrichment?.lastEnrichedAt ?? null,
+                status: response.status,
+                statusMessage: "",
+              },
+            }
+          : contact
+      )
+    )
+    scheduleContactEnrichmentPoll(contactId, 0, generation)
+    if (response.status === "completed") {
+      setContactStatusMessage("The latest AI insights are already ready. SalesFrame is refreshing this contact now.")
+      setContactStatusTone("status")
+    } else if (response.status === "ambiguous") {
+      setContactStatusMessage("SalesFrame needs more identifying detail before it can confidently enrich this contact.")
+      setContactStatusTone("error")
+    } else {
+      setContactStatusMessage("Enrichment queued. You can keep working while SalesFrame checks public professional sources.")
+      setContactStatusTone("status")
+    }
+  }
+
+  const handleArchiveContact = async (contact: Contact) => {
+    const archivedRow = await archiveSupabaseContact(contact.id)
+    const archivedContact = mapContactRowsToUi({ contacts: [archivedRow] })[0]
+    setWorkspaceContacts((contacts) =>
+      contacts.map((item) => item.id === contact.id ? { ...archivedContact, enrichment: item.enrichment } : item)
+    )
+    setWorkspaceOpportunityContacts((relationships) =>
+      relationships.map((relationship) =>
+        relationship.contactId === contact.id ? { ...relationship, isPrimary: false } : relationship
+      )
+    )
+  }
+
+  const handleRestoreContact = async (contact: Contact) => {
+    const restoredRow = await restoreSupabaseContact(contact.id)
+    const restoredContact = mapContactRowsToUi({ contacts: [restoredRow] })[0]
+    setWorkspaceContacts((contacts) =>
+      contacts.map((item) => item.id === contact.id ? { ...restoredContact, enrichment: item.enrichment } : item)
+    )
+  }
+
+  const handleEnrichContact = async (contact: Contact) => handleQueueContactEnrichment(contact.id)
+
+  const handleReplaceOpportunityContactSelection = async (opportunityId: string, contactIds: string[]) => {
+    const currentRelationships = workspaceOpportunityContacts.filter((item) => item.opportunityId === opportunityId)
+    const retainedPrimaryId = currentRelationships.find(
+      (item) => item.isPrimary && contactIds.includes(item.contactId)
+    )?.contactId
+    const primaryContactId = retainedPrimaryId ?? contactIds[0] ?? ""
+
+    await replaceOpportunityContacts(
+      opportunityId,
+      contactIds.map((nextContactId) => {
+        const current = currentRelationships.find((item) => item.contactId === nextContactId)
+        return {
+          contact_id: nextContactId,
+          buying_roles: current?.buyingRoles ?? [],
+          influence: current?.influence ?? "unknown",
+          relationship_strength: current?.relationshipStrength ?? "unknown",
+          stance: current?.stance ?? "unknown",
+          is_primary: nextContactId === primaryContactId,
+          notes: current?.notes || null,
+        }
+      })
+    )
+    const savedRelationships = mapOpportunityContactRowsToUi(await listOpportunityContacts(opportunityId))
+    setWorkspaceOpportunityContacts((relationships) => [
+      ...relationships.filter((item) => item.opportunityId !== opportunityId),
+      ...savedRelationships,
+    ])
+  }
+
+  const handleUpdateOpportunityContactRelationship = async (
+    opportunityId: string,
+    contactId: string,
+    patch: OpportunityContactPatch
+  ) => {
+    const currentRelationships = workspaceOpportunityContacts.filter((item) => item.opportunityId === opportunityId)
+    const nextRelationships = currentRelationships.map((relationship) => {
+      const nextRelationship = relationship.contactId === contactId ? { ...relationship, ...patch } : relationship
+      return patch.isPrimary && relationship.contactId !== contactId
+        ? { ...nextRelationship, isPrimary: false }
+        : nextRelationship
+    })
+
+    await replaceOpportunityContacts(
+      opportunityId,
+      nextRelationships.map((relationship) => ({
+        contact_id: relationship.contactId,
+        buying_roles: relationship.buyingRoles,
+        influence: relationship.influence,
+        relationship_strength: relationship.relationshipStrength,
+        stance: relationship.stance,
+        is_primary: relationship.isPrimary,
+        notes: relationship.notes || null,
+      }))
+    )
+    const savedRelationships = mapOpportunityContactRowsToUi(await listOpportunityContacts(opportunityId))
+    setWorkspaceOpportunityContacts((relationships) => [
+      ...relationships.filter((item) => item.opportunityId !== opportunityId),
+      ...savedRelationships,
+    ])
+  }
+
+  const handleConfirmSpeakerContact = async (speakerId: string, contactId: string | null) => {
+    const savedSpeaker = await confirmCallSpeakerContact(speakerId, contactId)
+    const savedSpeakerLabel = getCanonicalTranscriptSpeakerLabel(normalizeTranscriptSpeakerLabel(savedSpeaker.label))
+    const applyConfirmedContact = (lines: Opportunity["transcript"]) => lines.map((line) => {
+      const matchesSpeaker = line.speakerId === savedSpeaker.id || (
+        !line.speakerId &&
+        getCanonicalTranscriptSpeakerLabel(normalizeTranscriptSpeakerLabel(getTranscriptSpeakerLabel(line))) === savedSpeakerLabel
+      )
+      if (!matchesSpeaker) return line
+
+      return {
+        ...line,
+        contactConfirmedAt: savedSpeaker.contact_confirmed_at ?? undefined,
+        contactId: savedSpeaker.contact_id ?? undefined,
+        speakerId: savedSpeaker.id,
+      }
+    })
+
+    if (savedSpeaker.call_id === activeCallIdRef.current) {
+      setTranscript((lines) => {
+        const nextLines = applyConfirmedContact(lines)
+        transcriptRef.current = nextLines
+        return nextLines
+      })
+    }
+    setTranscriptsByCallId((transcripts) => {
+      const savedTranscript = transcripts[savedSpeaker.call_id]
+      if (!savedTranscript) return transcripts
+
+      return {
+        ...transcripts,
+        [savedSpeaker.call_id]: applyConfirmedContact(savedTranscript),
+      }
+    })
+    if (contactId) {
+      setWorkspaceCallContacts((relationships) =>
+        relationships.map((relationship) =>
+          relationship.callId === savedSpeaker.call_id && relationship.contactId === contactId
+            ? { ...relationship, attendance: "attended" }
+            : relationship
+        )
+      )
+    }
+  }
+
   const handleStartRecording = async (payload: StartRecordingPayload) => {
     if (!activeWorkspaceId) {
       return {
@@ -3850,8 +4295,8 @@ function App() {
       }
     }
 
-    const getStartCancelledResult = () => ({
-      message: "Call start was cancelled.",
+    const getStartCancelledResult = (message = "Call start was cancelled.") => ({
+      message,
       ok: false as const,
     })
     const updatePreparationStep = (step: StartCallPreparationStepId, detail?: string) => {
@@ -3880,7 +4325,42 @@ function App() {
     let createdCallId = ""
     let createdAccountRow: Awaited<ReturnType<typeof createSupabaseAccount>> | null = null
     let createdOpportunityRow: Awaited<ReturnType<typeof createSupabaseOpportunity>> | null = null
+    let createdQuickContactRow: Awaited<ReturnType<typeof createSupabaseContact>> | null = null
+    let savedOpportunityContactRows: OpportunityContactRow[] = []
+    let savedCallContactRows: CallContactRow[] = []
+    let opportunityId = ""
+    let previousOpportunityContactRows: OpportunityContactRow[] | null = null
+    let primaryContactId = ""
     let captureStarted = false
+    const restoreOpportunityContactsAfterFailedStart = async () => {
+      if (!opportunityId || !previousOpportunityContactRows) return
+      let lastError: unknown = null
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const restoredRows = await replaceOpportunityContacts(
+            opportunityId,
+            previousOpportunityContactRows.map((relationship) => ({
+              contact_id: relationship.contact_id,
+              buying_roles: relationship.buying_roles,
+              influence: relationship.influence,
+              relationship_strength: relationship.relationship_strength,
+              stance: relationship.stance,
+              is_primary: relationship.is_primary,
+              notes: relationship.notes,
+            }))
+          )
+          setWorkspaceOpportunityContacts((relationships) => [
+            ...relationships.filter((relationship) => relationship.opportunityId !== opportunityId),
+            ...mapOpportunityContactRowsToUi(restoredRows),
+          ])
+          return
+        } catch (error: unknown) {
+          lastError = error
+        }
+      }
+
+      throw lastError instanceof Error ? lastError : new Error("Opportunity contact restoration failed.")
+    }
 
     try {
       if (isNewAccount && !accountName) {
@@ -3945,7 +4425,7 @@ function App() {
       }
 
       const isNewOpportunity = isNewAccount || payload.opportunityMode === "new"
-      let opportunityId = isNewOpportunity ? "" : payload.opportunityId
+      opportunityId = isNewOpportunity ? "" : payload.opportunityId
       const opportunityName = isNewOpportunity
         ? payload.opportunityName.trim()
         : workspaceOpportunities.find((opportunity) => opportunity.id === opportunityId)?.name ?? "Selected opportunity"
@@ -3979,6 +4459,31 @@ function App() {
         createdOpportunityRow = opportunity
       }
 
+      const eligibleSelectedContactIds = [...new Set(payload.selectedContactIds.filter((contactId) =>
+        workspaceContacts.some(
+          (contact) => contact.id === contactId && contact.accountId === accountId && !contact.archivedAtIso
+        )
+      ))]
+      if (payload.quickContactDraft?.fullName.trim()) {
+        createdQuickContactRow = await createSupabaseContact({
+          workspace_id: activeWorkspaceId,
+          account_id: accountId,
+          full_name: payload.quickContactDraft.fullName.trim(),
+          job_title: payload.quickContactDraft.jobTitle.trim() || null,
+          source: "quick_add",
+        })
+        if (!eligibleSelectedContactIds.includes(createdQuickContactRow.id)) {
+          eligibleSelectedContactIds.push(createdQuickContactRow.id)
+        }
+        throwIfStartCancelled()
+      }
+      primaryContactId =
+        payload.primaryContactId === quickContactPrimaryToken && createdQuickContactRow
+          ? createdQuickContactRow.id
+          : payload.primaryContactId && eligibleSelectedContactIds.includes(payload.primaryContactId)
+            ? payload.primaryContactId
+            : eligibleSelectedContactIds[0] ?? ""
+
       const playbookIds = getPlaybookIdsForSelection(workspacePlaybooks, selectedPlaybooks)
       const playbookAssignments = await replaceOpportunityPlaybooks(opportunityId, playbookIds)
       throwIfStartCancelled()
@@ -3998,6 +4503,23 @@ function App() {
       })
       createdCallId = call.id
       throwIfStartCancelled()
+
+      if (eligibleSelectedContactIds.length > 0) {
+        if (!createdOpportunityRow) {
+          previousOpportunityContactRows = await listOpportunityContacts(opportunityId)
+        }
+        await replaceCallContacts(
+          call.id,
+          eligibleSelectedContactIds.map((contactId) => ({
+            contact_id: contactId,
+            attendance_status: "expected",
+            is_primary: contactId === primaryContactId,
+          }))
+        )
+        savedCallContactRows = await listCallContacts(call.id)
+        savedOpportunityContactRows = await listOpportunityContacts(opportunityId)
+        throwIfStartCancelled()
+      }
 
       await replaceCallPlaybooks(call.id, playbookIds)
       throwIfStartCancelled()
@@ -4164,8 +4686,7 @@ function App() {
         void requestCustomerResearch({
           accountId,
           callId: call.id,
-          customerContact: payload.customerResearch.customerContact,
-          customerRole: payload.customerResearch.customerRole,
+          contactId: primaryContactId || undefined,
           opportunityId,
           productContext: payload.customerResearch.productContext,
           sellerCompany: payload.customerResearch.sellerCompany,
@@ -4255,6 +4776,24 @@ function App() {
         }))
       }
 
+      if (createdQuickContactRow) {
+        const quickContact = mapContactRowsToUi({ contacts: [createdQuickContactRow] })[0]
+        setWorkspaceContacts((contacts) => [...contacts.filter((contact) => contact.id !== quickContact.id), quickContact])
+      }
+      if (savedOpportunityContactRows.length) {
+        const savedRelationships = mapOpportunityContactRowsToUi(savedOpportunityContactRows)
+        setWorkspaceOpportunityContacts((relationships) => [
+          ...relationships.filter((relationship) => relationship.opportunityId !== opportunityId),
+          ...savedRelationships,
+        ])
+      }
+      if (savedCallContactRows.length) {
+        setWorkspaceCallContacts((relationships) => [
+          ...relationships.filter((relationship) => relationship.callId !== call.id),
+          ...mapCallContactRowsToUi(savedCallContactRows),
+        ])
+      }
+
       startingRecordingRef.current = true
       if (pageLoadTimeoutRef.current !== null) {
         window.clearTimeout(pageLoadTimeoutRef.current)
@@ -4294,6 +4833,21 @@ function App() {
           await deleteSupabaseAccount(createdAccountRow.id).catch(() => undefined)
         } else if (createdOpportunityRow) {
           await deleteSupabaseOpportunity(createdOpportunityRow.id).catch(() => undefined)
+        }
+        if (!createdAccountRow && createdQuickContactRow) {
+          await archiveSupabaseContact(createdQuickContactRow.id, "Call start cancelled").catch(() => undefined)
+        }
+        let contactRollbackFailed = false
+        try {
+          await restoreOpportunityContactsAfterFailedStart()
+        } catch (rollbackError: unknown) {
+          contactRollbackFailed = true
+          setPersistentAppAlert("Some opportunity contact changes may remain after cancelling call setup. Review that opportunity before the next call.")
+          void reportClientError({
+            error: rollbackError,
+            eventName: "start_call_contact_rollback_failed",
+            metadata: { callId: createdCallId, opportunityId },
+          })
         }
 
         if (createdCallId) {
@@ -4372,10 +4926,14 @@ function App() {
         activeCallIdRef.current = ""
         setActiveCallStartedAt("")
 
-        return getStartCancelledResult()
+        return getStartCancelledResult(
+          contactRollbackFailed
+            ? "Call start was cancelled, but some opportunity contact changes may remain. Review that opportunity before the next call."
+            : undefined
+        )
       }
 
-      const message = appendErrorReference(getUserFacingErrorMessage(caughtError, "Call start needs another try."), caughtError)
+      let message = appendErrorReference(getUserFacingErrorMessage(caughtError, "Call start needs another try."), caughtError)
 
       void reportClientError({
         error: caughtError,
@@ -4407,6 +4965,20 @@ function App() {
           await deleteSupabaseAccount(createdAccountRow.id).catch(() => undefined)
         } else if (createdOpportunityRow) {
           await deleteSupabaseOpportunity(createdOpportunityRow.id).catch(() => undefined)
+        }
+        if (!createdAccountRow && createdQuickContactRow) {
+          await archiveSupabaseContact(createdQuickContactRow.id, "Call start failed").catch(() => undefined)
+        }
+        try {
+          await restoreOpportunityContactsAfterFailedStart()
+        } catch (rollbackError: unknown) {
+          message = `${message} Some opportunity contact changes may remain; review that opportunity before the next call.`
+          setPersistentAppAlert("Some opportunity contact changes may remain after call setup failed. Review that opportunity before the next call.")
+          void reportClientError({
+            error: rollbackError,
+            eventName: "start_call_contact_rollback_failed",
+            metadata: { callId: createdCallId, opportunityId },
+          })
         }
       }
 
@@ -4501,8 +5073,6 @@ function App() {
 
         void requestCustomerResearch({
           accountId: account.id,
-          customerContact: payload.customerResearch.customerContact,
-          customerRole: payload.customerResearch.customerRole,
           opportunityId: opportunityId || null,
           productContext: payload.customerResearch.productContext,
           sellerCompany: payload.customerResearch.sellerCompany,
@@ -5330,6 +5900,9 @@ function App() {
     setActiveWorkspaceId("")
     setWorkspaceAccounts([])
     setWorkspaceOpportunities([])
+    setWorkspaceContacts([])
+    setWorkspaceOpportunityContacts([])
+    setWorkspaceCallContacts([])
     setWorkspaceCalls([])
     setWorkspacePlaybooks([])
     setWorkspacePlaybookFields([])
@@ -5821,7 +6394,48 @@ function App() {
 
   return (
     <TooltipProvider>
+      <ContactWorkspaceContext.Provider
+        value={{
+          contacts: workspaceContacts,
+          accountTab: accountDetailTab,
+          focusedContactId,
+          opportunityContacts: workspaceOpportunityContacts,
+          callContacts: workspaceCallContacts,
+          contactStatusMessage,
+          contactStatusTone,
+          archiveContact: handleArchiveContact,
+          enrichContact: handleEnrichContact,
+          restoreContact: handleRestoreContact,
+          saveContact: handleSaveContact,
+          replaceOpportunityContactSelection: handleReplaceOpportunityContactSelection,
+          updateOpportunityContactRelationship: handleUpdateOpportunityContactRelationship,
+          confirmSpeakerContact: handleConfirmSpeakerContact,
+          clearFocusedContact,
+          focusContact: setFocusedContactId,
+          setAccountTab: setAccountDetailTab,
+        }}
+      >
       <SidebarProvider className="h-svh min-h-0 overflow-hidden">
+        {persistentAppAlert ? (
+          <div
+            className="fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-[80] flex w-[min(36rem,calc(100vw-1.5rem))] -translate-x-1/2 items-start gap-3 rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive shadow-lg"
+            role="alert"
+            aria-live="assertive"
+          >
+            <CircleAlertIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 flex-1">{persistentAppAlert}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-11 shrink-0 md:size-8"
+              aria-label="Dismiss contact recovery warning"
+              onClick={() => setPersistentAppAlert("")}
+            >
+              <XIcon />
+            </Button>
+          </div>
+        ) : null}
         <Dialog open={workspaceSessionWarningOpen && !isCallLive} onOpenChange={setWorkspaceSessionWarningOpen}>
           <DialogContent className="max-sm:max-w-[calc(100%-0.75rem)] sm:max-w-md">
             <DialogHeader>
@@ -6275,6 +6889,7 @@ function App() {
           />
         ) : null}
       </SidebarProvider>
+      </ContactWorkspaceContext.Provider>
     </TooltipProvider>
   )
 }
@@ -6941,6 +7556,7 @@ function GlobalSearch({
   onNavigate: (value: string) => void
   onOpportunitySelect: (id: string) => void
 }) {
+  const { contacts, focusContact, setAccountTab } = React.useContext(ContactWorkspaceContext)
   const [query, setQuery] = React.useState("")
   const [focused, setFocused] = React.useState(false)
   const [mobileOpen, setMobileOpen] = React.useState(false)
@@ -6961,6 +7577,33 @@ function GlobalSearch({
         searchText: getAccountSearchText(account, accountDrafts[account.id]),
         onSelect: () => onAccountSelect(account.id),
       })),
+      ...contacts
+        .filter((contact) => !contact.archivedAtIso)
+        .map((contact) => {
+          const account = accountById.get(contact.accountId)
+
+          return {
+            id: contact.id,
+            type: "Contact",
+            label: contact.fullName,
+            meta: `${contact.jobTitle || "Role not captured"} / ${account?.name ?? "Account"}`,
+            icon: <UserRoundCheckIcon />,
+            searchText: [
+              contact.fullName,
+              contact.preferredName,
+              contact.jobTitle,
+              contact.department,
+              contact.workEmail,
+              contact.businessPhone,
+              contact.linkedinUrl,
+            ].join(" "),
+            onSelect: () => {
+              onAccountSelect(contact.accountId)
+              setAccountTab("contacts")
+              focusContact(contact.id)
+            },
+          }
+        }),
       ...opportunities.map((item) => {
         const account = accountById.get(item.accountId)
 
@@ -7019,6 +7662,8 @@ function GlobalSearch({
     accountDrafts,
     accounts,
     calls,
+    contacts,
+    focusContact,
     onAccountSelect,
     onCallSelect,
     onNavigate,
@@ -7027,6 +7672,7 @@ function GlobalSearch({
     opportunityById,
     opportunityDrafts,
     query,
+    setAccountTab,
     transcriptsByCallId,
   ])
 
@@ -7051,7 +7697,7 @@ function GlobalSearch({
           <span className="min-w-0">
             <span className="block text-sm font-medium">Search the workspace</span>
             <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-              Try an account, opportunity, call, or playbook name.
+              Try an account, contact, opportunity, call, or playbook name.
             </span>
           </span>
         </div>
@@ -7067,7 +7713,7 @@ function GlobalSearch({
           <span className="min-w-0">
             <span className="block text-sm font-medium">Nothing matches that search</span>
             <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-              Try an account, opportunity, call, or playbook name.
+              Try an account, contact, opportunity, call, or playbook name.
             </span>
           </span>
         </div>
@@ -7110,7 +7756,7 @@ function GlobalSearch({
         <Input
           aria-label="Search workspace"
           value={query}
-          className="h-8 pl-9"
+          className="h-8 pl-10 md:pl-10"
           placeholder="Search workspace"
           onBlur={() => window.setTimeout(() => setFocused(false), 120)}
           onChange={(event) => {
@@ -7139,7 +7785,7 @@ function GlobalSearch({
         >
           <DialogHeader>
             <DialogTitle>Search workspace</DialogTitle>
-            <DialogDescription>Find accounts, opportunities, calls, and playbooks.</DialogDescription>
+            <DialogDescription>Find accounts, contacts, opportunities, calls, and playbooks.</DialogDescription>
           </DialogHeader>
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -7147,7 +7793,7 @@ function GlobalSearch({
               autoFocus
               aria-label="Search workspace"
               value={query}
-              className="h-11 pl-9"
+              className="h-11 pl-10 md:pl-10"
               placeholder="Search workspace"
               onChange={(event) => {
                 setQuery(event.currentTarget.value)
@@ -7455,14 +8101,16 @@ function StartCallPreparingView({
   )
 }
 
-type AudioSetupStatus = "idle" | "checking" | "listening" | "quiet" | "blocked" | "unsupported"
+type AudioSetupStatus = "idle" | "checking" | "silent" | "low" | "good" | "high" | "blocked" | "unsupported"
+
+const emptyAudioMeterReading = createAudioMeterReading(0)
 
 function useMediaStreamLevel(stream: MediaStream | null) {
-  const [level, setLevel] = React.useState(0)
+  const [reading, setReading] = React.useState<AudioMeterReading>(emptyAudioMeterReading)
 
   React.useEffect(() => {
     if (!stream || stream.getAudioTracks().length === 0) {
-      setLevel(0)
+      setReading(emptyAudioMeterReading)
       return
     }
 
@@ -7471,13 +8119,17 @@ function useMediaStreamLevel(stream: MediaStream | null) {
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
 
     if (!AudioContextCtor) {
-      setLevel(0)
+      setReading(emptyAudioMeterReading)
       return
     }
 
     let active = true
     let audioContext: AudioContext | null = null
-    let animationFrameId = 0
+    let meterTimerId = 0
+    let sourceNode: MediaStreamAudioSourceNode | null = null
+    let analyser: AnalyserNode | null = null
+    let smoothedLevel = 0
+    let consecutiveClippedFrames = 0
 
     const startMeter = async () => {
       audioContext = new AudioContextCtor()
@@ -7486,69 +8138,122 @@ function useMediaStreamLevel(stream: MediaStream | null) {
       }
       if (!active || !audioContext) return
 
-      const sourceNode = audioContext.createMediaStreamSource(stream)
-      const analyser = audioContext.createAnalyser()
+      sourceNode = audioContext.createMediaStreamSource(stream)
+      analyser = audioContext.createAnalyser()
       analyser.fftSize = 1024
-      const samples = new Uint8Array(analyser.fftSize)
+      analyser.smoothingTimeConstant = 0
+      const samples = new Float32Array(analyser.fftSize)
 
       sourceNode.connect(analyser)
 
       const tick = () => {
-        if (!active) return
+        if (!active || !analyser) return
 
-        analyser.getByteTimeDomainData(samples)
-        const nextLevel = calculateAudioRms(samples)
-        setLevel((previousLevel) => Number(smoothAudioMeterLevel(nextLevel, previousLevel).toFixed(4)))
-        animationFrameId = window.requestAnimationFrame(tick)
+        analyser.getFloatTimeDomainData(samples)
+        const rawLevel = calculateAudioRms(samples)
+        const rawPeak = calculateAudioPeak(samples)
+        consecutiveClippedFrames = rawPeak >= 0.98 ? consecutiveClippedFrames + 1 : 0
+        smoothedLevel = smoothAudioMeterLevel(rawLevel, smoothedLevel, 50)
+        setReading(createAudioMeterReading(smoothedLevel, consecutiveClippedFrames >= 2 ? rawPeak : 0))
       }
 
       tick()
+      meterTimerId = window.setInterval(tick, 50)
     }
 
     void startMeter()
 
     return () => {
       active = false
-      if (animationFrameId) window.cancelAnimationFrame(animationFrameId)
+      if (meterTimerId) window.clearInterval(meterTimerId)
+      sourceNode?.disconnect()
+      analyser?.disconnect()
       void audioContext?.close().catch(() => undefined)
     }
   }, [stream])
 
-  return level
+  return reading
 }
 
 function AudioSetupMeter({
   detail,
   label,
-  level,
+  reading,
   status,
+  quietHint = "Speak normally to test this input.",
 }: {
   detail: string
   label: string
-  level: number
+  reading: AudioMeterReading
   status: AudioSetupStatus
+  quietHint?: string
 }) {
-  const meterValue = calculateAudioMeterPercent(level)
+  const meterValue = reading.meterPercent
   const isBlocked = status === "blocked" || status === "unsupported"
+  const statusLabel: Record<AudioSetupStatus, string> = {
+    blocked: "Needs permission",
+    checking: "Connecting…",
+    good: "Good signal",
+    high: "Too loud",
+    idle: "Not connected",
+    low: "Signal is low",
+    silent: "No signal",
+    unsupported: "Not supported",
+  }
+  const guidance =
+    status === "silent" || status === "low"
+      ? quietHint
+      : status === "high"
+        ? "Move the microphone away or lower the input gain."
+        : detail
 
   return (
     <div className="grid min-w-0 gap-1.5">
-      <div className="min-w-0">
+      <div className="flex min-w-0 items-center justify-between gap-2">
         <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
-        <span className="sr-only">{status}</span>
+        <span className="flex shrink-0 items-center gap-1.5 text-xs font-medium" aria-live="polite">
+          <span
+            className={cn(
+              "size-1.5 rounded-full",
+              isBlocked
+                ? "bg-destructive"
+                : status === "good"
+                  ? "bg-emerald-500"
+                  : status === "high" || status === "low"
+                    ? "bg-amber-500"
+                    : "bg-muted-foreground/40"
+            )}
+            aria-hidden="true"
+          />
+          {statusLabel[status]}
+        </span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
+      <div
+        className="h-2.5 overflow-hidden rounded-full bg-muted"
+        role="meter"
+        aria-label={`${label} signal level`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={meterValue}
+        aria-valuetext={statusLabel[status]}
+      >
         <div
           className={cn(
             "h-full rounded-full transition-[width,background-color] duration-100 ease-out",
-            isBlocked ? "bg-destructive" : status === "idle" || status === "checking" ? "bg-muted-foreground/30" : "bg-foreground"
+            isBlocked
+              ? "bg-destructive"
+              : status === "good"
+                ? "bg-emerald-500"
+                : status === "high" || status === "low"
+                  ? "bg-amber-500"
+                  : "bg-muted-foreground/30"
           )}
           aria-hidden="true"
           style={{ width: `${meterValue}%` }}
         />
       </div>
-      <p className="truncate text-xs text-muted-foreground" title={`${detail} · input level ${meterValue}%`}>
-        {detail}
+      <p className="truncate text-xs text-muted-foreground" title={guidance}>
+        {guidance}
       </p>
     </div>
   )
@@ -7557,13 +8262,13 @@ function AudioSetupMeter({
 function getAudioSetupStatus({
   error,
   isChecking,
-  level,
+  reading,
   stream,
   unsupported,
 }: {
   error?: string
   isChecking: boolean
-  level: number
+  reading: AudioMeterReading
   stream: MediaStream | null
   unsupported?: boolean
 }): AudioSetupStatus {
@@ -7572,7 +8277,7 @@ function getAudioSetupStatus({
   if (isChecking) return "checking"
   if (!stream) return "idle"
 
-  return level >= 0.018 ? "listening" : "quiet"
+  return reading.quality
 }
 
 function stopMediaStream(stream: MediaStream | null) {
@@ -7619,6 +8324,7 @@ function StartRecordingDialog({
   triggerVariant?: React.ComponentProps<typeof Button>["variant"]
 }) {
   const isMobile = useIsMobile()
+  const { contacts, opportunityContacts } = React.useContext(ContactWorkspaceContext)
   const [open, setOpen] = React.useState(false)
   const [step, setStep] = React.useState<1 | 2 | 3 | 4>(1)
   const [accountMode, setAccountMode] = React.useState<"existing" | "new">("existing")
@@ -7661,8 +8367,11 @@ function StartRecordingDialog({
   const [researchProfileMessage, setResearchProfileMessage] = React.useState("")
   const [researchProfileStatus, setResearchProfileStatus] =
     React.useState<"idle" | "loading" | "success" | "error">("idle")
-  const [customerContact, setCustomerContact] = React.useState("")
-  const [customerRole, setCustomerRole] = React.useState("")
+  const [selectedContactIds, setSelectedContactIds] = React.useState<string[]>([])
+  const [primaryContactId, setPrimaryContactId] = React.useState("")
+  const [quickContactOpen, setQuickContactOpen] = React.useState(false)
+  const [quickContactName, setQuickContactName] = React.useState("")
+  const [quickContactTitle, setQuickContactTitle] = React.useState("")
   const [audioInputDevices, setAudioInputDevices] = React.useState<AudioDeviceOption[]>([])
   const [selectedAudioInputDeviceId, setSelectedAudioInputDeviceId] = React.useState(() =>
     readPreferredAudioInputDeviceId(workspaceId)
@@ -7686,6 +8395,14 @@ function StartRecordingDialog({
   const selectedAccount = accounts.find((account) => account.id === accountId)
   const selectedOpportunity = opportunities.find((opportunity) => opportunity.id === opportunityId)
   const accountOpportunities = opportunities.filter((opportunity) => opportunity.accountId === accountId)
+  const accountContacts = accountMode === "existing"
+    ? contacts.filter((contact) => contact.accountId === accountId && !contact.archivedAtIso)
+    : []
+  const opportunityContactIds = accountMode === "existing" && opportunityMode === "existing"
+    ? opportunityContacts
+        .filter((relationship) => relationship.opportunityId === opportunityId)
+        .map((relationship) => relationship.contactId)
+    : []
   const canUseExistingOpportunity = accountMode === "existing" && accountOpportunities.length > 0
   const canContinueAccount = accountMode === "new" ? accountName.trim().length > 0 : Boolean(accountId)
   const canContinueOpportunity =
@@ -7701,8 +8418,8 @@ function StartRecordingDialog({
   const canStart = canContinueAccount && canContinueOpportunity && canContinueCall && canUseResearch && canUseOpenAi
   const canContinue = step === 1 ? canContinueAccount : step === 2 ? canContinueOpportunity : canContinueCall
   const selectedAudioSourceChoice = getAudioSourceChoice(audioCaptureMode)
-  const microphonePreviewLevel = useMediaStreamLevel(microphonePreviewStream)
-  const meetingAudioPreviewLevel = useMediaStreamLevel(meetingAudioPreviewStream)
+  const microphonePreviewReading = useMediaStreamLevel(microphonePreviewStream)
+  const meetingAudioPreviewReading = useMediaStreamLevel(meetingAudioPreviewStream)
   const selectedAudioInputLabel = getAudioDeviceDisplayName(
     selectedAudioInputDeviceId,
     audioInputDevices,
@@ -7711,14 +8428,14 @@ function StartRecordingDialog({
   const microphoneSetupStatus = getAudioSetupStatus({
     error: microphonePreviewError,
     isChecking: microphonePreviewChecking,
-    level: microphonePreviewLevel,
+    reading: microphonePreviewReading,
     stream: microphonePreviewStream,
     unsupported: typeof navigator !== "undefined" && !navigator.mediaDevices?.getUserMedia,
   })
   const sharedAudioSetupStatus = getAudioSetupStatus({
     error: meetingAudioPreviewError,
     isChecking: meetingAudioSelecting,
-    level: meetingAudioPreviewLevel,
+    reading: meetingAudioPreviewReading,
     stream: meetingAudioPreviewStream,
     unsupported: typeof navigator !== "undefined" && !navigator.mediaDevices?.getDisplayMedia,
   })
@@ -7826,6 +8543,10 @@ function StartRecordingDialog({
   }, [])
 
   const handleAudioInputDeviceChange = (deviceId: string) => {
+    if (deviceId === selectedAudioInputDeviceId) return
+
+    clearMicrophonePreview()
+    setMicrophonePreviewChecking(true)
     setSelectedAudioInputDeviceId(deviceId)
     writePreferredAudioInputDeviceId(workspaceId, deviceId)
     setMicrophonePreviewError("")
@@ -7854,6 +8575,20 @@ function StartRecordingDialog({
       meetingAudioPreviewStreamRef.current = stream
       setMeetingAudioPreviewStream(stream)
       setMeetingAudioSurface(surface)
+      stream.getTracks().forEach((track) => {
+        track.addEventListener(
+          "ended",
+          () => {
+            if (meetingAudioPreviewStreamRef.current !== stream) return
+
+            meetingAudioPreviewStreamRef.current = null
+            setMeetingAudioPreviewStream(null)
+            setMeetingAudioSurface(undefined)
+            setMeetingAudioPreviewError("Shared audio stopped. Choose the tab, window, or screen again before starting.")
+          },
+          { once: true }
+        )
+      })
     } catch (error: unknown) {
       setMeetingAudioPreviewError(
         getUserFacingErrorMessage(error, "Shared audio needs another connection attempt. Try the browser picker again.")
@@ -7872,8 +8607,19 @@ function StartRecordingDialog({
     setProductContext(accountResearch?.productContext ?? sellerResearchProfile.productContext)
     setResearchProfileMessage("")
     setResearchProfileStatus("idle")
-    setCustomerContact(accountResearch?.customerContact ?? "")
-    setCustomerRole(accountResearch?.customerRole ?? "")
+  }
+
+  const clearContactSelection = () => {
+    setSelectedContactIds([])
+    setPrimaryContactId("")
+    setQuickContactOpen(false)
+    setQuickContactName("")
+    setQuickContactTitle("")
+  }
+
+  const handleSelectedContactsChange = (contactIds: string[]) => {
+    setSelectedContactIds(contactIds)
+    setPrimaryContactId((current) => (current && contactIds.includes(current) ? current : contactIds[0] ?? ""))
   }
 
   React.useEffect(() => {
@@ -7908,6 +8654,17 @@ function StartRecordingDialog({
     if (!open || step !== 3) return
 
     void refreshAudioDevices()
+
+    const mediaDevices = navigator.mediaDevices
+    if (!mediaDevices?.addEventListener) return
+
+    const handleDeviceChange = () => {
+      void refreshAudioDevices()
+    }
+
+    mediaDevices.addEventListener("devicechange", handleDeviceChange)
+
+    return () => mediaDevices.removeEventListener("devicechange", handleDeviceChange)
   }, [open, refreshAudioDevices, step])
 
   React.useEffect(() => {
@@ -7934,6 +8691,17 @@ function StartRecordingDialog({
 
     let cancelled = false
     let previewStream: MediaStream | null = null
+    let previewAudioTrack: MediaStreamTrack | null = null
+
+    const handlePreviewTrackEnded = () => {
+      if (cancelled || microphonePreviewStreamRef.current !== previewStream) return
+
+      microphonePreviewStreamRef.current = null
+      setMicrophonePreviewStream(null)
+      setMicrophonePreviewChecking(false)
+      setMicrophonePreviewError("That microphone disconnected. Choose an available input to continue.")
+      void refreshAudioDevices()
+    }
 
     const startMicrophonePreview = async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -7959,6 +8727,8 @@ function StartRecordingDialog({
         }
 
         previewStream = stream
+        previewAudioTrack = stream.getAudioTracks()[0] ?? null
+        previewAudioTrack?.addEventListener("ended", handlePreviewTrackEnded, { once: true })
         stopMediaStream(microphonePreviewStreamRef.current)
         microphonePreviewStreamRef.current = stream
         setMicrophonePreviewStream(stream)
@@ -7981,6 +8751,7 @@ function StartRecordingDialog({
 
     return () => {
       cancelled = true
+      previewAudioTrack?.removeEventListener("ended", handlePreviewTrackEnded)
       stopMediaStream(previewStream)
       if (microphonePreviewStreamRef.current === previewStream) {
         microphonePreviewStreamRef.current = null
@@ -8085,6 +8856,7 @@ function StartRecordingDialog({
       setMicrophonePreviewError("")
       setMeetingAudioPreviewError("")
       applyResearchDefaults(nextAccountId)
+      clearContactSelection()
     } else {
       resetStartProgress()
       clearMicrophonePreview()
@@ -8114,8 +8886,7 @@ function StartRecordingDialog({
       setProductContext(sellerResearchProfile.productContext)
       setResearchProfileMessage("")
       setResearchProfileStatus("idle")
-      setCustomerContact("")
-      setCustomerRole("")
+      clearContactSelection()
       return
     }
     const firstAccountId = accountId || accounts[0]?.id || ""
@@ -8125,6 +8896,7 @@ function StartRecordingDialog({
     setOpportunityMode(firstOpportunityId ? "existing" : "new")
     setOpportunityId(firstOpportunityId)
     applyResearchDefaults(firstAccountId)
+    clearContactSelection()
   }
 
   const handleAccountChange = (value: string) => {
@@ -8134,6 +8906,7 @@ function StartRecordingDialog({
     setOpportunityId(firstOpportunityId)
     setOpportunityMode(firstOpportunityId ? "existing" : "new")
     applyResearchDefaults(value)
+    clearContactSelection()
   }
 
   const handleNewAccountWebsiteChange = (value: string) => {
@@ -8313,7 +9086,7 @@ function StartRecordingDialog({
       selectedAudioSourceChoice === "two_channels" ? meetingAudioPreviewStreamRef.current : null
     const preparedMeetingAudio = preparedMeetingAudioStream
       ? {
-          level: meetingAudioPreviewLevel,
+          level: meetingAudioPreviewReading.level,
           stream: preparedMeetingAudioStream,
           surface: meetingAudioSurface,
         }
@@ -8352,9 +9125,14 @@ function StartRecordingDialog({
           sellerCompany: sellerCompany.trim(),
           sellerDomain: normalizeSellerDomain(sellerDomain),
           productContext: productContext.trim(),
-          customerContact: customerContact.trim(),
-          customerRole: customerRole.trim(),
+          customerContact: "",
+          customerRole: "",
         },
+        selectedContactIds,
+        primaryContactId: primaryContactId || undefined,
+        quickContactDraft: quickContactName.trim()
+          ? { fullName: quickContactName.trim(), jobTitle: quickContactTitle.trim() }
+          : undefined,
         openAiApiKey: "",
         abortSignal: startAbortController.signal,
         onPreparationStep: ({ detail, step }) => applyStartPreparationStep(step, detail),
@@ -8606,7 +9384,10 @@ function StartRecordingDialog({
                     <Label htmlFor="recording-opportunity-mode">What opportunity should receive the recording?</Label>
                     <Select
                       value={accountMode === "new" ? "new" : opportunityMode}
-                      onValueChange={(value) => setOpportunityMode(value as "existing" | "new")}
+                      onValueChange={(value) => {
+                        setOpportunityMode(value as "existing" | "new")
+                        clearContactSelection()
+                      }}
                       disabled={accountMode === "new" || !canUseExistingOpportunity}
                     >
                       <SelectTrigger id="recording-opportunity-mode" className="w-full min-w-0">
@@ -8621,7 +9402,13 @@ function StartRecordingDialog({
                     {accountMode === "existing" && opportunityMode === "existing" && canUseExistingOpportunity ? (
                       <div className="grid gap-2">
                         <Label htmlFor="recording-opportunity">Opportunity</Label>
-                        <Select value={opportunityId} onValueChange={setOpportunityId}>
+                        <Select
+                          value={opportunityId}
+                          onValueChange={(value) => {
+                            setOpportunityId(value)
+                            clearContactSelection()
+                          }}
+                        >
                           <SelectTrigger id="recording-opportunity" className="w-full min-w-0">
                             <SelectValue placeholder="Select opportunity" />
                           </SelectTrigger>
@@ -8716,11 +9503,107 @@ function StartRecordingDialog({
                   </div>
 
                   <div className="grid min-w-0 gap-3 rounded-lg border bg-background p-3">
+                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">Who is joining?</p>
+                        <p className="mt-1 text-xs leading-snug text-muted-foreground">
+                          Optional. Selected contacts help SalesFrame tailor the first question and can be confirmed against speakers later.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="min-h-11 shrink-0 gap-2 md:min-h-8"
+                        onClick={() => {
+                          if (quickContactOpen) {
+                            setQuickContactOpen(false)
+                            setQuickContactName("")
+                            setQuickContactTitle("")
+                            setPrimaryContactId((current) => current === quickContactPrimaryToken ? selectedContactIds[0] ?? "" : current)
+                          } else {
+                            setQuickContactOpen(true)
+                          }
+                        }}
+                      >
+                        {quickContactOpen ? <XIcon /> : <PlusIcon />}
+                        {quickContactOpen ? "Cancel quick add" : "Quick add"}
+                      </Button>
+                    </div>
+                    {accountContacts.length ? (
+                      <div className="grid gap-2">
+                        <Label htmlFor="recording-contacts">Contacts</Label>
+                        <ContactMultiSelect
+                          id="recording-contacts"
+                          contacts={accountContacts}
+                          preferredContactIds={opportunityContactIds}
+                          value={selectedContactIds}
+                          onChange={handleSelectedContactsChange}
+                        />
+                      </div>
+                    ) : accountMode === "existing" ? (
+                      <p className="rounded-md bg-muted/30 p-3 text-sm text-muted-foreground">
+                        This account has no contacts yet. Use Quick add, or continue without selecting anyone.
+                      </p>
+                    ) : null}
+                    {selectedContactIds.length + (quickContactName.trim() ? 1 : 0) > 1 ? (
+                      <div className="grid gap-2">
+                        <Label htmlFor="recording-primary-contact">Primary call contact</Label>
+                        <Select value={primaryContactId} onValueChange={setPrimaryContactId}>
+                          <SelectTrigger id="recording-primary-contact" className="w-full"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {selectedContactIds.map((contactId) => {
+                              const contact = accountContacts.find((item) => item.id === contactId)
+                              return contact ? <SelectItem key={contact.id} value={contact.id}>{contact.fullName}</SelectItem> : null
+                            })}
+                            {quickContactName.trim() ? (
+                              <SelectItem value={quickContactPrimaryToken}>{quickContactName.trim()} (quick add)</SelectItem>
+                            ) : null}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                    {quickContactOpen ? (
+                      <div className="grid gap-3 rounded-md bg-muted/30 p-3 sm:grid-cols-2">
+                        <div className="grid gap-2">
+                          <Label htmlFor="recording-quick-contact-name">Contact name</Label>
+                          <Input
+                            id="recording-quick-contact-name"
+                            value={quickContactName}
+                            placeholder="e.g. Priya Shah"
+                            onChange={(event) => {
+                              const nextName = event.currentTarget.value
+                              setQuickContactName(nextName)
+                              setPrimaryContactId((current) => {
+                                if (nextName.trim() && !current) return quickContactPrimaryToken
+                                if (!nextName.trim() && current === quickContactPrimaryToken) return selectedContactIds[0] ?? ""
+                                return current
+                              })
+                            }}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="recording-quick-contact-title">Job title</Label>
+                          <Input
+                            id="recording-quick-contact-title"
+                            value={quickContactTitle}
+                            placeholder="Optional"
+                            onChange={(event) => setQuickContactTitle(event.currentTarget.value)}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground sm:col-span-2">
+                          The contact is created and selected when the call starts. Add full details or enrichment later from the account.
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="grid min-w-0 gap-3 rounded-lg border bg-background p-3">
                     <div className="grid min-w-0 gap-1">
                       <div className="min-w-0">
                         <p className="text-sm font-medium">Audio check</p>
                         <p className="text-xs leading-snug text-muted-foreground">
-                          Choose what SalesFrame listens to and use the meters as a signal check.
+                          Choose each input, then speak normally or play shared audio. Aim for a steady Good signal.
                         </p>
                       </div>
                     </div>
@@ -8758,7 +9641,7 @@ function StartRecordingDialog({
                           <AudioSetupMeter
                             detail={selectedAudioInputLabel}
                             label="Seller mic"
-                            level={microphonePreviewLevel}
+                            reading={microphonePreviewReading}
                             status={microphoneSetupStatus}
                           />
                           {microphonePreviewError ? (
@@ -8796,8 +9679,9 @@ function StartRecordingDialog({
                           <AudioSetupMeter
                             detail={meetingAudioSurface ? `Shared ${meetingAudioSurface}` : "Choose a tab, window, or screen with audio"}
                             label="Shared audio"
-                            level={meetingAudioPreviewLevel}
+                            reading={meetingAudioPreviewReading}
                             status={sharedAudioSetupStatus}
+                            quietHint="Play audio in the shared tab, window, or screen to test it."
                           />
                           {meetingAudioPreviewError ? (
                             <p className="text-xs leading-snug text-destructive">{meetingAudioPreviewError}</p>
@@ -8841,7 +9725,7 @@ function StartRecordingDialog({
                           <AudioSetupMeter
                             detail={selectedAudioInputLabel}
                             label="Room/call audio"
-                            level={microphonePreviewLevel}
+                            reading={microphonePreviewReading}
                             status={microphoneSetupStatus}
                           />
                           {microphonePreviewError ? (
@@ -8923,35 +9807,6 @@ function StartRecordingDialog({
                             className="min-w-0"
                             placeholder="e.g. SalesFrame"
                             onChange={(event) => setSellerCompany(event.currentTarget.value)}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid gap-1">
-                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Buyer context</p>
-                        <p className="text-xs text-muted-foreground">Optional details help the question fit the person you are meeting.</p>
-                      </div>
-                      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                        <div className="grid min-w-0 gap-2">
-                          <Label htmlFor="customer-contact">Customer contact</Label>
-                          <Input
-                            id="customer-contact"
-                            value={customerContact}
-                            disabled={!customerResearchEnabled}
-                            className="min-w-0"
-                            placeholder="Optional"
-                            onChange={(event) => setCustomerContact(event.currentTarget.value)}
-                          />
-                        </div>
-                        <div className="grid min-w-0 gap-2">
-                          <Label htmlFor="customer-role">Customer role</Label>
-                          <Input
-                            id="customer-role"
-                            value={customerRole}
-                            disabled={!customerResearchEnabled}
-                            className="min-w-0"
-                            placeholder="Optional"
-                            onChange={(event) => setCustomerRole(event.currentTarget.value)}
                           />
                         </div>
                       </div>
@@ -11658,6 +12513,20 @@ function AccountView({
   saveMessage: string
   saveStatus: RecordSaveStatus
 }) {
+  const {
+    accountTab,
+    clearFocusedContact,
+    contacts,
+    focusedContactId,
+    contactStatusMessage,
+    contactStatusTone,
+    opportunityContacts,
+    archiveContact,
+    enrichContact,
+    restoreContact,
+    saveContact,
+    setAccountTab,
+  } = React.useContext(ContactWorkspaceContext)
   const [opportunityQuery, setOpportunityQuery] = React.useState("")
   const [opportunityCoverageFilter, setOpportunityCoverageFilter] = React.useState<OpportunityCoverageFilter>("all")
   const [opportunitySort, setOpportunitySort] = React.useState<OpportunitySort>("gaps")
@@ -11721,11 +12590,19 @@ function AccountView({
         </CardHeader>
       </Card>
 
-      <Tabs defaultValue="record" className="grid w-full min-w-0 gap-4" onValueChange={onScrollToTop}>
-        <TabsList className="grid w-full grid-cols-3 md:w-fit">
-          <TabsTrigger value="record">Account record</TabsTrigger>
-          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
-          <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
+      <Tabs
+        value={accountTab}
+        className="grid w-full min-w-0 gap-4"
+        onValueChange={(value) => {
+          setAccountTab(value as typeof accountTab)
+          onScrollToTop()
+        }}
+      >
+        <TabsList className="w-full md:w-fit">
+          <TabsTrigger className="min-w-28" value="record">Account record</TabsTrigger>
+          <TabsTrigger className="min-w-28" value="contacts">Contacts</TabsTrigger>
+          <TabsTrigger className="min-w-28" value="opportunities">Opportunities</TabsTrigger>
+          <TabsTrigger className="min-w-28" value="intelligence">Intelligence</TabsTrigger>
         </TabsList>
 
         <TabsContent value="record" className="m-0 w-full min-w-0">
@@ -11820,6 +12697,24 @@ function AccountView({
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="contacts" className="m-0 w-full min-w-0">
+          <ContactsPanel
+            accountWebsite={accountDraft.website || account.website}
+            contacts={contacts.filter((contact) => contact.accountId === account.id)}
+            focusedContactId={focusedContactId}
+            externalStatusMessage={contactStatusMessage}
+            externalStatusTone={contactStatusTone}
+            opportunities={opportunities}
+            opportunityContacts={opportunityContacts.filter((relationship) => relationship.accountId === account.id)}
+            onArchive={archiveContact}
+            onFocusedContactHandled={clearFocusedContact}
+            onEnrich={enrichContact}
+            onOpenOpportunity={onOpportunitySelect}
+            onRestore={restoreContact}
+            onSave={saveContact}
+          />
         </TabsContent>
 
         <TabsContent value="opportunities" className="m-0 w-full min-w-0">
@@ -13436,6 +14331,12 @@ function OpportunityWorkspace({
   opportunitySaveMessage: string
   opportunitySaveStatus: RecordSaveStatus
 }) {
+  const {
+    contacts,
+    opportunityContacts,
+    replaceOpportunityContactSelection,
+    updateOpportunityContactRelationship,
+  } = React.useContext(ContactWorkspaceContext)
   const defaultTab =
     activeView === "methodology" ? "methodology" : activeView === "opportunity-intelligence" ? "intelligence" : "record"
 
@@ -13477,6 +14378,16 @@ function OpportunityWorkspace({
           onSaveOpportunityDraft={onSaveOpportunityDraft}
           saveMessage={opportunitySaveMessage}
           saveStatus={opportunitySaveStatus}
+        />
+        <OpportunityContactsCard
+          contacts={contacts.filter((contact) => contact.accountId === account.id)}
+          opportunityContacts={opportunityContacts.filter(
+            (relationship) => relationship.opportunityId === opportunity.id
+          )}
+          onSelectionChange={(contactIds) => replaceOpportunityContactSelection(opportunity.id, contactIds)}
+          onRelationshipChange={(contactId, patch) =>
+            updateOpportunityContactRelationship(opportunity.id, contactId, patch)
+          }
         />
         <AccountRecordPanel account={account} accountDraft={accountDraft} onNavigate={onNavigate} />
       </TabsContent>
@@ -14347,24 +15258,39 @@ function RecordFieldTile({
 }
 
 function SpeakerIdentityPanel({
+  activeCallId,
   identities,
   onSpeakerIdentityChange,
   sellerName,
   transcript,
 }: {
+  activeCallId: string
   identities: CallSpeakerIdentityMap
   onSpeakerIdentityChange: (payload: SpeakerIdentityChangePayload) => Promise<SpeakerIdentityChangeResult>
   sellerName: string
   transcript: Opportunity["transcript"]
 }) {
+  const { callContacts, confirmSpeakerContact, contacts } = React.useContext(ContactWorkspaceContext)
   const [addedSpeakerLabels, setAddedSpeakerLabels] = React.useState<TranscriptSpeaker[]>([])
   const [pendingSpeakerLabel, setPendingSpeakerLabel] = React.useState<TranscriptSpeaker | null>(null)
   const [speakerSaveMessage, setSpeakerSaveMessage] = React.useState("")
   const [speakerSaveTone, setSpeakerSaveTone] = React.useState<"saved" | "local" | "error">("saved")
+  const [speakerContactDrafts, setSpeakerContactDrafts] = React.useState<Record<string, string>>({})
+  const [confirmedSpeakerContacts, setConfirmedSpeakerContacts] = React.useState<Record<string, string | null>>({})
+  const [speakerContactMessage, setSpeakerContactMessage] = React.useState("")
+  const [pendingSpeakerContactLabel, setPendingSpeakerContactLabel] = React.useState<TranscriptSpeaker | null>(null)
   const touchedSpeakerLabelsRef = React.useRef(new Set<TranscriptSpeaker>())
+
+  React.useEffect(() => {
+    setAddedSpeakerLabels([])
+    setSpeakerContactDrafts({})
+    setConfirmedSpeakerContacts({})
+    setSpeakerContactMessage("")
+    setPendingSpeakerContactLabel(null)
+  }, [activeCallId])
   const hasTranscriptText = transcript.some((line) => line.text.trim())
   const speakerRows = React.useMemo(() => {
-    const labels = new Map<TranscriptSpeaker, { displayName: string; lineCount: number }>()
+    const labels = new Map<TranscriptSpeaker, { contactId?: string; displayName: string; lineCount: number; speakerId?: string }>()
     const requiredLabels: TranscriptSpeaker[] = ["Seller", "Customer"]
 
     transcript.forEach((line) => {
@@ -14376,8 +15302,10 @@ function SpeakerIdentityPanel({
       const existingLabel = labels.get(label)
 
       labels.set(label, {
+        contactId: existingLabel?.contactId || line.contactId,
         displayName: existingLabel?.displayName || getTranscriptSpeakerDisplayName(line),
         lineCount: (existingLabel?.lineCount ?? 0) + 1,
+        speakerId: existingLabel?.speakerId || line.speakerId,
       })
     })
 
@@ -14387,8 +15315,10 @@ function SpeakerIdentityPanel({
       if (label === "Unknown") return
 
       labels.set(label, {
+        contactId: labels.get(label)?.contactId,
         displayName: identity.displayName || labels.get(label)?.displayName || label,
         lineCount: labels.get(label)?.lineCount ?? 0,
+        speakerId: labels.get(label)?.speakerId,
       })
     })
 
@@ -14411,12 +15341,23 @@ function SpeakerIdentityPanel({
         return (leftIndex === -1 ? labelOrder.length : leftIndex) - (rightIndex === -1 ? labelOrder.length : rightIndex)
       })
       .map(([label, details]) => ({
+        contactId: Object.prototype.hasOwnProperty.call(confirmedSpeakerContacts, label)
+          ? confirmedSpeakerContacts[label] ?? undefined
+          : details.contactId,
         displayName: identities[label]?.displayName || details.displayName || label,
         isMe: Boolean(identities[label]?.isMe),
         label,
         lineCount: details.lineCount,
+        speakerId: details.speakerId,
       }))
-  }, [addedSpeakerLabels, identities, transcript])
+  }, [addedSpeakerLabels, confirmedSpeakerContacts, identities, transcript])
+  const selectedCallContacts = React.useMemo(() => {
+    const selectedIds = new Set(
+      callContacts.filter((relationship) => relationship.callId === activeCallId).map((relationship) => relationship.contactId)
+    )
+
+    return contacts.filter((contact) => selectedIds.has(contact.id))
+  }, [activeCallId, callContacts, contacts])
   const [draftNames, setDraftNames] = React.useState<Record<string, string>>({})
   const nextSpeakerLabel = React.useMemo(() => {
     const visibleLabels = new Set(speakerRows.map((speaker) => speaker.label))
@@ -14463,6 +15404,37 @@ function SpeakerIdentityPanel({
     },
     [onSpeakerIdentityChange, sellerName]
   )
+
+  const saveSpeakerContact = async (
+    label: TranscriptSpeaker,
+    speakerId: string | undefined,
+    currentContactId: string | undefined
+  ) => {
+    if (!speakerId) {
+      setSpeakerContactMessage(`Save ${label}'s name once before confirming a contact mapping.`)
+      return
+    }
+
+    const draftValue = speakerContactDrafts[label]
+    const contactId = draftValue === "__unassigned__" || !draftValue ? null : draftValue
+    if ((currentContactId ?? null) === contactId) return
+
+    setPendingSpeakerContactLabel(label)
+    setSpeakerContactMessage("")
+    try {
+      await confirmSpeakerContact(speakerId, contactId)
+      setConfirmedSpeakerContacts((items) => ({ ...items, [label]: contactId }))
+      setSpeakerContactMessage(
+        contactId
+          ? `${label} is now seller-confirmed as ${contacts.find((contact) => contact.id === contactId)?.fullName ?? "the selected contact"}.`
+          : `${label}'s contact mapping was cleared.`
+      )
+    } catch (error: unknown) {
+      setSpeakerContactMessage(getUserFacingErrorMessage(error, "Contact mapping needs another save attempt."))
+    } finally {
+      setPendingSpeakerContactLabel(null)
+    }
+  }
 
   React.useEffect(() => {
     setDraftNames((items) => {
@@ -14549,6 +15521,47 @@ function SpeakerIdentityPanel({
                   }
                 }}
               />
+              {!speaker.isMe && selectedCallContacts.length ? (
+                <div className="grid gap-2 rounded-md bg-muted/30 p-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor={`speaker-contact-${speaker.label}`} className="text-xs">Selected call contact</Label>
+                    <Select
+                      value={speakerContactDrafts[speaker.label] ?? speaker.contactId ?? "__unassigned__"}
+                      onValueChange={(value) => {
+                        setSpeakerContactDrafts((items) => ({ ...items, [speaker.label]: value }))
+                        setSpeakerContactMessage("")
+                      }}
+                    >
+                      <SelectTrigger id={`speaker-contact-${speaker.label}`} className="h-11 w-full md:h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                        {selectedCallContacts.map((contact) => (
+                          <SelectItem key={contact.id} value={contact.id}>
+                            {contact.fullName}{contact.archivedAtIso ? " (archived)" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-11 gap-1.5 md:h-8"
+                    disabled={pendingSpeakerContactLabel === speaker.label || !speaker.speakerId ||
+                      (speakerContactDrafts[speaker.label] ?? speaker.contactId ?? "__unassigned__") === (speaker.contactId ?? "__unassigned__")}
+                    onClick={() => void saveSpeakerContact(speaker.label, speaker.speakerId, speaker.contactId)}
+                  >
+                    <UserRoundCheckIcon />
+                    Confirm mapping
+                  </Button>
+                  {!speaker.speakerId ? (
+                    <p className="text-xs text-muted-foreground sm:col-span-2">Save this speaker once before confirming the contact.</p>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -14599,6 +15612,9 @@ function SpeakerIdentityPanel({
           >
             {speakerSaveMessage}
           </p>
+        ) : null}
+        {speakerContactMessage ? (
+          <p className="px-1 text-xs text-muted-foreground" role="status">{speakerContactMessage}</p>
         ) : null}
       </div>
     </details>
@@ -14839,6 +15855,7 @@ function LiveRail({
               onScroll={handleTranscriptScroll}
             >
               <SpeakerIdentityPanel
+                activeCallId={activeCallId}
                 identities={speakerIdentities}
                 onSpeakerIdentityChange={onSpeakerIdentityChange}
                 sellerName={sellerName}
@@ -15491,6 +16508,73 @@ function BriefList({
   )
 }
 
+function CallParticipantsSummary({
+  callId,
+  transcript = [],
+}: {
+  callId: string
+  transcript?: Opportunity["transcript"]
+}) {
+  const { callContacts, contacts } = React.useContext(ContactWorkspaceContext)
+  const contactById = React.useMemo(
+    () => new Map(contacts.map((contact) => [contact.id, contact])),
+    [contacts]
+  )
+  const speakerLabelsByContactId = React.useMemo(() => {
+    const labels = new Map<string, Set<string>>()
+    transcript.forEach((line) => {
+      if (!line.contactId || !line.text.trim()) return
+      const label = getTranscriptSpeakerDisplayName(line)
+      const contactLabels = labels.get(line.contactId) ?? new Set<string>()
+      contactLabels.add(label)
+      labels.set(line.contactId, contactLabels)
+    })
+    return labels
+  }, [transcript])
+  const participants = callContacts
+    .filter((relationship) => relationship.callId === callId)
+    .sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary))
+
+  if (!participants.length) return null
+
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>Call participants</CardTitle>
+          <CardDescription>Saved contact participation and seller-confirmed speaker mappings</CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-2 sm:grid-cols-2">
+        {participants.map((relationship) => {
+          const contact = contactById.get(relationship.contactId)
+          const speakerLabels = [...(speakerLabelsByContactId.get(relationship.contactId) ?? [])]
+          return (
+            <div key={relationship.id} className="grid gap-2 rounded-lg bg-muted/30 p-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <p className="truncate text-sm font-medium">{contact?.fullName ?? "Historical contact"}</p>
+                {relationship.isPrimary ? <Badge variant="secondary">Primary</Badge> : null}
+                {contact?.archivedAtIso ? <Badge variant="outline">Archived</Badge> : null}
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span>{relationship.attendance.charAt(0).toUpperCase() + relationship.attendance.slice(1)}</span>
+                {contact?.jobTitle ? <span>· {contact.jobTitle}</span> : null}
+              </div>
+              {speakerLabels.length ? (
+                <p className="text-xs text-muted-foreground">
+                  Confirmed speaker: {speakerLabels.join(", ")}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">No speaker mapping confirmed.</p>
+              )}
+            </div>
+          )
+        })}
+      </CardContent>
+    </Card>
+  )
+}
+
 function OpportunityRecordingHistory({
   activeCallId,
   calls,
@@ -15502,6 +16586,8 @@ function OpportunityRecordingHistory({
   opportunity: Opportunity
   onDeleteCall: (callId: string) => void
 }) {
+  const { callContacts, contacts } = React.useContext(ContactWorkspaceContext)
+  const contactById = React.useMemo(() => new Map(contacts.map((contact) => [contact.id, contact])), [contacts])
   const [downloadingCallId, setDownloadingCallId] = React.useState("")
   const [downloadError, setDownloadError] = React.useState("")
   const recordings = calls
@@ -15542,6 +16628,10 @@ function OpportunityRecordingHistory({
         {recordings.map((call) => {
           const displayStatus = getCallDisplayStatus(call, activeCallId)
           const displayDuration = getCallDisplayDuration(call, activeCallId)
+          const participantNames = callContacts
+            .filter((relationship) => relationship.callId === call.id)
+            .map((relationship) => contactById.get(relationship.contactId)?.fullName)
+            .filter(Boolean) as string[]
 
           return (
             <div
@@ -15557,6 +16647,9 @@ function OpportunityRecordingHistory({
                   <p className="text-sm text-muted-foreground">
                     {call.date} · {call.type} · {displayDuration}
                   </p>
+                  {participantNames.length ? (
+                    <p className="mt-1 truncate text-xs text-muted-foreground">Participants: {participantNames.join(", ")}</p>
+                  ) : null}
                 </div>
               </div>
               <span className={cn("text-sm font-medium", getCallStatusTextClassName(displayStatus))}>
@@ -15638,6 +16731,9 @@ function PostCallPanel({
           onDeleteCall={onDeleteCall}
           transcript={transcript}
         />
+      ) : null}
+      {completedCall ? (
+        <CallParticipantsSummary callId={completedCall.id} transcript={transcript} />
       ) : null}
       {processingError ? (
         <Card>

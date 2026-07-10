@@ -268,6 +268,81 @@ export type Database = {
           updated_at?: string
         }
       >
+      contacts: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          full_name: string
+          preferred_name: string | null
+          job_title: string | null
+          department: string | null
+          seniority: string | null
+          work_email: string | null
+          business_phone: string | null
+          linkedin_url: string | null
+          location: string | null
+          timezone: string | null
+          employment_status: string
+          private_notes: string | null
+          source: string
+          normalized_email: string | null
+          normalized_linkedin_url: string | null
+          created_by_user_id: string | null
+          updated_by_user_id: string | null
+          archived_at: string | null
+          archived_by: string | null
+          archive_reason: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          full_name: string
+          preferred_name?: string | null
+          job_title?: string | null
+          department?: string | null
+          seniority?: string | null
+          work_email?: string | null
+          business_phone?: string | null
+          linkedin_url?: string | null
+          location?: string | null
+          timezone?: string | null
+          employment_status?: string
+          private_notes?: string | null
+          source?: string
+          created_by_user_id?: string | null
+          updated_by_user_id?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          archive_reason?: string | null
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          full_name?: string
+          preferred_name?: string | null
+          job_title?: string | null
+          department?: string | null
+          seniority?: string | null
+          work_email?: string | null
+          business_phone?: string | null
+          linkedin_url?: string | null
+          location?: string | null
+          timezone?: string | null
+          employment_status?: string
+          private_notes?: string | null
+          source?: string
+          created_by_user_id?: string | null
+          updated_by_user_id?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          archive_reason?: string | null
+        }
+      >
       opportunities: TableDefinition<
         {
           id: string
@@ -444,6 +519,52 @@ export type Database = {
           created_at?: string
         }
       >
+      opportunity_contacts: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          contact_id: string
+          buying_roles: string[]
+          influence: string
+          relationship_strength: string
+          stance: string
+          is_primary: boolean
+          notes: string | null
+          created_by_user_id: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          contact_id: string
+          buying_roles?: string[]
+          influence?: string
+          relationship_strength?: string
+          stance?: string
+          is_primary?: boolean
+          notes?: string | null
+          created_by_user_id?: string | null
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          contact_id?: string
+          buying_roles?: string[]
+          influence?: string
+          relationship_strength?: string
+          stance?: string
+          is_primary?: boolean
+          notes?: string | null
+          created_by_user_id?: string | null
+        }
+      >
       calls: TableDefinition<
         {
           id: string
@@ -540,6 +661,43 @@ export type Database = {
         { id?: string; call_id: string; playbook_id: string; created_at?: string },
         { id?: string; call_id?: string; playbook_id?: string; created_at?: string }
       >
+      call_contacts: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          call_id: string
+          contact_id: string
+          attendance_status: string
+          is_primary: boolean
+          created_by_user_id: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          call_id: string
+          contact_id: string
+          attendance_status?: string
+          is_primary?: boolean
+          created_by_user_id?: string | null
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          call_id?: string
+          contact_id?: string
+          attendance_status?: string
+          is_primary?: boolean
+          created_by_user_id?: string | null
+        }
+      >
       call_speakers: TableDefinition<
         {
           id: string
@@ -547,6 +705,9 @@ export type Database = {
           label: string
           display_name: string | null
           role: Database["public"]["Enums"]["speaker_role"]
+          contact_id: string | null
+          contact_confirmed_at: string | null
+          contact_confirmed_by: string | null
           created_at: string
           updated_at: string
         },
@@ -556,6 +717,9 @@ export type Database = {
           label: string
           display_name?: string | null
           role?: Database["public"]["Enums"]["speaker_role"]
+          contact_id?: string | null
+          contact_confirmed_at?: string | null
+          contact_confirmed_by?: string | null
           created_at?: string
           updated_at?: string
         },
@@ -565,6 +729,9 @@ export type Database = {
           label?: string
           display_name?: string | null
           role?: Database["public"]["Enums"]["speaker_role"]
+          contact_id?: string | null
+          contact_confirmed_at?: string | null
+          contact_confirmed_by?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -814,6 +981,9 @@ export type Database = {
           evidence_summary: string
           source_call_id: string | null
           source_turn_ids: Json
+          contact_id: string | null
+          contact_confirmed_at: string | null
+          contact_confirmed_by: string | null
           last_seen_at: string
           created_at: string
           updated_at: string
@@ -832,6 +1002,9 @@ export type Database = {
           evidence_summary?: string
           source_call_id?: string | null
           source_turn_ids?: Json
+          contact_id?: string | null
+          contact_confirmed_at?: string | null
+          contact_confirmed_by?: string | null
           last_seen_at?: string
           created_at?: string
           updated_at?: string
@@ -850,6 +1023,9 @@ export type Database = {
           evidence_summary?: string
           source_call_id?: string | null
           source_turn_ids?: Json
+          contact_id?: string | null
+          contact_confirmed_at?: string | null
+          contact_confirmed_by?: string | null
           last_seen_at?: string
           created_at?: string
           updated_at?: string
@@ -1181,6 +1357,124 @@ export type Database = {
           created_at?: string
         }
       >
+      contact_enrichment_profiles: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          contact_id: string
+          professional_summary: string | null
+          role_scope: string | null
+          likely_priorities: string | null
+          likely_kpis: string | null
+          relevant_experience: string | null
+          recent_professional_signals: string | null
+          discovery_angles: string | null
+          caveats: string | null
+          confidence: number | null
+          sources: Json
+          last_enriched_at: string | null
+          created_by_user_id: string | null
+          updated_by_user_id: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          contact_id: string
+          professional_summary?: string | null
+          role_scope?: string | null
+          likely_priorities?: string | null
+          likely_kpis?: string | null
+          relevant_experience?: string | null
+          recent_professional_signals?: string | null
+          discovery_angles?: string | null
+          caveats?: string | null
+          confidence?: number | null
+          sources?: Json
+          last_enriched_at?: string | null
+          created_by_user_id?: string | null
+          updated_by_user_id?: string | null
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          contact_id?: string
+          professional_summary?: string | null
+          role_scope?: string | null
+          likely_priorities?: string | null
+          likely_kpis?: string | null
+          relevant_experience?: string | null
+          recent_professional_signals?: string | null
+          discovery_angles?: string | null
+          caveats?: string | null
+          confidence?: number | null
+          sources?: Json
+          last_enriched_at?: string | null
+          created_by_user_id?: string | null
+          updated_by_user_id?: string | null
+        }
+      >
+      contact_enrichment_runs: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          contact_id: string
+          status: string
+          model: string | null
+          requested_full_name: string | null
+          requested_account_name: string | null
+          proposed_core_updates: Json
+          applied_core_updates: Json
+          enrichment_payload: Json
+          sources: Json
+          error_message: string | null
+          started_at: string | null
+          completed_at: string | null
+          created_by_user_id: string | null
+          created_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          contact_id: string
+          status?: string
+          model?: string | null
+          requested_full_name?: string | null
+          requested_account_name?: string | null
+          proposed_core_updates?: Json
+          applied_core_updates?: Json
+          enrichment_payload?: Json
+          sources?: Json
+          error_message?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          created_by_user_id?: string | null
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          contact_id?: string
+          status?: string
+          model?: string | null
+          requested_full_name?: string | null
+          requested_account_name?: string | null
+          proposed_core_updates?: Json
+          applied_core_updates?: Json
+          enrichment_payload?: Json
+          sources?: Json
+          error_message?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          created_by_user_id?: string | null
+        }
+      >
       csv_import_runs: TableDefinition<
         {
           id: string
@@ -1317,6 +1611,7 @@ export type Database = {
           call_id: string | null
           account_id: string
           opportunity_id: string | null
+          contact_id: string | null
           enabled: boolean
           customer_contact: string | null
           customer_role: string | null
@@ -1334,6 +1629,7 @@ export type Database = {
           call_id?: string | null
           account_id: string
           opportunity_id?: string | null
+          contact_id?: string | null
           enabled?: boolean
           customer_contact?: string | null
           customer_role?: string | null
@@ -1351,6 +1647,7 @@ export type Database = {
           call_id?: string | null
           account_id?: string
           opportunity_id?: string | null
+          contact_id?: string | null
           enabled?: boolean
           customer_contact?: string | null
           customer_role?: string | null
@@ -1430,8 +1727,48 @@ export type Database = {
         Args: { target_call_id: string }
         Returns: boolean
       }
+      can_access_contact: {
+        Args: { target_contact_id: string }
+        Returns: boolean
+      }
+      normalize_linkedin_contact_url: {
+        Args: { value: string }
+        Returns: string
+      }
       can_access_playbook: {
         Args: { target_playbook_id: string }
+        Returns: boolean
+      }
+      replace_opportunity_contacts: {
+        Args: { target_opportunity_id: string; assignments: Json }
+        Returns: Database["public"]["Tables"]["opportunity_contacts"]["Row"][]
+      }
+      replace_call_contacts: {
+        Args: { target_call_id: string; assignments: Json }
+        Returns: Database["public"]["Tables"]["call_contacts"]["Row"][]
+      }
+      get_latest_contact_enrichment_runs: {
+        Args: { target_contact_ids: string[] }
+        Returns: {
+          contact_id: string
+          status: string
+          error_message: string | null
+          created_at: string
+        }[]
+      }
+      finalize_contact_enrichment_run: {
+        Args: {
+          target_run_id: string
+          target_contact_id: string
+          target_workspace_id: string
+          target_account_id: string
+          target_user_id: string
+          model_name: string
+          profile_payload: Json
+          core_fields: Json
+          result_payload: Json
+          source_payload: Json
+        }
         Returns: boolean
       }
       workspace_id_from_storage_path: {

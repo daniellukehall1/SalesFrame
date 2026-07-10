@@ -18,7 +18,7 @@ Think like a combined product, engineering, security, and design review team fro
 - Push to GitHub only when the user explicitly asks for a commit/push.
 - Do not create or merge pull requests.
 - Trigger Netlify deploys only when the user explicitly asks for a deploy.
-- Do not run production database migrations.
+- Run production database migrations only with explicit user authorisation. Use an additive, reviewed migration; run any required read-only preflight first; and validate the result before deploying dependent application code.
 - Do not modify production data.
 - Do not commit secrets, credentials, tokens, API keys, auth cookies, or `.env` files.
 - Do not print secrets into logs, reports, test output, screenshots, or comments.

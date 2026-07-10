@@ -74,6 +74,12 @@ export type AccountEnrichmentResponse = {
   suggestedCoreUpdates: Record<string, unknown>
 }
 
+export type ContactEnrichmentQueuedResponse = {
+  contactId: string
+  runId: string
+  status: "queued" | "completed" | "ambiguous"
+}
+
 export type BulkImportRunStatus = {
   createdAt: string
   failureRows: CsvImportSummary["failures"]
@@ -418,6 +424,13 @@ export function requestAccountEnrichment(accountId: string) {
   return callFunction<AccountEnrichmentResponse>("/api/openai/account-enrichment", {
     method: "POST",
     body: { accountId },
+  })
+}
+
+export function requestContactEnrichment(contactId: string) {
+  return callFunction<ContactEnrichmentQueuedResponse>("/api/openai/contact-enrichment", {
+    method: "POST",
+    body: { contactId },
   })
 }
 

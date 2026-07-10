@@ -19,9 +19,15 @@ import {
   type AccountDraft,
   type CallSummary,
   type CallPlaybook,
+  type CallContact,
+  type Contact,
+  type ContactBuyingRole,
+  type ContactEnrichmentProfile,
+  type ContactEnrichmentStatus,
   type CustomerResearchConfig,
   type NextCallBrief,
   type Opportunity,
+  type OpportunityContact,
   type OpportunityDraft,
   type RecordingLifecycleStatus,
   type SellerResearchProfile,
@@ -45,6 +51,75 @@ import type {
   TranscriptSegmentRow,
   WorkspaceRow,
 } from "@/lib/supabase/salesframe-data"
+
+type ContactRowLike = {
+  id: string
+  workspace_id: string
+  account_id: string
+  full_name: string
+  preferred_name: string | null
+  job_title: string | null
+  department: string | null
+  seniority: string | null
+  work_email: string | null
+  business_phone: string | null
+  linkedin_url: string | null
+  location: string | null
+  timezone: string | null
+  employment_status: string
+  private_notes: string | null
+  source: string
+  created_at: string
+  updated_at: string
+  archived_at: string | null
+}
+
+type OpportunityContactRowLike = {
+  id: string
+  workspace_id: string
+  account_id: string
+  opportunity_id: string
+  contact_id: string
+  buying_roles: string[]
+  influence: string
+  relationship_strength: string
+  stance: string
+  is_primary: boolean
+  notes: string | null
+}
+
+type CallContactRowLike = {
+  id: string
+  workspace_id: string
+  account_id: string
+  opportunity_id: string
+  call_id: string
+  contact_id: string
+  attendance_status: string
+  is_primary: boolean
+}
+
+type ContactEnrichmentProfileRowLike = {
+  contact_id: string
+  professional_summary: string | null
+  role_scope: string | null
+  likely_priorities: string | null
+  likely_kpis: string | null
+  relevant_experience: string | null
+  recent_professional_signals: string | null
+  discovery_angles: string | null
+  confidence: number | null
+  caveats: string | null
+  sources: unknown
+  last_enriched_at: string | null
+}
+
+type ContactEnrichmentRunRowLike = {
+  contact_id: string
+  status: string
+  error_message?: string | null
+  created_at: string
+}
 
 export function mapWorkspaceRowToNavItem(row: WorkspaceRow): WorkspaceNavItem {
   return {
@@ -107,6 +182,175 @@ export function mapAccountRowsToDrafts(accounts: AccountRow[]) {
       mapAccountRowToDraft(account),
     ])
   ) as Record<string, AccountDraft>
+}
+
+export function mapContactRowsToUi({
+  contacts,
+  enrichmentProfiles = [],
+  enrichmentRuns = [],
+}: {
+  contacts: ContactRowLike[]
+  enrichmentProfiles?: ContactEnrichmentProfileRowLike[]
+  enrichmentRuns?: ContactEnrichmentRunRowLike[]
+}): Contact[] {
+  const profileByContactId = new Map(enrichmentProfiles.map((profile) => [profile.contact_id, profile]))
+  const latestRunByContactId = new Map<string, ContactEnrichmentRunRowLike>()
+
+  enrichmentRuns
+    .slice()
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+    .forEach((run) => {
+      if (!latestRunByContactId.has(run.contact_id)) latestRunByContactId.set(run.contact_id, run)
+    })
+
+  return contacts.map((contact) => {
+    const profile = profileByContactId.get(contact.id)
+    const latestRun = latestRunByContactId.get(contact.id)
+
+    return {
+      id: contact.id,
+      workspaceId: contact.workspace_id,
+      accountId: contact.account_id,
+      fullName: contact.full_name,
+      preferredName: contact.preferred_name ?? "",
+      jobTitle: contact.job_title ?? "",
+      department: contact.department ?? "",
+      seniority: contact.seniority ?? "",
+      workEmail: contact.work_email ?? "",
+      businessPhone: contact.business_phone ?? "",
+      linkedinUrl: contact.linkedin_url ?? "",
+      location: contact.location ?? "",
+      timezone: contact.timezone ?? "",
+      employmentStatus:
+        contact.employment_status === "former" || contact.employment_status === "unknown"
+          ? contact.employment_status
+          : "active",
+      privateNotes: contact.private_notes ?? "",
+      source: contact.source,
+      createdAt: formatCloseDateValue(contact.created_at),
+      createdAtIso: contact.created_at,
+      updatedAtIso: contact.updated_at,
+      archivedAtIso: contact.archived_at,
+      enrichment: profile || latestRun
+        ? mapContactEnrichmentProfile(profile, latestRun, contact.id)
+        : null,
+    }
+  })
+}
+
+export function mapOpportunityContactRowsToUi(rows: OpportunityContactRowLike[]): OpportunityContact[] {
+  return rows.map((row) => ({
+    id: row.id,
+    workspaceId: row.workspace_id,
+    accountId: row.account_id,
+    opportunityId: row.opportunity_id,
+    contactId: row.contact_id,
+    buyingRoles: row.buying_roles.filter((role): role is ContactBuyingRole =>
+      [
+        "champion",
+        "coach",
+        "economic_buyer",
+        "decision_maker",
+        "evaluator",
+        "technical_buyer",
+        "influencer",
+        "end_user",
+        "procurement",
+        "legal",
+        "security",
+        "blocker",
+        "other",
+      ].includes(role)
+    ),
+    influence:
+      row.influence === "high" || row.influence === "medium" || row.influence === "low"
+        ? row.influence
+        : "unknown",
+    relationshipStrength:
+      row.relationship_strength === "strong" || row.relationship_strength === "developing" || row.relationship_strength === "weak"
+        ? row.relationship_strength
+        : "unknown",
+    stance:
+      row.stance === "supportive" || row.stance === "neutral" || row.stance === "resistant"
+        ? row.stance
+        : "unknown",
+    isPrimary: row.is_primary,
+    notes: row.notes ?? "",
+  }))
+}
+
+export function mapCallContactRowsToUi(rows: CallContactRowLike[]): CallContact[] {
+  return rows.map((row) => ({
+    id: row.id,
+    workspaceId: row.workspace_id,
+    accountId: row.account_id,
+    opportunityId: row.opportunity_id,
+    callId: row.call_id,
+    contactId: row.contact_id,
+    attendance:
+      row.attendance_status === "expected" || row.attendance_status === "attended" || row.attendance_status === "absent"
+        ? row.attendance_status
+        : "unknown",
+    isPrimary: row.is_primary,
+  }))
+}
+
+function mapContactEnrichmentProfile(
+  profile: ContactEnrichmentProfileRowLike | undefined,
+  latestRun: ContactEnrichmentRunRowLike | undefined,
+  contactId: string
+): ContactEnrichmentProfile {
+  const runStatus = latestRun?.status
+  const status: ContactEnrichmentStatus =
+    runStatus === "queued" || runStatus === "running" || runStatus === "failed" || runStatus === "ambiguous"
+      ? runStatus
+      : profile?.last_enriched_at
+        ? "completed"
+        : "not_enriched"
+
+  return {
+    contactId,
+    professionalSummary: profile?.professional_summary ?? "",
+    roleScope: profile?.role_scope ?? "",
+    priorities: textList(profile?.likely_priorities),
+    kpis: textList(profile?.likely_kpis),
+    relevantExperience: textList(profile?.relevant_experience),
+    recentSignals: textList(profile?.recent_professional_signals),
+    discoveryAngles: textList(profile?.discovery_angles),
+    confidence: profile?.confidence ?? null,
+    caveats: textList(profile?.caveats),
+    sources: mapContactEnrichmentSources(profile?.sources),
+    status,
+    statusMessage: latestRun?.error_message ?? "",
+    lastEnrichedAt: profile?.last_enriched_at ? formatCloseDateValue(profile.last_enriched_at) : null,
+  }
+}
+
+function textList(value: string | null | undefined) {
+  if (!value) return []
+
+  return value
+    .split(/\n|;/)
+    .map((item) => item.replace(/^[-*•]\s*/, "").trim())
+    .filter(Boolean)
+}
+
+function mapContactEnrichmentSources(value: unknown): ContactEnrichmentProfile["sources"] {
+  const sourceList = Array.isArray(value)
+    ? value
+    : value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as Record<string, unknown>).consulted)
+      ? (value as Record<string, unknown>).consulted as unknown[]
+      : []
+
+  return sourceList.flatMap((source) => {
+    if (typeof source === "string") return [{ title: "Public professional source", url: source }]
+    if (!source || typeof source !== "object" || Array.isArray(source)) return []
+    const record = source as Record<string, unknown>
+    const title = typeof record.title === "string" ? record.title : "Public professional source"
+    const url = typeof record.url === "string" ? record.url : ""
+
+    return url ? [{ title, url }] : []
+  })
 }
 
 export function mapAccountRowToDraft(account: AccountRow): AccountDraft {
@@ -303,6 +547,8 @@ export function mapOpportunityRowToUi({
 
           return {
             id: segment.id,
+            contactConfirmedAt: speaker?.contact_confirmed_at ?? undefined,
+            contactId: speaker?.contact_id ?? undefined,
             speaker: speakerLabel,
             speakerAttributionReason: segment.speaker_attribution_reason ?? undefined,
             speakerConfidence: segment.speaker_confidence ?? undefined,

@@ -176,6 +176,115 @@ export type SellerResearchProfile = Pick<
   "sellerCompany" | "sellerDomain" | "productContext"
 >
 
+export const contactEmploymentStatuses = ["active", "former", "unknown"] as const
+export type ContactEmploymentStatus = (typeof contactEmploymentStatuses)[number]
+
+export const contactBuyingRoles = [
+  "champion",
+  "coach",
+  "economic_buyer",
+  "decision_maker",
+  "evaluator",
+  "technical_buyer",
+  "influencer",
+  "end_user",
+  "procurement",
+  "legal",
+  "security",
+  "blocker",
+  "other",
+] as const
+export type ContactBuyingRole = (typeof contactBuyingRoles)[number]
+
+export const contactInfluenceLevels = ["high", "medium", "low", "unknown"] as const
+export type ContactInfluenceLevel = (typeof contactInfluenceLevels)[number]
+
+export const contactRelationshipStrengths = ["strong", "developing", "weak", "unknown"] as const
+export type ContactRelationshipStrength = (typeof contactRelationshipStrengths)[number]
+
+export const contactStances = ["supportive", "neutral", "resistant", "unknown"] as const
+export type ContactStance = (typeof contactStances)[number]
+
+export type ContactEnrichmentStatus = "not_enriched" | "queued" | "running" | "completed" | "failed" | "ambiguous"
+
+export type ContactEnrichmentSource = {
+  title: string
+  url: string
+}
+
+export type ContactEnrichmentProfile = {
+  contactId: string
+  professionalSummary: string
+  roleScope: string
+  priorities: string[]
+  kpis: string[]
+  relevantExperience: string[]
+  recentSignals: string[]
+  discoveryAngles: string[]
+  confidence: number | null
+  caveats: string[]
+  sources: ContactEnrichmentSource[]
+  status: ContactEnrichmentStatus
+  statusMessage: string
+  lastEnrichedAt: string | null
+}
+
+export type Contact = {
+  id: string
+  workspaceId: string
+  accountId: string
+  fullName: string
+  preferredName: string
+  jobTitle: string
+  department: string
+  seniority: string
+  workEmail: string
+  businessPhone: string
+  linkedinUrl: string
+  location: string
+  timezone: string
+  employmentStatus: ContactEmploymentStatus
+  privateNotes: string
+  source: string
+  createdAt: string
+  createdAtIso: string | null
+  updatedAtIso: string | null
+  archivedAtIso: string | null
+  enrichment?: ContactEnrichmentProfile | null
+}
+
+export type ContactDraft = Omit<
+  Contact,
+  "id" | "workspaceId" | "accountId" | "createdAt" | "createdAtIso" | "updatedAtIso" | "archivedAtIso" | "enrichment"
+>
+
+export type OpportunityContact = {
+  id: string
+  workspaceId: string
+  accountId: string
+  opportunityId: string
+  contactId: string
+  buyingRoles: ContactBuyingRole[]
+  influence: ContactInfluenceLevel
+  relationshipStrength: ContactRelationshipStrength
+  stance: ContactStance
+  isPrimary: boolean
+  notes: string
+}
+
+export type CallContact = {
+  id: string
+  workspaceId: string
+  accountId: string
+  opportunityId: string
+  callId: string
+  contactId: string
+  attendance: "expected" | "attended" | "absent" | "unknown"
+  isPrimary: boolean
+}
+
+export type QuickContactDraft = Pick<ContactDraft, "fullName" | "jobTitle">
+
 export type SavedOpenAiKeyState = {
   maskedKey: string
   fingerprint: string
@@ -302,6 +411,8 @@ export type Opportunity = {
   transcript: {
     audioSourceKind?: string
     clientId?: string
+    contactConfirmedAt?: string
+    contactId?: string
     diarizationSpeaker?: string
     endOfTurnConfidence?: number
     id?: string
@@ -374,6 +485,9 @@ export type StartRecordingPayload = {
   callType: string
   playbooks: CallPlaybook[]
   customerResearch: CustomerResearchConfig
+  selectedContactIds: string[]
+  primaryContactId?: string
+  quickContactDraft?: QuickContactDraft
   openAiApiKey: string
   onPreparationStep?: (update: StartCallPreparationUpdate) => void
 }

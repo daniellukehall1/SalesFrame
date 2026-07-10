@@ -5,13 +5,12 @@ import { badRequest, dataResponse, errorResponse, forbidden, methodNotAllowed, r
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { assertRateLimit } from "./_shared/rate-limit"
-import { authorizeAccount, authorizeCall, authorizeOpportunity, requireUser } from "./_shared/supabase"
+import { authorizeAccount, authorizeCall, authorizeContact, authorizeOpportunity, requireUser } from "./_shared/supabase"
 
 type CustomerResearchPayload = {
   accountId?: string
   callId?: string | null
-  customerContact?: string
-  customerRole?: string
+  contactId?: string | null
   opportunityId?: string | null
   productContext?: string
   sellerCompany?: string
@@ -151,6 +150,9 @@ export default async (request: Request, _context: Context) => {
       ? await authorizeOpportunity(user.id, payload.opportunityId, supabase, { token })
       : null
     const authorizedCall = payload.callId ? await authorizeCall(user.id, payload.callId, supabase, { token }) : null
+    const authorizedContact = payload.contactId
+      ? await authorizeContact(user.id, payload.contactId, supabase, { token })
+      : null
 
     if (authorizedOpportunity && authorizedOpportunity.account_id !== payload.accountId) {
       throw forbidden("Opportunity does not belong to this account.")
@@ -160,6 +162,38 @@ export default async (request: Request, _context: Context) => {
     }
     if (authorizedCall && payload.opportunityId && authorizedCall.opportunity_id !== payload.opportunityId) {
       throw forbidden("Call does not belong to this opportunity.")
+    }
+    if (authorizedContact && authorizedContact.account_id !== authorizedAccount.id) {
+      throw forbidden("Contact does not belong to this account.")
+    }
+    if (authorizedContact && authorizedContact.archived_at) {
+      throw forbidden("Archived contacts cannot be used for new research.")
+    }
+
+    if (authorizedContact && authorizedCall) {
+      const { data: primaryCallContact, error } = await supabase
+        .from("call_contacts")
+        .select("contact_id")
+        .eq("workspace_id", authorizedAccount.workspace_id)
+        .eq("call_id", authorizedCall.id)
+        .eq("contact_id", authorizedContact.id)
+        .eq("is_primary", true)
+        .maybeSingle()
+
+      if (error) throw new Error(error.message)
+      if (!primaryCallContact) throw forbidden("Contact is not the primary contact for this call.")
+    } else if (authorizedContact && authorizedOpportunity) {
+      const { data: primaryOpportunityContact, error } = await supabase
+        .from("opportunity_contacts")
+        .select("contact_id")
+        .eq("workspace_id", authorizedAccount.workspace_id)
+        .eq("opportunity_id", authorizedOpportunity.id)
+        .eq("contact_id", authorizedContact.id)
+        .eq("is_primary", true)
+        .maybeSingle()
+
+      if (error) throw new Error(error.message)
+      if (!primaryOpportunityContact) throw forbidden("Contact is not the primary contact for this opportunity.")
     }
 
     assertRateLimit({
@@ -188,6 +222,18 @@ export default async (request: Request, _context: Context) => {
 
     if (opportunityError) throw new Error(opportunityError.message)
 
+    const { data: contact, error: contactError } = authorizedContact
+      ? await supabase
+          .from("contacts")
+          .select("full_name,preferred_name,job_title,department,seniority")
+          .eq("id", authorizedContact.id)
+          .eq("workspace_id", authorizedAccount.workspace_id)
+          .eq("account_id", authorizedAccount.id)
+          .single()
+      : { data: null, error: null }
+
+    if (contactError) throw new Error(contactError.message)
+
     const result = assertCustomerResearchResult(
       await callOpenAiJson<CustomerResearchResult>({
         apiKey,
@@ -204,8 +250,15 @@ export default async (request: Request, _context: Context) => {
             domain: payload.sellerDomain,
             productContext: payload.productContext,
           },
-          customerContact: payload.customerContact,
-          customerRole: payload.customerRole,
+          customerContact: contact
+            ? {
+                fullName: contact.full_name,
+                preferredName: contact.preferred_name,
+                jobTitle: contact.job_title,
+                department: contact.department,
+                seniority: contact.seniority,
+              }
+            : null,
           requiredJsonShape: {
             researchSummary: "One concise paragraph.",
             questionAngle: "How this should change live call questioning.",
@@ -228,10 +281,11 @@ export default async (request: Request, _context: Context) => {
       .insert({
         call_id: authorizedCall?.id ?? null,
         account_id: authorizedAccount.id,
+        contact_id: authorizedContact?.id ?? null,
         opportunity_id: payload.opportunityId ?? null,
         enabled: true,
-        customer_contact: payload.customerContact ?? null,
-        customer_role: payload.customerRole ?? null,
+        customer_contact: contact?.full_name ?? null,
+        customer_role: contact?.job_title ?? null,
         seller_company: payload.sellerCompany ?? null,
 	        seller_domain: payload.sellerDomain ?? null,
 	        product_context: payload.productContext ?? null,
