@@ -131,9 +131,11 @@ export async function getOrCreateWorkspaceSessionStatus({
   userId: string
   workspaceId: string
 }): Promise<WorkspaceSessionStatus> {
-  const policy = await getWorkspaceSessionPolicy(supabase, workspaceId)
   const sessionKey = getSessionKey(userId, token)
-  const existingSession = await getWorkspaceSessionActivity({ sessionKey, supabase, userId, workspaceId })
+  const [policy, existingSession] = await Promise.all([
+    getWorkspaceSessionPolicy(supabase, workspaceId),
+    getWorkspaceSessionActivity({ sessionKey, supabase, userId, workspaceId }),
+  ])
   const now = new Date()
 
   if (!existingSession) {
@@ -150,10 +152,9 @@ export async function getOrCreateWorkspaceSessionStatus({
     return buildWorkspaceSessionStatus({ now, policy, session: insertedSession })
   }
 
-  const reconciledSession = await reconcileSessionExpiry({
+  const reconciledSession = reconcileSessionExpiry({
     policy,
     session: existingSession,
-    supabase,
   })
   const evaluatedSession = await expireSessionIfNeeded({
     now,
@@ -198,9 +199,11 @@ export async function getWorkspaceSessionStatus({
   userId: string
   workspaceId: string
 }): Promise<WorkspaceSessionStatus> {
-  const policy = await getWorkspaceSessionPolicy(supabase, workspaceId)
   const sessionKey = getSessionKey(userId, token)
-  const existingSession = await getWorkspaceSessionActivity({ sessionKey, supabase, userId, workspaceId })
+  const [policy, existingSession] = await Promise.all([
+    getWorkspaceSessionPolicy(supabase, workspaceId),
+    getWorkspaceSessionActivity({ sessionKey, supabase, userId, workspaceId }),
+  ])
   const now = new Date()
 
   if (!existingSession) {
@@ -216,10 +219,9 @@ export async function getWorkspaceSessionStatus({
     return buildWorkspaceSessionStatus({ now, policy, session: insertedSession })
   }
 
-  const reconciledSession = await reconcileSessionExpiry({
+  const reconciledSession = reconcileSessionExpiry({
     policy,
     session: existingSession,
-    supabase,
   })
   const evaluatedSession = await expireSessionIfNeeded({
     now,
@@ -407,14 +409,12 @@ async function expireSessionIfNeeded({
   return data
 }
 
-async function reconcileSessionExpiry({
+function reconcileSessionExpiry({
   policy,
   session,
-  supabase,
 }: {
   policy: WorkspaceSessionPolicyRow
   session: WorkspaceSessionActivityRow
-  supabase: SupabaseClient<Database>
 }) {
   if (session.expired_at) return session
 
@@ -427,16 +427,10 @@ async function reconcileSessionExpiry({
 
   if (new Date(session.expires_at).getTime() === expectedExpiresAt.getTime()) return session
 
-  const { data, error } = await supabase
-    .from("workspace_session_activity")
-    .update({ expires_at: expectedExpiresAt.toISOString() })
-    .eq("id", session.id)
-    .select("*")
-    .single()
-
-  if (error) throw new Error(error.message)
-
-  return data
+  return {
+    ...session,
+    expires_at: expectedExpiresAt.toISOString(),
+  }
 }
 
 async function updateWorkspaceSessionActivity({

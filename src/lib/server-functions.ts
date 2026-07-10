@@ -158,6 +158,8 @@ type FunctionRequestOptions = {
   timeoutMs?: number
 }
 
+const workspaceSessionRequestTimeoutMs = 15_000
+
 export class SalesFrameFunctionError extends Error {
   code?: string
   requestId?: string
@@ -517,21 +519,21 @@ export function recordWorkspaceSessionActivity(body: {
   return callFunction<WorkspaceSessionStatusResponse>("/api/session/activity", {
     method: "POST",
     body,
-    timeoutMs: 6000,
+    timeoutMs: workspaceSessionRequestTimeoutMs,
   })
 }
 
 export function getWorkspaceSessionStatus(workspaceId: string) {
   return callFunction<WorkspaceSessionStatusResponse>(
     `/api/session/status?workspaceId=${encodeURIComponent(workspaceId)}`,
-    { timeoutMs: 6000 }
+    { timeoutMs: workspaceSessionRequestTimeoutMs }
   )
 }
 
 export function getWorkspaceSessionPolicy(workspaceId: string) {
   return callFunction<WorkspaceSessionPolicy>(
     `/api/session/policy?workspaceId=${encodeURIComponent(workspaceId)}`,
-    { timeoutMs: 6000 }
+    { timeoutMs: workspaceSessionRequestTimeoutMs }
   )
 }
 
@@ -539,6 +541,6 @@ export function saveWorkspaceSessionPolicy(workspaceId: string, idleTimeoutSecon
   return callFunction<WorkspaceSessionPolicy>("/api/session/policy", {
     method: "POST",
     body: { idleTimeoutSeconds, workspaceId },
-    timeoutMs: 6000,
+    timeoutMs: workspaceSessionRequestTimeoutMs,
   })
 }

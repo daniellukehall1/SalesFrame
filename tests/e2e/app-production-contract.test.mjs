@@ -5219,6 +5219,10 @@ test("workspace session timeout is server enforced with calm client warnings", a
   const serverFunctions = await read("src/lib/server-functions.ts")
   const sharedSupabase = await read("netlify/functions/_shared/supabase.ts")
   const workspaceSession = await read("netlify/functions/_shared/workspace-session.ts")
+  const sessionReconciliation = workspaceSession.slice(
+    workspaceSession.indexOf("function reconcileSessionExpiry"),
+    workspaceSession.indexOf("async function updateWorkspaceSessionActivity")
+  )
   const sessionActivity = await read("netlify/functions/session-activity.ts")
   const sessionStatus = await read("netlify/functions/session-status.ts")
   const sessionPolicy = await read("netlify/functions/session-policy.ts")
@@ -5258,6 +5262,9 @@ test("workspace session timeout is server enforced with calm client warnings", a
   assert.match(workspaceSession, /policy\.idle_timeout_seconds === null \|\| activeCallId/)
   assert.match(workspaceSession, /reconcileSessionExpiry/)
   assert.match(workspaceSession, /now: new Date\(session\.last_activity_at\)/)
+  assert.match(workspaceSession, /const \[policy, existingSession\] = await Promise\.all/)
+  assert.doesNotMatch(workspaceSession, /async function reconcileSessionExpiry/)
+  assert.doesNotMatch(sessionReconciliation, /\.from\("workspace_session_activity"\)/)
   assert.match(workspaceSession, /const warningAt = addSeconds\(expiresAt, -SESSION_WARNING_LEAD_SECONDS\)/)
   assert.match(workspaceSession, /\.upsert\(\{ workspace_id: workspaceId \}, \{ onConflict: "workspace_id" \}\)/)
   assert.match(workspaceSession, /\.upsert\(row, \{ onConflict: "workspace_id,user_id,session_key" \}\)/)
@@ -5280,6 +5287,8 @@ test("workspace session timeout is server enforced with calm client warnings", a
   assert.match(serverFunctions, /recordWorkspaceSessionActivity/)
   assert.match(serverFunctions, /getWorkspaceSessionStatus/)
   assert.match(serverFunctions, /saveWorkspaceSessionPolicy/)
+  assert.match(serverFunctions, /const workspaceSessionRequestTimeoutMs = 15_000/)
+  assert.doesNotMatch(serverFunctions, /\/api\/session\/(?:activity|status|policy)[\s\S]{0,240}timeoutMs: 6000/)
 
   assert.match(app, /workspaceSessionTimeoutOptions/)
   assert.match(app, /Still here\?/)
