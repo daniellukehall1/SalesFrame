@@ -39,7 +39,11 @@ test("contact identities open a complete responsive canonical record", async () 
   assert.match(contacts, /aria-label=\{`View \$\{contact\.fullName\} contact details`\}/)
   assert.match(detailOverlay, /if \(isMobile\)[\s\S]*<Drawer open=\{open\} onOpenChange=\{onOpenChange\}/)
   assert.match(detailOverlay, /<Dialog open=\{open\} onOpenChange=\{onOpenChange\}>/)
-  assert.match(detailOverlay, /<dl className="grid gap-3 sm:grid-cols-2">/)
+  assert.match(detailOverlay, /<dl className="grid min-w-0 gap-3 md:grid-cols-2">/)
+  assert.match(detailOverlay, /overflow-x-hidden overflow-y-auto overscroll-contain/)
+  assert.match(detailOverlay, /overflow-x-hidden overflow-y-hidden/)
+  assert.match(detailOverlay, /\[overflow-wrap:anywhere\]/)
+  assert.doesNotMatch(detailOverlay, /overflow-x-auto/)
   for (const label of [
     "Full name",
     "Preferred name",
@@ -80,6 +84,22 @@ test("contact identities open a complete responsive canonical record", async () 
   assert.match(contacts, /if \(invoker\?\.isConnected\)[\s\S]*invoker\.focus\(\)/)
   assert.match(contacts, /visibleContactButton \?\? addContactButtonRef\.current/)
   assert.doesNotMatch(contacts, /<TableRow[^>]*role="button"/)
+})
+
+test("opportunity account directory clearly opens contacts and keeps menus contact-specific", async () => {
+  const contacts = await read("src/components/contact-management.tsx")
+  const panel = contacts.slice(
+    contacts.indexOf("export function ContactsPanel"),
+    contacts.indexOf("function BuyingRoleMultiSelect")
+  )
+
+  assert.match(panel, /className=\{cn\([\s\S]*"cursor-pointer"/)
+  assert.match(panel, /isContactDirectoryControl\(event\.target\)/)
+  assert.match(panel, /event\.currentTarget\.querySelector<HTMLButtonElement>\("\[data-contact-detail-id\]"\)/)
+  assert.match(panel, /<ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" \/>/)
+  assert.match(panel, /aria-label=\{`View \$\{contact\.fullName\} contact details`\}/)
+  assert.doesNotMatch(panel, /<DropdownMenuItem key=\{opportunity!\.id\}/)
+  assert.doesNotMatch(panel, /<ExternalLinkIcon \/>Open \{opportunity!\.name\}/)
 })
 
 test("opportunities expose the shared account directory beside deal-specific contact roles", async () => {

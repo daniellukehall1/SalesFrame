@@ -3,6 +3,7 @@ import {
   ArchiveIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   ExternalLinkIcon,
   MailIcon,
   MoreHorizontalIcon,
@@ -155,6 +156,10 @@ function matchesContact(contact: Contact, query: string) {
     contact.businessPhone,
     contact.linkedinUrl,
   ].some((value) => value.toLowerCase().includes(normalizedQuery))
+}
+
+function isContactDirectoryControl(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest("button, a, input, textarea, select, [role=menuitem], [role=combobox]"))
 }
 
 function getSafeProfessionalProfileUrl(value: string) {
@@ -815,13 +820,13 @@ function ContactInsightList({
   const visibleItems = maxItems === null ? items : items.slice(0, maxItems)
 
   return (
-    <div className={cn("rounded-md bg-background/70 p-3", tone === "caution" && "bg-amber-500/10")}>
+    <div className={cn("min-w-0 rounded-md bg-background/70 p-3", tone === "caution" && "bg-amber-500/10")}>
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
       <ul className="mt-2 grid gap-1.5 text-sm">
         {visibleItems.map((item) => (
-          <li key={item} className="flex gap-2">
+          <li key={item} className="flex min-w-0 gap-2">
             <span className={cn("mt-2 size-1.5 shrink-0 rounded-full bg-primary", tone === "caution" && "bg-amber-600")} />
-            <span>{item}</span>
+            <span className="min-w-0 [overflow-wrap:anywhere]">{item}</span>
           </li>
         ))}
       </ul>
@@ -862,7 +867,7 @@ function ContactEnrichmentDetails({
         </p>
       ) : null}
       {enrichment && hasInsights ? (
-        <div className="grid gap-3 rounded-lg bg-muted/30 p-3">
+        <div className="grid min-w-0 gap-3 overflow-x-hidden rounded-lg bg-muted/30 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-medium">Professional insights</p>
             <Badge variant="outline">
@@ -874,16 +879,16 @@ function ContactEnrichmentDetails({
           {enrichment.professionalSummary ? (
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Professional summary</p>
-              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{enrichment.professionalSummary}</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{enrichment.professionalSummary}</p>
             </div>
           ) : null}
           {enrichment.roleScope ? (
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Role scope</p>
-              <p className="mt-1 text-sm leading-relaxed">{enrichment.roleScope}</p>
+              <p className="mt-1 text-sm leading-relaxed [overflow-wrap:anywhere]">{enrichment.roleScope}</p>
             </div>
           ) : null}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid min-w-0 gap-3 lg:grid-cols-2">
             <ContactInsightList title="Likely priorities" items={enrichment.priorities} maxItems={maxItems} />
             <ContactInsightList title="Likely KPIs" items={enrichment.kpis} maxItems={maxItems} />
             <ContactInsightList title="Relevant experience" items={enrichment.relevantExperience} maxItems={maxItems} />
@@ -894,19 +899,19 @@ function ContactEnrichmentDetails({
           {enrichment.sources.some((source) => getSafeProfessionalProfileUrl(source.url)) ? (
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Public sources</p>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="mt-2 flex min-w-0 flex-wrap gap-2 overflow-hidden">
                 {enrichment.sources.map((source) => {
                   const safeUrl = getSafeProfessionalProfileUrl(source.url)
                   return safeUrl ? (
                     <a
                       key={`${source.title}-${safeUrl}`}
-                      className="inline-flex min-h-11 items-center gap-1.5 rounded-md border bg-background px-3 text-sm text-primary underline-offset-4 hover:underline md:min-h-8"
+                      className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-md border bg-background px-3 text-sm text-primary underline-offset-4 hover:underline md:min-h-8"
                       href={safeUrl}
                       target="_blank"
                       rel="noreferrer"
                     >
                       <ExternalLinkIcon className="size-3.5" />
-                      {source.title}
+                      <span className="truncate">{source.title}</span>
                     </a>
                   ) : null
                 })}
@@ -974,7 +979,7 @@ function ContactDetailField({
   return (
     <div className="grid min-w-0 gap-1 rounded-lg bg-muted/20 p-3">
       <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-sm">{value || "Not captured"}</dd>
+      <dd className="min-w-0 break-words text-sm [overflow-wrap:anywhere]">{value || "Not captured"}</dd>
     </div>
   )
 }
@@ -1023,8 +1028,8 @@ function ContactDetailsOverlay({
   const archivedAt = formatContactTimestamp(contact.archivedAtIso)
 
   const body = (
-    <div className="grid min-h-0 gap-5 overflow-y-auto overscroll-contain pr-1">
-      <div className="flex min-w-0 flex-col gap-3 rounded-lg border bg-background p-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="grid min-h-0 w-full min-w-0 max-w-full gap-5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1">
+      <div className="flex w-full min-w-0 max-w-full flex-col gap-3 rounded-lg border bg-background p-3 md:flex-row md:items-start md:justify-between">
         <ContactIdentity contact={contact} />
         <div className="flex flex-wrap gap-2">
           <EnrichmentBadge status={enrichmentStatus} />
@@ -1033,12 +1038,12 @@ function ContactDetailsOverlay({
         </div>
       </div>
 
-      <section className="grid gap-3" aria-labelledby={contactDetailsHeadingId}>
+      <section className="grid w-full min-w-0 max-w-full gap-3" aria-labelledby={contactDetailsHeadingId}>
         <div>
           <h3 id={contactDetailsHeadingId} className="text-sm font-medium">Contact details</h3>
           <p className="mt-1 text-xs text-muted-foreground">Reusable professional context stored on the account.</p>
         </div>
-        <dl className="grid gap-3 sm:grid-cols-2">
+        <dl className="grid min-w-0 gap-3 md:grid-cols-2">
           <ContactDetailField label="Full name" value={contact.fullName} />
           <ContactDetailField label="Preferred name" value={contact.preferredName} />
           <ContactDetailField label="Job title" value={contact.jobTitle} />
@@ -1051,7 +1056,7 @@ function ContactDetailsOverlay({
             label="Professional profile"
             value={professionalProfileUrl ? (
               <a
-                className="inline-flex min-h-11 max-w-full items-center gap-2 text-primary underline-offset-4 hover:underline md:min-h-8"
+                className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 text-primary underline-offset-4 hover:underline md:min-h-8"
                 href={professionalProfileUrl}
                 target="_blank"
                 rel="noreferrer"
@@ -1067,9 +1072,9 @@ function ContactDetailsOverlay({
           <ContactDetailField label="Created" value={createdAt} />
           <ContactDetailField label="Last updated" value={updatedAt} />
           <ContactDetailField label="Archive status" value={contact.archivedAtIso ? `Archived ${archivedAt}` : "Active record"} />
-          <div className="grid min-w-0 gap-1 rounded-lg bg-muted/20 p-3 sm:col-span-2">
+          <div className="grid min-w-0 gap-1 rounded-lg bg-muted/20 p-3 md:col-span-2">
             <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Private seller notes</dt>
-            <dd className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+            <dd className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]">
               {contact.privateNotes || "No private notes captured."}
             </dd>
           </div>
@@ -1077,7 +1082,7 @@ function ContactDetailsOverlay({
       </section>
 
       <Separator />
-      <section className="grid gap-3" aria-labelledby={opportunityHeadingId}>
+      <section className="grid w-full min-w-0 max-w-full gap-3" aria-labelledby={opportunityHeadingId}>
         <div>
           <h3 id={opportunityHeadingId} className="text-sm font-medium">Linked opportunities</h3>
           <p className="mt-1 text-xs text-muted-foreground">Deal-specific roles and relationship context remain separate from the contact record.</p>
@@ -1085,8 +1090,8 @@ function ContactDetailsOverlay({
         {linkedOpportunities.length ? (
           <div className="grid gap-3">
             {linkedOpportunities.map(({ opportunity, relationship }) => (
-              <article key={relationship.id || `${relationship.opportunityId}-${relationship.contactId}`} className="grid gap-3 rounded-lg border bg-background p-3">
-                <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <article key={relationship.id || `${relationship.opportunityId}-${relationship.contactId}`} className="grid min-w-0 gap-3 overflow-hidden rounded-lg border bg-background p-3">
+                <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{opportunity?.name || "Linked opportunity unavailable"}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -1111,14 +1116,14 @@ function ContactDetailsOverlay({
                   {relationship.buyingRoles.map((role) => <Badge key={role} variant="secondary">{formatBuyingRole(role)}</Badge>)}
                   {!relationship.buyingRoles.length ? <Badge variant="outline">Role not captured</Badge> : null}
                 </div>
-                <dl className="grid gap-2 sm:grid-cols-3">
+                <dl className="grid min-w-0 gap-2 md:grid-cols-3">
                   <ContactDetailField label="Influence" value={formatStatusLabel(relationship.influence)} />
                   <ContactDetailField label="Relationship" value={formatStatusLabel(relationship.relationshipStrength)} />
                   <ContactDetailField label="Stance" value={formatStatusLabel(relationship.stance)} />
                 </dl>
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Deal-specific notes</p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                  <p className="mt-1 min-w-0 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
                     {relationship.notes || "No deal-specific notes captured."}
                   </p>
                 </div>
@@ -1133,15 +1138,15 @@ function ContactDetailsOverlay({
       </section>
 
       <Separator />
-      <section className="grid gap-3" aria-labelledby={callHeadingId}>
+      <section className="grid w-full min-w-0 max-w-full gap-3" aria-labelledby={callHeadingId}>
         <div>
           <h3 id={callHeadingId} className="text-sm font-medium">Call participation</h3>
           <p className="mt-1 text-xs text-muted-foreground">Expected and attended call relationships retained for this contact.</p>
         </div>
         {linkedCalls.length ? (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid min-w-0 gap-3 lg:grid-cols-2">
             {linkedCalls.map(({ call, opportunity, relationship }) => (
-              <article key={relationship.id || `${relationship.callId}-${relationship.contactId}`} className="grid gap-3 rounded-lg border bg-background p-3">
+              <article key={relationship.id || `${relationship.callId}-${relationship.contactId}`} className="grid min-w-0 gap-3 overflow-hidden rounded-lg border bg-background p-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{call?.title || "Historical call participation"}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -1180,7 +1185,7 @@ function ContactDetailsOverlay({
       </section>
 
       <Separator />
-      <section className="grid gap-3" aria-labelledby={insightHeadingId}>
+      <section className="grid w-full min-w-0 max-w-full gap-3" aria-labelledby={insightHeadingId}>
         <div>
           <h3 id={insightHeadingId} className="flex items-center gap-2 text-sm font-medium">
             <SparklesIcon className="size-4 text-primary" />
@@ -1206,11 +1211,11 @@ function ContactDetailsOverlay({
   )
 
   const actions = (
-    <div className="grid w-full gap-2 sm:grid-cols-[auto_1fr] sm:items-center">
-      <Button type="button" variant="outline" className="min-h-11 sm:w-fit md:min-h-8" disabled={pending} onClick={() => onOpenChange(false)}>
+    <div className="grid w-full min-w-0 gap-2 lg:grid-cols-[auto_1fr] lg:items-center">
+      <Button type="button" variant="outline" className="min-h-11 w-full lg:w-fit lg:min-h-8" disabled={pending} onClick={() => onOpenChange(false)}>
         Close
       </Button>
-      <div className="grid gap-2 sm:flex sm:justify-end">
+      <div className="grid min-w-0 gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap lg:justify-end">
         {contact.archivedAtIso ? (
           <Button type="button" className="min-h-11 gap-2 md:min-h-8" disabled={pending} onClick={() => void onAction(contact, "restore")}>
             <Undo2Icon />
@@ -1254,7 +1259,7 @@ function ContactDetailsOverlay({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange} showSwipeHandle>
-        <DrawerContent className="grid max-h-[94svh] min-h-[min(680px,94svh)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden px-3 pb-[env(safe-area-inset-bottom)] [&_[data-slot=button]]:min-h-11">
+        <DrawerContent className="grid w-full min-w-0 max-w-full max-h-[94svh] min-h-[min(680px,94svh)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-x-hidden overflow-y-hidden px-3 pb-[env(safe-area-inset-bottom)] [&_[data-slot=button]]:min-h-11">
           <DrawerHeader className="px-0 text-left">
             <DrawerTitle>{title}</DrawerTitle>
             <DrawerDescription>{description}</DrawerDescription>
@@ -1270,7 +1275,7 @@ function ContactDetailsOverlay({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dismissible className="grid max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-4xl">
+      <DialogContent dismissible className="grid w-full min-w-0 max-w-[calc(100%-2rem)] max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-x-hidden overflow-y-hidden sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -1597,17 +1602,28 @@ export function ContactsPanel({
                 <article
                   key={contact.id}
                   data-focused={contact.id === highlightedContactId || undefined}
-                  className={cn("grid gap-3 rounded-lg border bg-background p-3", contact.id === highlightedContactId && "ring-2 ring-primary/30")}
+                  className={cn(
+                    "grid cursor-pointer gap-3 rounded-lg border bg-background p-3 transition-colors hover:bg-muted/20",
+                    contact.id === highlightedContactId && "ring-2 ring-primary/30"
+                  )}
+                  onClick={(event) => {
+                    if (isContactDirectoryControl(event.target)) return
+                    openContactDetails(
+                      contact,
+                      event.currentTarget.querySelector<HTMLButtonElement>("[data-contact-detail-id]")
+                    )
+                  }}
                 >
                   <div className="flex min-w-0 items-start justify-between gap-3">
                     <button
                       type="button"
-                      className="min-h-11 min-w-0 flex-1 rounded-md text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="grid min-h-11 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
                       data-contact-detail-id={contact.id}
                       aria-label={`View ${contact.fullName} contact details`}
                       onClick={(event) => openContactDetails(contact, event.currentTarget)}
                     >
                       <ContactIdentity contact={contact} />
+                      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                     </button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -1617,15 +1633,6 @@ export function ContactsPanel({
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         {!contact.archivedAtIso ? <DropdownMenuItem onSelect={() => openEditContact(contact)}><PencilIcon />Edit</DropdownMenuItem> : null}
-                        {opportunityContacts
-                          .filter((relationship) => relationship.contactId === contact.id)
-                          .map((relationship) => opportunityById.get(relationship.opportunityId))
-                          .filter(Boolean)
-                          .map((opportunity) => (
-                            <DropdownMenuItem key={opportunity!.id} onSelect={() => onOpenOpportunity(opportunity!.id)}>
-                              <ExternalLinkIcon />Open {opportunity!.name}
-                            </DropdownMenuItem>
-                          ))}
                         {contact.archivedAtIso ? (
                           <DropdownMenuItem disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "restore")}>
                             <Undo2Icon />Restore contact
@@ -1687,16 +1694,31 @@ export function ContactsPanel({
                   const professionalProfileUrl = getSafeProfessionalProfileUrl(contact.linkedinUrl)
 
                   return (
-                    <TableRow key={contact.id} data-focused={contact.id === highlightedContactId || undefined} className={contact.id === highlightedContactId ? "bg-primary/5 ring-1 ring-inset ring-primary/20" : undefined}>
+                    <TableRow
+                      key={contact.id}
+                      data-focused={contact.id === highlightedContactId || undefined}
+                      className={cn(
+                        "cursor-pointer",
+                        contact.id === highlightedContactId && "bg-primary/5 ring-1 ring-inset ring-primary/20"
+                      )}
+                      onClick={(event) => {
+                        if (isContactDirectoryControl(event.target)) return
+                        openContactDetails(
+                          contact,
+                          event.currentTarget.querySelector<HTMLButtonElement>("[data-contact-detail-id]")
+                        )
+                      }}
+                    >
                       <TableCell className="max-w-0 pl-3 whitespace-normal">
                         <button
                           type="button"
-                          className="min-h-11 w-full min-w-0 rounded-md text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+                          className="grid min-h-11 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
                           data-contact-detail-id={contact.id}
                           aria-label={`View ${contact.fullName} contact details`}
                           onClick={(event) => openContactDetails(contact, event.currentTarget)}
                         >
                           <ContactIdentity contact={contact} compact />
+                          <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                         </button>
                       </TableCell>
                       <TableCell className="max-w-0 whitespace-normal">
@@ -1725,15 +1747,6 @@ export function ContactsPanel({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             {!contact.archivedAtIso ? <DropdownMenuItem onSelect={() => openEditContact(contact)}><PencilIcon />Edit</DropdownMenuItem> : null}
-                            {opportunityContacts
-                              .filter((relationship) => relationship.contactId === contact.id)
-                              .map((relationship) => opportunityById.get(relationship.opportunityId))
-                              .filter(Boolean)
-                              .map((opportunity) => (
-                                <DropdownMenuItem key={opportunity!.id} onSelect={() => onOpenOpportunity(opportunity!.id)}>
-                                  <ExternalLinkIcon />Open {opportunity!.name}
-                                </DropdownMenuItem>
-                              ))}
                             {contact.archivedAtIso ? (
                               <DropdownMenuItem disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "restore")}>
                                 <Undo2Icon />Restore contact
