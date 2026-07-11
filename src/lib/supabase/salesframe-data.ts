@@ -161,6 +161,22 @@ export async function listWorkspaces(client?: SalesFrameClient) {
   return requireData(response, "No workspaces returned.")
 }
 
+export async function resolveRecordWorkspaceId(
+  resource: { id: string; type: "account" | "opportunity" | "call" },
+  client?: SalesFrameClient
+) {
+  const table = resource.type === "account" ? "accounts" : resource.type === "opportunity" ? "opportunities" : "calls"
+  const response = await getSupabase(client)
+    .from(table)
+    .select("workspace_id")
+    .eq("id", resource.id)
+    .maybeSingle()
+
+  if (response.error) throw new Error(response.error.message)
+
+  return response.data?.workspace_id ?? null
+}
+
 export async function createWorkspace(
   values: Pick<TablesInsert<"workspaces">, "name"> &
     Partial<Pick<TablesInsert<"workspaces">, "description" | "default_currency" | "workspace_icon">>,

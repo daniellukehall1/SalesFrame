@@ -195,6 +195,17 @@ import {
   shouldIncludeLiveTranscriptLine,
 } from "@/lib/live-question-policy"
 import { normalizePublicMarketingPath } from "@/lib/public-marketing-routes"
+import {
+  getAuthenticatedPathForState,
+  getAuthenticatedRoutePath,
+  getRouteResource,
+  getRouteWorkspaceId,
+  getSafeAuthenticatedNextPath,
+  isProtectedRoutePath,
+  parseAuthenticatedRoute,
+  type AccountRouteTab,
+  type AuthenticatedRoute,
+} from "@/lib/authenticated-routes"
 import { createClient } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
 import {
@@ -289,6 +300,7 @@ import {
   replaceOpportunityContacts,
   replaceOpportunityPlaybooks,
   replacePlaybookFields,
+  resolveRecordWorkspaceId,
   updateAccount as updateSupabaseAccount,
   updateContact as updateSupabaseContact,
   updateCall as updateSupabaseCall,
@@ -333,6 +345,7 @@ import {
   getDisplayedLiveCoachQuestion,
 } from "@/lib/manual-coach"
 import {
+  clearStoredLiveCoachPopoutState,
   createLiveCoachPopoutSourceId,
   getLiveCoachPopoutCommandKey,
   isFreshLiveCoachPopoutCommand,
@@ -485,7 +498,7 @@ type SpeakerIdentityChangeResult = {
 }
 
 type ContactWorkspaceContextValue = {
-  accountTab: "record" | "contacts" | "opportunities" | "intelligence"
+  accountTab: AccountRouteTab
   focusedContactId: string
   contacts: Contact[]
   opportunityContacts: OpportunityContact[]
@@ -505,7 +518,7 @@ type ContactWorkspaceContextValue = {
   confirmSpeakerContact: (speakerId: string, contactId: string | null) => Promise<void>
   clearFocusedContact: () => void
   focusContact: (contactId: string) => void
-  setAccountTab: (tab: "record" | "contacts" | "opportunities" | "intelligence") => void
+  setAccountTab: (tab: AccountRouteTab, options?: { replace?: boolean }) => void
 }
 
 const ContactWorkspaceContext = React.createContext<ContactWorkspaceContextValue>({
@@ -584,6 +597,8 @@ const opportunityStageOptions = [
 ] as const
 
 const workspaceSessionExpiredMessage = "We signed you out to keep your workspace safe."
+const protectedRouteUnavailableMessage =
+  "This page is not available. The link may be outdated, or the record may belong to a workspace you cannot access."
 const workspaceSessionActivityThrottleMs = 60_000
 const workspaceSessionLiveHeartbeatMs = 60_000
 
@@ -591,6 +606,8 @@ const profileRouteIds = ["profile-account"]
 const settingsRouteIds = ["settings", "capture", "retention", "ai"]
 const breadcrumbOpportunityViews = [
   "methodology",
+  "opportunity-contacts",
+  "opportunity-history",
   "opportunity-record",
   "opportunity-intelligence",
 ]
@@ -618,6 +635,8 @@ const mobileStartCallInlineActionViews = [
   "workspace",
   "post-call",
   "methodology",
+  "opportunity-contacts",
+  "opportunity-history",
   "opportunity-record",
   "opportunity-intelligence",
 ]
@@ -632,6 +651,7 @@ const mobileStartCallViews = [
 const sellerDomainLookupDebounceMs = 2000
 const colorModeStorageKey = "salesframe.color-mode"
 const captureSettingsStorageKey = "salesframe.capture-settings"
+const activeWorkspaceStorageKey = "salesframe.active-workspace"
 const quickContactPrimaryToken = "__quick_contact_draft__"
 
 type CaptureSettings = {
@@ -644,6 +664,26 @@ type AudioSourceChoice = "one_channel" | "two_channels" | "meeting_bot"
 const defaultCaptureSettings: CaptureSettings = {
   browserTab: true,
   inPersonMic: true,
+}
+
+function getStoredActiveWorkspaceId(userId: string) {
+  if (typeof window === "undefined" || !userId) return ""
+
+  try {
+    return window.localStorage.getItem(`${activeWorkspaceStorageKey}.${userId}`) ?? ""
+  } catch {
+    return ""
+  }
+}
+
+function storeActiveWorkspaceId(userId: string, workspaceId: string) {
+  if (typeof window === "undefined" || !userId || !workspaceId) return
+
+  try {
+    window.localStorage.setItem(`${activeWorkspaceStorageKey}.${userId}`, workspaceId)
+  } catch {
+    // The current session still retains the workspace when browser storage is unavailable.
+  }
 }
 
 function getInitialDarkMode() {
@@ -732,6 +772,7 @@ function getPublicAuthRouteFromPath(): PublicAuthRoute {
   if (typeof window === "undefined") return "landing"
   if (window.location.pathname === "/login") return "login"
   if (window.location.pathname === "/signup") return "signup"
+  if (isProtectedRoutePath(window.location.pathname)) return "login"
 
   return "landing"
 }
@@ -739,7 +780,8 @@ function getPublicAuthRouteFromPath(): PublicAuthRoute {
 function isPublicLandingRouteOverride() {
   if (typeof window === "undefined") return false
 
-  return new URLSearchParams(window.location.search).has("salesframe_public_preview")
+  return window.location.pathname === "/" &&
+    new URLSearchParams(window.location.search).has("salesframe_public_preview")
 }
 
 function getAuthRedirectUrl(path: "/login" | "/signup" = "/login") {
@@ -785,6 +827,32 @@ function PublicRouteFallback({
         </p>
       </div>
     </main>
+  )
+}
+
+function ProtectedRouteUnavailable({
+  message,
+  onGoHome,
+  onRetry,
+}: {
+  message: string
+  onGoHome: () => void
+  onRetry: () => void
+}) {
+  return (
+    <div className="mx-auto grid w-full max-w-2xl gap-5 py-12 md:py-20">
+      <div className="flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground" aria-hidden="true">
+        <CircleAlertIcon className="size-5" />
+      </div>
+      <div className="grid gap-2">
+        <h1 className="font-heading text-2xl font-medium">This page isn’t available</h1>
+        <p className="max-w-xl text-sm leading-relaxed text-muted-foreground">{message}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" onClick={onRetry}>Try again</Button>
+        <Button type="button" variant="outline" onClick={onGoHome}>Return home</Button>
+      </div>
+    </div>
   )
 }
 
@@ -2192,7 +2260,23 @@ function getLiveCallLimitNotice(elapsedSeconds: number, durationLimitSeconds = M
 
 function App() {
   const supabase = React.useMemo(() => createOptionalSupabaseClient(), [])
-  const [activeView, setActiveView] = React.useState("home")
+  const initialAuthenticatedRouteRef = React.useRef<AuthenticatedRoute | null>(
+    typeof window === "undefined"
+      ? null
+      : parseAuthenticatedRoute(`${window.location.pathname}${window.location.search}`)
+  )
+  const pendingAuthenticatedPathRef = React.useRef(
+    typeof window === "undefined"
+      ? ""
+      : getSafeAuthenticatedNextPath(window.location.search) ??
+        (initialAuthenticatedRouteRef.current
+          ? getAuthenticatedRoutePath(initialAuthenticatedRouteRef.current)
+          : "")
+  )
+  const [activeView, setActiveView] = React.useState(initialAuthenticatedRouteRef.current?.view ?? "home")
+  const [authenticatedRouteRevision, setAuthenticatedRouteRevision] = React.useState(0)
+  const [authenticatedRouteError, setAuthenticatedRouteError] = React.useState("")
+  const [authenticatedRouteResolving, setAuthenticatedRouteResolving] = React.useState(false)
   const [navigationScrollResetNonce, setNavigationScrollResetNonce] = React.useState(0)
   const [workspaceNavItems, setWorkspaceNavItems] = React.useState<WorkspaceNavItem[]>([])
   const [activeWorkspaceId, setActiveWorkspaceId] = React.useState("")
@@ -2211,13 +2295,23 @@ function App() {
   const [persistentAppAlert, setPersistentAppAlert] = React.useState("")
   const [archivedAccountRows, setArchivedAccountRows] = React.useState<AccountRow[]>([])
   const [archivedOpportunityRows, setArchivedOpportunityRows] = React.useState<OpportunityRow[]>([])
-  const [activeAccountId, setActiveAccountId] = React.useState("")
-  const [accountDetailTab, setAccountDetailTab] = React.useState<"record" | "contacts" | "opportunities" | "intelligence">("record")
+  const [activeAccountId, setActiveAccountId] = React.useState(
+    initialAuthenticatedRouteRef.current?.kind === "account" ? initialAuthenticatedRouteRef.current.accountId : ""
+  )
+  const [accountDetailTab, setAccountDetailTab] = React.useState<AccountRouteTab>(
+    initialAuthenticatedRouteRef.current?.kind === "account" ? initialAuthenticatedRouteRef.current.tab : "record"
+  )
   const [focusedContactId, setFocusedContactId] = React.useState("")
   const clearFocusedContact = React.useCallback(() => setFocusedContactId(""), [])
-  const [activeOpportunityId, setActiveOpportunityId] = React.useState("")
+  const [activeOpportunityId, setActiveOpportunityId] = React.useState(
+    initialAuthenticatedRouteRef.current?.kind === "opportunity"
+      ? initialAuthenticatedRouteRef.current.opportunityId
+      : ""
+  )
   const [activeCallId, setActiveCallId] = React.useState("")
-  const [postCallFocusCallId, setPostCallFocusCallId] = React.useState("")
+  const [postCallFocusCallId, setPostCallFocusCallId] = React.useState(
+    initialAuthenticatedRouteRef.current?.kind === "call" ? initialAuthenticatedRouteRef.current.callId : ""
+  )
   const [activeCallStartedAt, setActiveCallStartedAt] = React.useState("")
   const [createAccountOpen, setCreateAccountOpen] = React.useState(false)
   const [createOpportunityOpen, setCreateOpportunityOpen] = React.useState(false)
@@ -2333,6 +2427,12 @@ function App() {
   const appMainScrollRef = React.useRef<HTMLElement | null>(null)
   const pendingNavigationScrollResetRef = React.useRef(false)
   const lastScrolledNavigationKeyRef = React.useRef("")
+  const lastAppliedAuthenticatedRouteRef = React.useRef("")
+  const authenticatedRouteLookupKeyRef = React.useRef("")
+  const authenticatedRouteRefreshKeyRef = React.useRef("")
+  const currentAuthenticatedPathRef = React.useRef(
+    initialAuthenticatedRouteRef.current ? getAuthenticatedRoutePath(initialAuthenticatedRouteRef.current) : ""
+  )
   const navigationScrollResetTokenRef = React.useRef(0)
   const workspaceSessionActivitySentAtRef = React.useRef(0)
   const workspaceSessionStatusRef = React.useRef<WorkspaceSessionStatusResponse | null>(null)
@@ -2409,6 +2509,56 @@ function App() {
     activeOpportunity.id || "opportunity",
     activePostCallCallId || activeCallId || "call",
   ].join(":")
+
+  React.useEffect(() => {
+    if (passwordRecoveryActive) {
+      document.title = "Reset password · SalesFrame"
+      return
+    }
+
+    if (!authSession) {
+      if (publicAuthRoute === "signup") {
+        document.title = "Create account · SalesFrame"
+      } else if (publicAuthRoute === "login" || isProtectedRoutePath(window.location.pathname)) {
+        document.title = "Sign in · SalesFrame"
+      }
+      return
+    }
+
+    if (isLiveCoachPopoutRoute()) return
+
+    if (authenticatedRouteError) {
+      document.title = "Page unavailable · SalesFrame"
+      return
+    }
+
+    const pageLabel = viewLabels[activeView] ?? "SalesFrame"
+    const isOpportunityContext = [
+      "methodology",
+      "opportunity-contacts",
+      "opportunity-history",
+      "opportunity-intelligence",
+      "opportunity-record",
+      "post-call",
+      "workspace",
+    ].includes(activeView)
+    const recordLabel = activeView === "account-detail"
+      ? activeAccount.name
+      : isOpportunityContext
+        ? activeOpportunity.name
+        : ""
+    const title = recordLabel ? `${recordLabel} — ${pageLabel}` : pageLabel
+
+    document.title = title === "SalesFrame" ? title : `${title} · SalesFrame`
+  }, [
+    activeAccount.name,
+    activeOpportunity.name,
+    activeView,
+    authenticatedRouteError,
+    authSession,
+    passwordRecoveryActive,
+    publicAuthRoute,
+  ])
 
   const scrollAppContentToTop = React.useCallback(() => {
     const resetToken = navigationScrollResetTokenRef.current + 1
@@ -2488,14 +2638,64 @@ function App() {
     activeElement.blur()
   }, [])
 
+  const writeAuthenticatedHistory = React.useCallback((path: string, mode: "push" | "replace" = "push") => {
+    const requestedRoute = parseAuthenticatedRoute(path)
+    const authenticatedRoute = requestedRoute?.kind === "view" && !requestedRoute.workspaceId
+      ? { ...requestedRoute, workspaceId: activeWorkspaceIdRef.current }
+      : requestedRoute
+    const nextPath = authenticatedRoute ? getAuthenticatedRoutePath(authenticatedRoute) : path
+    const currentPath = `${window.location.pathname}${window.location.search}`
+    if (currentPath === nextPath) return
+
+    const nextState = {
+      ...(window.history.state ?? {}),
+      salesframeRoute: nextPath,
+      salesframeWorkspaceId: activeWorkspaceIdRef.current || undefined,
+    }
+    if (mode === "replace") {
+      window.history.replaceState(nextState, "", nextPath)
+    } else {
+      window.history.pushState(nextState, "", nextPath)
+    }
+
+    currentAuthenticatedPathRef.current = authenticatedRoute
+      ? getAuthenticatedRoutePath(authenticatedRoute)
+      : ""
+  }, [])
+
+  const restoreActiveCallRoute = React.useCallback((
+    message: string,
+    mode: "push" | "replace" = "replace"
+  ) => {
+    const callId = activeCallIdRef.current
+    const activeCallPath = callId
+      ? getAuthenticatedRoutePath({ callId, kind: "call", view: "workspace" })
+      : getAuthenticatedRoutePath({
+          kind: "view",
+          view: "home",
+          workspaceId: activeWorkspaceIdRef.current || undefined,
+        })
+
+    writeAuthenticatedHistory(activeCallPath, mode)
+    setPostCallFocusCallId("")
+    setAuthenticatedRouteError("")
+    setAuthenticatedRouteResolving(false)
+    setActiveView(callId ? "workspace" : "home")
+    setAuthenticatedRouteRevision((value) => value + 1)
+    requestNavigationScrollReset()
+    setPersistentAppAlert(message)
+  }, [requestNavigationScrollReset, writeAuthenticatedHistory])
+
   const ensureAuthenticatedAppRoute = React.useCallback(() => {
-    if (!isAuthRoutePath(window.location.pathname)) return
+    if (!isAuthRoutePath(window.location.pathname) && window.location.pathname !== "/") return
 
     setLegalPage(null)
     setPublicAuthRoute("landing")
     setAuthMode("login")
-    window.history.replaceState(null, "", "/")
-  }, [])
+    const nextPath = pendingAuthenticatedPathRef.current || "/app"
+    writeAuthenticatedHistory(nextPath, "replace")
+    setAuthenticatedRouteRevision((value) => value + 1)
+  }, [writeAuthenticatedHistory])
 
   React.useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode)
@@ -2513,17 +2713,33 @@ function App() {
 
   React.useEffect(() => {
     const handlePopState = () => {
+      if (isCallLiveRef.current) {
+        restoreActiveCallRoute("Stop the active call before using browser history.", "push")
+        return
+      }
+
+      if (
+        currentAuthenticatedPathRef.current &&
+        document.querySelector('[data-unsaved-contact-notes="true"]')
+      ) {
+        const currentPath = currentAuthenticatedPathRef.current
+        window.history.pushState({ ...(window.history.state ?? {}), salesframeRoute: currentPath }, "", currentPath)
+        setPersistentAppAlert("Save or revert the contact note changes before leaving this opportunity.")
+        return
+      }
+
       setLegalPage(getLegalPageFromPath())
       setPublicMarketingPath(getPublicMarketingPathFromPath())
       const nextRoute = getPublicAuthRouteFromPath()
       setPublicAuthRoute(nextRoute)
       if (nextRoute !== "landing") setAuthMode(nextRoute)
+      setAuthenticatedRouteRevision((value) => value + 1)
     }
 
     window.addEventListener("popstate", handlePopState)
 
     return () => window.removeEventListener("popstate", handlePopState)
-  }, [])
+  }, [restoreActiveCallRoute])
 
   React.useEffect(() => {
     if (!supabase) {
@@ -2576,10 +2792,28 @@ function App() {
   }, [supabase])
 
   React.useEffect(() => {
+    if (authLoading || authSession) return
+
+    clearStoredLiveCoachPopoutState()
+  }, [authLoading, authSession])
+
+  React.useEffect(() => {
     if (!authSession || passwordRecoveryActive) return
 
     ensureAuthenticatedAppRoute()
-  }, [authSession, ensureAuthenticatedAppRoute, passwordRecoveryActive])
+  }, [authenticatedRouteRevision, authSession, ensureAuthenticatedAppRoute, passwordRecoveryActive])
+
+  React.useEffect(() => {
+    if (authLoading || authSession || !isProtectedRoutePath(window.location.pathname)) return
+
+    const parsedRoute = parseAuthenticatedRoute(`${window.location.pathname}${window.location.search}`)
+    const nextPath = parsedRoute ? getAuthenticatedRoutePath(parsedRoute) : "/app"
+    pendingAuthenticatedPathRef.current = nextPath
+    setPasswordRecoveryActive(false)
+    setPublicAuthRoute("login")
+    setAuthMode("login")
+    writeAuthenticatedHistory(`/login?next=${encodeURIComponent(nextPath)}`, "replace")
+  }, [authLoading, authSession, authenticatedRouteRevision, writeAuthenticatedHistory])
 
   React.useEffect(() => {
     if (!authSession) return
@@ -2945,6 +3179,14 @@ function App() {
     workspaceDataState,
   ])
 
+  const handleRetryAuthenticatedRoute = React.useCallback(() => {
+    lastAppliedAuthenticatedRouteRef.current = ""
+    authenticatedRouteLookupKeyRef.current = ""
+    authenticatedRouteRefreshKeyRef.current = ""
+    setAuthenticatedRouteError("")
+    setAuthenticatedRouteRevision((value) => value + 1)
+  }, [])
+
   React.useEffect(() => {
     if (
       !authSession ||
@@ -2974,7 +3216,17 @@ function App() {
       setWorkspaceErrorMessage("")
 
       try {
-        let workspaceRows = await listWorkspaces()
+        const requestedRoute = parseAuthenticatedRoute(`${window.location.pathname}${window.location.search}`)
+        const requestedResource = requestedRoute ? getRouteResource(requestedRoute) : null
+        const requestedViewWorkspaceId = requestedRoute ? getRouteWorkspaceId(requestedRoute) : null
+        const [initialWorkspaceRows, resourceWorkspaceId] = await Promise.all([
+          listWorkspaces(),
+          requestedResource
+            ? resolveRecordWorkspaceId(requestedResource).catch(() => null)
+            : Promise.resolve(null),
+        ])
+        const routeWorkspaceId = resourceWorkspaceId || requestedViewWorkspaceId
+        let workspaceRows = initialWorkspaceRows
 
         if (workspaceRows.length === 0) {
           const createdWorkspace = await createSupabaseWorkspace({
@@ -2990,12 +3242,21 @@ function App() {
         if (cancelled) return
 
         const navItems = workspaceRows.map(mapWorkspaceRowToNavItem)
+        const storedWorkspaceId = getStoredActiveWorkspaceId(authSession.userId)
+        const preferredWorkspaceId =
+          (routeWorkspaceId && navItems.some((workspace) => workspace.id === routeWorkspaceId)
+            ? routeWorkspaceId
+            : "") ||
+          (storedWorkspaceId && navItems.some((workspace) => workspace.id === storedWorkspaceId)
+            ? storedWorkspaceId
+            : "")
 
         setWorkspaceNavItems(navItems)
         setActiveWorkspaceId((currentWorkspaceId) =>
-          currentWorkspaceId && navItems.some((workspace) => workspace.id === currentWorkspaceId)
+          preferredWorkspaceId ||
+          (currentWorkspaceId && navItems.some((workspace) => workspace.id === currentWorkspaceId)
             ? currentWorkspaceId
-            : navItems[0]?.id ?? ""
+            : navItems[0]?.id ?? "")
         )
       } catch (caughtError: unknown) {
         if (cancelled) return
@@ -3011,6 +3272,12 @@ function App() {
       cancelled = true
     }
   }, [authSession])
+
+  React.useEffect(() => {
+    if (!authSession?.userId || !activeWorkspaceId) return
+
+    storeActiveWorkspaceId(authSession.userId, activeWorkspaceId)
+  }, [activeWorkspaceId, authSession?.userId])
 
   const refreshWorkspaceData = React.useCallback(async () => {
     const requestId = workspaceRefreshRequestIdRef.current + 1
@@ -3279,19 +3546,32 @@ function App() {
   const handleNavigate = React.useCallback((view: string) => {
     blurFocusedNavigationElement()
 
-    if (view === activeView) {
-      requestNavigationScrollReset()
-      return
-    }
-
     if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
       setPersistentAppAlert("Save or revert the contact note changes before leaving this opportunity.")
       return
     }
 
+    const nextPath = getAuthenticatedPathForState({
+      accountId: activeAccountIdRef.current,
+      accountTab: accountDetailTab,
+      activeView: view,
+      callId: activeCallIdRef.current || (view === "post-call" ? postCallFocusCallId : ""),
+      opportunityId: activeOpportunityIdRef.current,
+      workspaceId: activeWorkspaceIdRef.current,
+    })
+
+    setAuthenticatedRouteError("")
+    setAuthenticatedRouteResolving(false)
+    writeAuthenticatedHistory(nextPath)
+
+    if (view === activeView) {
+      requestNavigationScrollReset()
+      return
+    }
+
     setActiveView(view)
     requestNavigationScrollReset()
-  }, [activeView, blurFocusedNavigationElement, requestNavigationScrollReset])
+  }, [accountDetailTab, activeView, blurFocusedNavigationElement, postCallFocusCallId, requestNavigationScrollReset, writeAuthenticatedHistory])
 
   const handleAccountSelect = (accountId: string) => {
     if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
@@ -3301,14 +3581,22 @@ function App() {
 
     requestNavigationScrollReset()
     setActiveAccountId(accountId)
+    activeAccountIdRef.current = accountId
     setAccountDetailTab("record")
     setFocusedContactId("")
     setPostCallFocusCallId("")
     const firstOpportunity = workspaceOpportunities.find((opportunity) => opportunity.accountId === accountId)
     if (firstOpportunity) {
       setActiveOpportunityId(firstOpportunity.id)
+      activeOpportunityIdRef.current = firstOpportunity.id
+    } else {
+      setActiveOpportunityId("")
+      activeOpportunityIdRef.current = ""
     }
-    handleNavigate("account-detail")
+    setAuthenticatedRouteError("")
+    setAuthenticatedRouteResolving(false)
+    setActiveView("account-detail")
+    writeAuthenticatedHistory(getAuthenticatedRoutePath({ accountId, kind: "account", tab: "record", view: "account-detail" }))
   }
 
   const handleOpportunitySelect = (opportunityId: string) => {
@@ -3321,7 +3609,9 @@ function App() {
     if (selectedOpportunity) {
       requestNavigationScrollReset()
       setActiveAccountId(selectedOpportunity.accountId)
+      activeAccountIdRef.current = selectedOpportunity.accountId
       setActiveOpportunityId(opportunityId)
+      activeOpportunityIdRef.current = opportunityId
       setPostCallFocusCallId("")
       handleNavigate("opportunity-record")
     }
@@ -3427,12 +3717,280 @@ function App() {
 
     requestNavigationScrollReset()
     setActiveAccountId(selectedOpportunity.accountId)
+    activeAccountIdRef.current = selectedOpportunity.accountId
     setActiveOpportunityId(selectedOpportunity.id)
+    activeOpportunityIdRef.current = selectedOpportunity.id
     const isActiveSelectedCall = callId === activeCallId || callId === callCapture.activeCallId
 
     setPostCallFocusCallId(isActiveSelectedCall ? "" : callId)
-    handleNavigate(isActiveSelectedCall ? "workspace" : "post-call")
+    setAuthenticatedRouteError("")
+    setAuthenticatedRouteResolving(false)
+    setActiveView(isActiveSelectedCall ? "workspace" : "post-call")
+    writeAuthenticatedHistory(
+      getAuthenticatedRoutePath({
+        callId,
+        kind: "call",
+        view: isActiveSelectedCall ? "workspace" : "post-call",
+      })
+    )
   }
+
+  const handleAccountTabChange = React.useCallback((tab: AccountRouteTab, options: { replace?: boolean } = {}) => {
+    setAccountDetailTab(tab)
+    setAuthenticatedRouteError("")
+    setAuthenticatedRouteResolving(false)
+
+    const accountId = activeAccountIdRef.current
+    if (!accountId) return
+
+    const nextPath = getAuthenticatedRoutePath({ accountId, kind: "account", tab, view: "account-detail" })
+    writeAuthenticatedHistory(nextPath, options.replace ? "replace" : "push")
+  }, [writeAuthenticatedHistory])
+
+  React.useLayoutEffect(() => {
+    if (!authSession || passwordRecoveryActive) return
+
+    const pathname = window.location.pathname
+    const locationPath = `${pathname}${window.location.search}`
+    const route = parseAuthenticatedRoute(locationPath)
+    const routeKey = `${authenticatedRouteRevision}:${activeWorkspaceId || "workspace"}:${locationPath}`
+    if (lastAppliedAuthenticatedRouteRef.current === routeKey) return
+
+    if (!route) {
+      if (isProtectedRoutePath(pathname)) {
+        lastAppliedAuthenticatedRouteRef.current = routeKey
+        setAuthenticatedRouteResolving(false)
+        setAuthenticatedRouteError(protectedRouteUnavailableMessage)
+      }
+      return
+    }
+
+    const canonicalRoutePath = getAuthenticatedRoutePath(route)
+    currentAuthenticatedPathRef.current = canonicalRoutePath
+    if (route.kind !== "view" && canonicalRoutePath !== locationPath) {
+      writeAuthenticatedHistory(canonicalRoutePath, "replace")
+    }
+
+    if (route.kind === "view") {
+      const requestedWorkspaceId = getRouteWorkspaceId(route)
+      const targetWorkspace = requestedWorkspaceId
+        ? workspaceNavItems.find((workspace) => workspace.id === requestedWorkspaceId)
+        : null
+
+      if (requestedWorkspaceId && workspaceNavItems.length === 0) return
+
+      if (requestedWorkspaceId && !targetWorkspace) {
+        lastAppliedAuthenticatedRouteRef.current = routeKey
+        setAuthenticatedRouteResolving(false)
+        setAuthenticatedRouteError(protectedRouteUnavailableMessage)
+        return
+      }
+
+      if (targetWorkspace && targetWorkspace.id !== activeWorkspaceId) {
+        if (isCallLiveRef.current) {
+          restoreActiveCallRoute("Stop the active call before changing workspaces.")
+          return
+        }
+
+        loadedWorkspaceIdRef.current = null
+        activeWorkspaceIdRef.current = targetWorkspace.id
+        setLoadingWorkspace(targetWorkspace)
+        setWorkspaceDataState("loading")
+        setActiveWorkspaceId(targetWorkspace.id)
+        return
+      }
+
+      const canonicalViewRoutePath = getAuthenticatedRoutePath({
+        ...route,
+        workspaceId: targetWorkspace?.id || activeWorkspaceId || undefined,
+      })
+      if (canonicalViewRoutePath !== locationPath) {
+        writeAuthenticatedHistory(canonicalViewRoutePath, "replace")
+      }
+
+      lastAppliedAuthenticatedRouteRef.current = routeKey
+      setAuthenticatedRouteResolving(false)
+      setAuthenticatedRouteError("")
+      setActiveView(route.view)
+      requestNavigationScrollReset()
+      return
+    }
+
+    if (workspaceDataState !== "ready" && workspaceDataState !== "empty") {
+      if (workspaceDataState !== "loading") setAuthenticatedRouteResolving(false)
+      return
+    }
+
+    const routeResource = getRouteResource(route)
+    const routeResourceIsLoaded =
+      route.kind === "account"
+        ? workspaceAccounts.some((account) => account.id === route.accountId)
+        : route.kind === "opportunity"
+          ? workspaceOpportunities.some((opportunity) => opportunity.id === route.opportunityId)
+          : workspaceCalls.some((call) => call.id === route.callId)
+
+    if (routeResource && !routeResourceIsLoaded) {
+      if (authenticatedRouteLookupKeyRef.current === routeKey) return
+
+      authenticatedRouteLookupKeyRef.current = routeKey
+      setAuthenticatedRouteResolving(true)
+      setAuthenticatedRouteError("")
+      void resolveRecordWorkspaceId(routeResource)
+        .then((workspaceId) => {
+          if (
+            authenticatedRouteLookupKeyRef.current !== routeKey ||
+            `${window.location.pathname}${window.location.search}` !== locationPath
+          ) {
+            return
+          }
+
+          const targetWorkspace = workspaceNavItems.find((workspace) => workspace.id === workspaceId)
+          if (targetWorkspace && targetWorkspace.id !== activeWorkspaceId) {
+            if (isCallLiveRef.current) {
+              restoreActiveCallRoute("Stop the active call before changing workspaces.")
+              lastAppliedAuthenticatedRouteRef.current = routeKey
+              return
+            }
+
+            loadedWorkspaceIdRef.current = null
+            activeWorkspaceIdRef.current = targetWorkspace.id
+            setLoadingWorkspace(targetWorkspace)
+            setWorkspaceDataState("loading")
+            setActiveWorkspaceId(targetWorkspace.id)
+            return
+          }
+
+          if (
+            workspaceId === activeWorkspaceId &&
+            authenticatedRouteRefreshKeyRef.current !== routeKey
+          ) {
+            authenticatedRouteRefreshKeyRef.current = routeKey
+            authenticatedRouteLookupKeyRef.current = ""
+            setWorkspaceDataState("loading")
+            setWorkspaceRefreshToken((value) => value + 1)
+            return
+          }
+
+          lastAppliedAuthenticatedRouteRef.current = routeKey
+          setAuthenticatedRouteResolving(false)
+          setAuthenticatedRouteError(protectedRouteUnavailableMessage)
+        })
+        .catch(() => {
+          if (
+            authenticatedRouteLookupKeyRef.current !== routeKey ||
+            `${window.location.pathname}${window.location.search}` !== locationPath
+          ) {
+            return
+          }
+
+          lastAppliedAuthenticatedRouteRef.current = routeKey
+          setAuthenticatedRouteResolving(false)
+          setAuthenticatedRouteError(protectedRouteUnavailableMessage)
+        })
+      return
+    }
+
+    lastAppliedAuthenticatedRouteRef.current = routeKey
+
+    if (route.kind === "account") {
+      const selectedAccount = workspaceAccounts.find((account) => account.id === route.accountId)
+      if (!selectedAccount) {
+        setAuthenticatedRouteError(protectedRouteUnavailableMessage)
+        return
+      }
+
+      const selectedOpportunity =
+        workspaceOpportunities.find(
+          (opportunity) => opportunity.id === activeOpportunityIdRef.current && opportunity.accountId === selectedAccount.id
+        ) ?? workspaceOpportunities.find((opportunity) => opportunity.accountId === selectedAccount.id)
+
+      activeAccountIdRef.current = selectedAccount.id
+      activeOpportunityIdRef.current = selectedOpportunity?.id ?? ""
+      setActiveAccountId(selectedAccount.id)
+      setActiveOpportunityId(selectedOpportunity?.id ?? "")
+      setAccountDetailTab(route.tab)
+      setFocusedContactId("")
+      setPostCallFocusCallId("")
+      setActiveView(route.view)
+      setAuthenticatedRouteResolving(false)
+      setAuthenticatedRouteError("")
+      requestNavigationScrollReset()
+      return
+    }
+
+    if (route.kind === "opportunity") {
+      const selectedOpportunity = workspaceOpportunities.find(
+        (opportunity) => opportunity.id === route.opportunityId
+      )
+      const selectedAccount = selectedOpportunity
+        ? workspaceAccounts.find((account) => account.id === selectedOpportunity.accountId)
+        : null
+
+      if (!selectedOpportunity || !selectedAccount) {
+        setAuthenticatedRouteError(protectedRouteUnavailableMessage)
+        return
+      }
+
+      activeAccountIdRef.current = selectedAccount.id
+      activeOpportunityIdRef.current = selectedOpportunity.id
+      setActiveAccountId(selectedAccount.id)
+      setActiveOpportunityId(selectedOpportunity.id)
+      setPostCallFocusCallId("")
+      setActiveView(route.view)
+      setAuthenticatedRouteResolving(false)
+      setAuthenticatedRouteError("")
+      requestNavigationScrollReset()
+      return
+    }
+
+    const selectedCall = workspaceCalls.find((call) => call.id === route.callId)
+    const selectedOpportunity = selectedCall
+      ? workspaceOpportunities.find((opportunity) => opportunity.id === selectedCall.opportunityId)
+      : null
+    const selectedAccount = selectedOpportunity
+      ? workspaceAccounts.find((account) => account.id === selectedOpportunity.accountId)
+      : null
+
+    if (!selectedCall || !selectedOpportunity || !selectedAccount) {
+      setAuthenticatedRouteError(protectedRouteUnavailableMessage)
+      return
+    }
+
+    const isCurrentLiveCall =
+      isCallLiveRef.current &&
+      (activeCallIdRef.current === selectedCall.id || callCapture.activeCallId === selectedCall.id)
+
+    activeAccountIdRef.current = selectedAccount.id
+    activeOpportunityIdRef.current = selectedOpportunity.id
+    setActiveAccountId(selectedAccount.id)
+    setActiveOpportunityId(selectedOpportunity.id)
+    const shouldOpenCockpit = route.view === "workspace" && isCurrentLiveCall
+    setPostCallFocusCallId(shouldOpenCockpit ? "" : selectedCall.id)
+    setActiveView(shouldOpenCockpit ? "workspace" : "post-call")
+    if (route.view === "workspace" && !shouldOpenCockpit) {
+      writeAuthenticatedHistory(
+        getAuthenticatedRoutePath({ callId: selectedCall.id, kind: "call", view: "post-call" }),
+        "replace"
+      )
+    }
+    setAuthenticatedRouteResolving(false)
+    setAuthenticatedRouteError("")
+    requestNavigationScrollReset()
+  }, [
+    activeWorkspaceId,
+    authenticatedRouteRevision,
+    authSession,
+    callCapture.activeCallId,
+    passwordRecoveryActive,
+    requestNavigationScrollReset,
+    restoreActiveCallRoute,
+    workspaceAccounts,
+    workspaceCalls,
+    workspaceDataState,
+    workspaceNavItems,
+    workspaceOpportunities,
+    writeAuthenticatedHistory,
+  ])
 
   const handleOpenCreateOpportunity = (accountId = activeAccount.id) => {
     setCreateOpportunityAccountId(accountId)
@@ -3799,6 +4357,20 @@ function App() {
     }
 
     let stoppedCallId = stoppingCallId
+    const showPostCallForStoppedCall = (callId: string) => {
+      setPostCallFocusCallId(callId)
+      setIsRecording(false)
+      setActiveCallId("")
+      activeCallIdRef.current = ""
+      setActiveCallStartedAt("")
+      setAuthenticatedRouteError("")
+      setAuthenticatedRouteResolving(false)
+      setActiveView("post-call")
+      writeAuthenticatedHistory(
+        getAuthenticatedRoutePath({ callId, kind: "call", view: "post-call" })
+      )
+      requestNavigationScrollReset()
+    }
 
     try {
       setIsStoppingCall(true)
@@ -3831,18 +4403,9 @@ function App() {
           )
         )
       }
-      setIsRecording(false)
-      setActiveCallId("")
-      activeCallIdRef.current = ""
-      setActiveCallStartedAt("")
-      handleNavigate("post-call")
+      showPostCallForStoppedCall(stoppedCallId)
     } catch (caughtError: unknown) {
-      setPostCallFocusCallId(stoppedCallId)
-      setIsRecording(false)
-      setActiveCallId("")
-      activeCallIdRef.current = ""
-      setActiveCallStartedAt("")
-      handleNavigate("post-call")
+      showPostCallForStoppedCall(stoppedCallId)
       setPersistentAppAlert(
         getUserFacingErrorMessage(caughtError, "The call ended, and a few post-call items need another save attempt.")
       )
@@ -4953,6 +5516,9 @@ function App() {
       setCallPlaybooks(selectedPlaybooks)
       blurFocusedNavigationElement()
       setActiveView("workspace")
+      setAuthenticatedRouteError("")
+      setAuthenticatedRouteResolving(false)
+      writeAuthenticatedHistory(getAuthenticatedRoutePath({ callId: call.id, kind: "call", view: "workspace" }))
       requestNavigationScrollReset()
       setLiveGuidanceByCallId((items) => ({
         ...items,
@@ -5230,8 +5796,17 @@ function App() {
       }
 
       setActiveAccountId(account.id)
-      if (opportunityId) setActiveOpportunityId(opportunityId)
-      handleNavigate("account-detail")
+      activeAccountIdRef.current = account.id
+      if (opportunityId) {
+        setActiveOpportunityId(opportunityId)
+        activeOpportunityIdRef.current = opportunityId
+      }
+      setAccountDetailTab("record")
+      setAuthenticatedRouteError("")
+      setAuthenticatedRouteResolving(false)
+      setActiveView("account-detail")
+      writeAuthenticatedHistory(getAuthenticatedRoutePath({ accountId: account.id, kind: "account", tab: "record", view: "account-detail" }))
+      requestNavigationScrollReset()
       setCreateAccountOpen(false)
       setWorkspaceRefreshToken((value) => value + 1)
       setWorkspaceErrorMessage("")
@@ -5323,7 +5898,9 @@ function App() {
 
       await replaceOpportunityPlaybooks(opportunity.id, getPlaybookIdsForSelection(workspacePlaybooks, selectedPlaybooks))
       setActiveAccountId(payload.accountId)
+      activeAccountIdRef.current = payload.accountId
       setActiveOpportunityId(opportunity.id)
+      activeOpportunityIdRef.current = opportunity.id
       handleNavigate("opportunity-record")
       setCreateOpportunityOpen(false)
       setWorkspaceRefreshToken((value) => value + 1)
@@ -5771,13 +6348,13 @@ function App() {
     setPublicAuthRoute(mode)
     setAuthStatusTone("info")
     setAuthStatusMessage("")
-    const nextPath = `/${mode}`
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState(null, "", nextPath)
-    }
+    const pendingPath = pendingAuthenticatedPathRef.current
+    const nextPath = `/${mode}${pendingPath ? `?next=${encodeURIComponent(pendingPath)}` : ""}`
+    writeAuthenticatedHistory(nextPath)
   }
 
   const handleLandingLogin = () => {
+    pendingAuthenticatedPathRef.current = ""
     setPasswordRecoveryActive(false)
     setLegalPage(null)
     setPublicMarketingPath(null)
@@ -5791,6 +6368,7 @@ function App() {
   }
 
   const handleLandingSignup = () => {
+    pendingAuthenticatedPathRef.current = ""
     setPasswordRecoveryActive(false)
     setLegalPage(null)
     setPublicMarketingPath(null)
@@ -5804,6 +6382,7 @@ function App() {
   }
 
   const handleAuthBackHome = () => {
+    pendingAuthenticatedPathRef.current = ""
     setLegalPage(null)
     setPublicMarketingPath(null)
     setPublicAuthRoute("landing")
@@ -5858,9 +6437,11 @@ function App() {
 
       if (data.user) {
         setAuthSession((current) => preserveAuthSessionIdentity(current, data.user))
-        if (window.location.pathname !== "/") {
-          window.history.pushState(null, "", "/")
-        }
+        const nextPath = pendingAuthenticatedPathRef.current || getSafeAuthenticatedNextPath(window.location.search) || "/app"
+        pendingAuthenticatedPathRef.current = ""
+        setPublicAuthRoute("landing")
+        writeAuthenticatedHistory(nextPath, "replace")
+        setAuthenticatedRouteRevision((value) => value + 1)
       }
     } catch (caughtError: unknown) {
       setAuthStatusTone("error")
@@ -5919,15 +6500,16 @@ function App() {
 
       if (data.session?.user) {
         setAuthSession((current) => preserveAuthSessionIdentity(current, data.session?.user ?? null))
-        if (window.location.pathname !== "/") {
-          window.history.pushState(null, "", "/")
-        }
+        const nextPath = pendingAuthenticatedPathRef.current || getSafeAuthenticatedNextPath(window.location.search) || "/app"
+        pendingAuthenticatedPathRef.current = ""
+        setPublicAuthRoute("landing")
+        writeAuthenticatedHistory(nextPath, "replace")
+        setAuthenticatedRouteRevision((value) => value + 1)
       } else {
         setAuthMode("login")
         setPublicAuthRoute("login")
-        if (window.location.pathname !== "/login") {
-          window.history.pushState(null, "", "/login")
-        }
+        const pendingPath = pendingAuthenticatedPathRef.current
+        writeAuthenticatedHistory(`/login${pendingPath ? `?next=${encodeURIComponent(pendingPath)}` : ""}`, "replace")
         setAuthStatusTone("success")
         setAuthStatusMessage("Account created. Check your email to confirm your account before signing in.")
       }
@@ -6086,6 +6668,11 @@ function App() {
     destination: "landing" | "login" = "landing",
     options: { message?: string; tone?: "success" | "error" | "info" } = {}
   ) => {
+    const currentRoute = parseAuthenticatedRoute(`${window.location.pathname}${window.location.search}`)
+    const returnPath = destination === "login" && currentRoute
+      ? getAuthenticatedRoutePath(currentRoute)
+      : ""
+    pendingAuthenticatedPathRef.current = returnPath
     setIsRecording(false)
     setLoadingWorkspace(null)
 
@@ -6118,13 +6705,15 @@ function App() {
     setLiveGuidanceByCallId({})
     setActiveAccountId("")
     setActiveOpportunityId("")
+    setAuthenticatedRouteError("")
+    setAuthenticatedRouteResolving(false)
     setWorkspaceDataState("loading")
     setAuthMode("login")
     setPublicAuthRoute(destination)
-    const nextPath = destination === "login" ? "/login" : "/"
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState(null, "", nextPath)
-    }
+    const nextPath = destination === "login"
+      ? `/login${returnPath ? `?next=${encodeURIComponent(returnPath)}` : ""}`
+      : "/"
+    writeAuthenticatedHistory(nextPath)
     setAuthStatusTone(error ? "error" : options.tone ?? "success")
     setAuthStatusMessage(error ? getUserFacingErrorMessage(error, "Sign-out needs another try.") : options.message ?? "Signed out.")
   }
@@ -6234,8 +6823,12 @@ function App() {
     loadedWorkspaceIdRef.current = null
     blurFocusedNavigationElement()
     setActiveView("home")
-    requestNavigationScrollReset()
+    setAuthenticatedRouteError("")
+    setAuthenticatedRouteResolving(false)
+    activeWorkspaceIdRef.current = workspace.id
     setActiveWorkspaceId(workspace.id)
+    writeAuthenticatedHistory("/app")
+    requestNavigationScrollReset()
     void recordWorkspaceSessionActivity({
       activityType: "workspace_switch",
       workspaceId: workspace.id,
@@ -6414,17 +7007,29 @@ function App() {
         ? items.map((workspace) => (workspace.id === nextWorkspace.id ? nextWorkspace : workspace))
         : [...items, createdWorkspaceNavItem ?? nextWorkspace]
     )
+    activeWorkspaceIdRef.current = nextWorkspace.id
     setActiveWorkspaceId(nextWorkspace.id)
     setWorkspaceSetupDraft(null)
     setOnboardingOpen(false)
     loadedWorkspaceIdRef.current = null
     setActiveView("home")
+    setAuthenticatedRouteError("")
+    setAuthenticatedRouteResolving(false)
+    writeAuthenticatedHistory("/app")
     requestNavigationScrollReset()
     setWorkspaceDataState("loading")
     setWorkspaceRefreshToken((value) => value + 1)
   }
 
-  const workspaceViews = ["workspace", "post-call", "methodology", "opportunity-record", "opportunity-intelligence"]
+  const workspaceViews = [
+    "workspace",
+    "post-call",
+    "methodology",
+    "opportunity-contacts",
+    "opportunity-history",
+    "opportunity-record",
+    "opportunity-intelligence",
+  ]
   const accountViews = ["account-detail"]
   const opportunityViews = ["opportunities"]
   const callViews = ["calls"]
@@ -6451,6 +7056,8 @@ function App() {
   const shouldShowWorkspaceState = workspaceDataState !== "ready" && !isWorkspaceIndependentView && !isCallLive
   const shouldShowMobileStartCall =
     !loadingWorkspace &&
+    !authenticatedRouteError &&
+    !authenticatedRouteResolving &&
     !shouldShowWorkspaceState &&
     !isCallLive &&
     mobileStartCallViews.includes(activeView)
@@ -6513,14 +7120,6 @@ function App() {
     setWorkspaceRefreshToken((value) => value + 1)
   }
 
-  if (isLiveCoachPopoutRoute()) {
-    return (
-      <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} />}>
-        <LiveCoachPopoutWindow darkMode={darkMode} />
-      </React.Suspense>
-    )
-  }
-
   if (isPublicLandingRouteOverride()) {
     return (
       <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} surface="landing" />}>
@@ -6553,7 +7152,7 @@ function App() {
     )
   }
 
-  if (authLoading && publicAuthRoute === "landing") {
+  if (authLoading && publicAuthRoute === "landing" && !isLiveCoachPopoutRoute()) {
     return (
       <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} surface="landing" />}>
         <MarketingLandingPage onLogin={handleLandingLogin} onSignup={handleLandingSignup} />
@@ -6566,7 +7165,7 @@ function App() {
   }
 
   if (!authSession || passwordRecoveryActive) {
-    if (publicAuthRoute === "landing") {
+    if (publicAuthRoute === "landing" && !isLiveCoachPopoutRoute()) {
       return (
         <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} surface="landing" />}>
           <MarketingLandingPage onLogin={handleLandingLogin} onSignup={handleLandingSignup} />
@@ -6603,6 +7202,14 @@ function App() {
     )
   }
 
+  if (isLiveCoachPopoutRoute()) {
+    return (
+      <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} />}>
+        <LiveCoachPopoutWindow darkMode={darkMode} />
+      </React.Suspense>
+    )
+  }
+
   return (
     <TooltipProvider>
       <ContactWorkspaceContext.Provider
@@ -6623,7 +7230,7 @@ function App() {
           confirmSpeakerContact: handleConfirmSpeakerContact,
           clearFocusedContact,
           focusContact: setFocusedContactId,
-          setAccountTab: setAccountDetailTab,
+          setAccountTab: handleAccountTabChange,
         }}
       >
       <SidebarProvider className="h-svh min-h-0 overflow-hidden">
@@ -6741,7 +7348,7 @@ function App() {
                 : "pb-[calc(1rem+env(safe-area-inset-bottom))]"
             )}
           >
-            {loadingWorkspace || shouldShowWorkspaceState || activeView === "home" ? null : callSurfaceViews.includes(activeView) ? (
+            {loadingWorkspace || authenticatedRouteError || authenticatedRouteResolving || shouldShowWorkspaceState || activeView === "home" ? null : callSurfaceViews.includes(activeView) ? (
               <CommandBar
                 account={activeAccount}
                 callType={callType}
@@ -6775,6 +7382,14 @@ function App() {
             ) : null}
             {loadingWorkspace ? (
               <WorkspaceSwitchSkeleton workspace={loadingWorkspace} />
+            ) : authenticatedRouteResolving ? (
+              <PageTransitionSkeleton activeView={activeView} />
+            ) : authenticatedRouteError ? (
+              <ProtectedRouteUnavailable
+                message={authenticatedRouteError}
+                onGoHome={() => handleNavigate("home")}
+                onRetry={handleRetryAuthenticatedRoute}
+              />
             ) : shouldShowWorkspaceState ? (
               workspaceDataState === "loading" ? (
                 <PageTransitionSkeleton activeView={activeView} />
@@ -7840,7 +8455,7 @@ function GlobalSearch({
             ].join(" "),
             onSelect: () => {
               onAccountSelect(contact.accountId)
-              setAccountTab("contacts")
+              setAccountTab("contacts", { replace: true })
               focusContact(contact.id)
             },
           }
@@ -13936,7 +14551,13 @@ function WorkspaceView({
   const defaultTab =
     activeView === "post-call"
       ? "post-call"
-      : activeView === "methodology" || activeView === "opportunity-record" || activeView === "opportunity-intelligence"
+      : [
+          "methodology",
+          "opportunity-contacts",
+          "opportunity-history",
+          "opportunity-record",
+          "opportunity-intelligence",
+        ].includes(activeView)
         ? "opportunity"
         : "cockpit"
   const liveGuidance = aiLiveGuidance
@@ -14779,10 +15400,35 @@ function OpportunityWorkspace({
   const [focusedOpportunityContactId, setFocusedOpportunityContactId] = React.useState("")
   React.useEffect(() => setFocusedOpportunityContactId(""), [opportunity.id])
   const defaultTab =
-    activeView === "methodology" ? "methodology" : activeView === "opportunity-intelligence" ? "intelligence" : "record"
+    activeView === "methodology"
+      ? "methodology"
+      : activeView === "opportunity-contacts"
+        ? "contacts"
+        : activeView === "opportunity-history"
+          ? "history"
+          : activeView === "opportunity-intelligence"
+            ? "intelligence"
+            : "record"
 
   return (
-    <Tabs key={defaultTab} defaultValue={defaultTab} className="grid w-full min-w-0 gap-4" onValueChange={onScrollToTop}>
+    <Tabs
+      value={defaultTab}
+      className="grid w-full min-w-0 gap-4"
+      onValueChange={(value) => {
+        const nextView =
+          value === "contacts"
+            ? "opportunity-contacts"
+            : value === "history"
+              ? "opportunity-history"
+              : value === "intelligence"
+                ? "opportunity-intelligence"
+                : value === "methodology"
+                  ? "methodology"
+                  : "opportunity-record"
+        onScrollToTop()
+        onNavigate(nextView)
+      }}
+    >
       <OpportunitySummaryStrip
         opportunity={opportunity}
         startCallAction={
@@ -20598,15 +21244,31 @@ function SettingsView({
     : sessionPolicy.idle_timeout_seconds === null
       ? "never"
       : String(sessionPolicy.idle_timeout_seconds)
+  const settingsPageTitle =
+    activeView === "capture"
+      ? "Audio capture"
+      : activeView === "ai"
+        ? "OpenAI API key"
+        : activeView === "retention"
+          ? "Session and retention"
+          : "Settings"
+  const settingsPageDescription =
+    activeView === "capture"
+      ? "Choose how SalesFrame can capture meeting and in-person audio in this browser."
+      : activeView === "ai"
+        ? "Manage the workspace connection used for live guidance, enrichment, and post-call outputs."
+        : activeView === "retention"
+          ? "Manage how long inactive workspace sessions remain open."
+          : "Manage AI, session, and call capture preferences for this workspace."
 
   return (
     <div className="grid gap-4">
       <div>
-        <h1 className="font-heading text-2xl leading-tight font-semibold">Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Manage AI, session, and call capture preferences for this workspace.</p>
+        <h1 className="font-heading text-2xl leading-tight font-semibold">{settingsPageTitle}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{settingsPageDescription}</p>
       </div>
       <div className="grid gap-4">
-        <Card>
+        <Card id="settings-ai" className={cn(activeView !== "settings" && activeView !== "ai" && "hidden")}>
           <CardHeader>
             <div>
               <CardTitle>{activeView === "ai" ? "OpenAI API key" : "OpenAI setup"}</CardTitle>
@@ -20796,7 +21458,7 @@ function SettingsView({
           </DialogContent>
         </Dialog>
 
-        <Card>
+        <Card id="settings-retention" className={cn(activeView !== "settings" && activeView !== "retention" && "hidden")}>
           <CardHeader>
             <CardTitle>Session timeout</CardTitle>
             <CardDescription>
@@ -20845,9 +21507,9 @@ function SettingsView({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card id="settings-capture" className={cn(activeView !== "settings" && activeView !== "capture" && "hidden")}>
           <CardHeader>
-            <CardTitle>{activeView === "retention" ? "Retention" : activeView === "capture" ? "Audio capture" : "Capture settings"}</CardTitle>
+            <CardTitle>{activeView === "capture" ? "Audio capture" : "Capture settings"}</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4">
             {[

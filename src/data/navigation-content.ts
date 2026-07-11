@@ -2,6 +2,8 @@ export const viewLabels: Record<string, string> = {
   home: "Home",
   workspace: "Active Call",
   "opportunity-record": "Opportunity",
+  "opportunity-contacts": "Opportunity Contacts",
+  "opportunity-history": "Opportunity History",
   "opportunity-intelligence": "Next-call Brief",
   "account-detail": "Account",
   "post-call": "Post-call Outputs",

@@ -175,11 +175,6 @@ export function NavProjects({
     closeMobileNavigation()
   }
 
-  const handleAccountAction = (action: () => void) => {
-    action()
-    closeMobileNavigation()
-  }
-
   const handleOpportunityAction = (action: () => void) => {
     action()
     closeMobileNavigation()
@@ -248,7 +243,7 @@ export function NavProjects({
                   <SidebarMenuButton
                     tooltip={account.name}
                     size="lg"
-                    className="h-11 py-2 pr-[5.75rem] md:pr-16"
+                    className="h-11 py-2 pr-12 md:pr-8"
                     isActive={account.id === activeAccountId}
                     onClick={() => handleAccountButtonClick(account)}
                   >
@@ -263,54 +258,13 @@ export function NavProjects({
                 </ContextMenuTrigger>
                 <CollapsibleTrigger asChild>
                   <SidebarMenuAction
-                    className="right-11 md:right-8"
+                    className="right-0"
                     aria-label={`Toggle ${account.name} opportunities`}
                     onClick={(event) => event.stopPropagation()}
                   >
                     <ChevronRightIcon className="transition-transform duration-200 group-data-[state=open]/account:rotate-90" />
                   </SidebarMenuAction>
                 </CollapsibleTrigger>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <SidebarMenuAction
-                      aria-label={`Actions for ${account.name}`}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <MoreHorizontalIcon aria-hidden="true" />
-                    </SidebarMenuAction>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    className="w-56"
-                    align="end"
-                    side={isMobile ? "bottom" : "right"}
-                  >
-                    <DropdownMenuLabel>{account.name}</DropdownMenuLabel>
-                    <DropdownMenuItem onSelect={() => handleAccountAction(() => onAccountSelect(account.id))}>
-                      <ExternalLinkIcon />
-                      Open account
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => handleAccountAction(() => onEditAccount(account.id))}>
-                      <PencilIcon />
-                      Edit account fields
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => handleAccountAction(() => onCreateOpportunity(account.id))}>
-                      <PlusIcon />
-                      Add opportunity
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={() => handleAccountAction(() => onArchiveAccount(account.id))}>
-                      <ArchiveIcon />
-                      Archive account
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onSelect={() => handleAccountAction(() => onDeleteAccount(account.id))}
-                    >
-                      <Trash2Icon />
-                      Delete account
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
                 <ContextMenuContent className="w-56">
                   <ContextMenuLabel>{account.name}</ContextMenuLabel>
                   <ContextMenuItem onSelect={() => onAccountSelect(account.id)}>

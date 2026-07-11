@@ -120,6 +120,12 @@ export function writeStoredLiveCoachPopoutAcknowledgement(
   writeStoredLiveCoachPopoutValue(liveCoachPopoutCommandAckStorageKey, acknowledgement)
 }
 
+export function clearStoredLiveCoachPopoutState() {
+  removeStoredLiveCoachPopoutValue(liveCoachPopoutSnapshotStorageKey)
+  removeStoredLiveCoachPopoutValue(liveCoachPopoutCommandStorageKey)
+  removeStoredLiveCoachPopoutValue(liveCoachPopoutCommandAckStorageKey)
+}
+
 export function getLiveCoachPopoutCommandKey(command: LiveCoachPopoutCommand) {
   return [
     command.version,

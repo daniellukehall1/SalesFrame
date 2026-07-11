@@ -24,7 +24,8 @@ test("workspace navigation exposes one main landmark and keyboard-operable desti
   assert.match(app, /<main[\s\S]*aria-label=\{viewLabels\[activeView\][\s\S]*tabIndex=\{-1\}/)
   assert.match(app, /appMainScrollRef\.current\?\.focus\(\{ preventScroll: true \}\)/)
   assert.match(app, /<h1 className="truncate font-heading text-2xl[^"]*">\{accountDraft\.accountName\}<\/h1>/)
-  assert.match(app, /<h1 className="font-heading text-2xl[^"]*">Settings<\/h1>/)
+  assert.match(app, /const settingsPageTitle =[\s\S]*activeView === "capture"[\s\S]*"Settings"/)
+  assert.match(app, /<h1 className="font-heading text-2xl[^"]*">\{settingsPageTitle\}<\/h1>/)
   assert.match(progress, /<ProgressPrimitive\.Root[\s\S]*value=\{value\}/)
 })
 

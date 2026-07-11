@@ -1039,8 +1039,8 @@ function ContactDetailsOverlay({
   const archivedAt = formatContactTimestamp(contact.archivedAtIso)
 
   const body = (
-    <div className="grid min-h-0 w-full min-w-0 max-w-full gap-5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1">
-      <div className="flex w-full min-w-0 max-w-full flex-col gap-3 rounded-lg border bg-background p-3 md:flex-row md:items-start md:justify-between">
+    <div className="grid min-h-0 w-full min-w-0 max-w-full gap-6 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 sm:pr-2">
+      <div className="flex w-full min-w-0 max-w-full flex-col gap-4 rounded-lg border bg-background p-4 md:flex-row md:items-center md:justify-between">
         <ContactIdentity contact={contact} />
         <div className="flex flex-wrap gap-2">
           <EnrichmentBadge status={enrichmentStatus} />
@@ -1054,7 +1054,7 @@ function ContactDetailsOverlay({
           <h3 id={contactDetailsHeadingId} className="text-sm font-medium">Contact details</h3>
           <p className="mt-1 text-xs text-muted-foreground">Reusable professional context stored on the account.</p>
         </div>
-        <dl className="grid min-w-0 gap-3 md:grid-cols-2">
+        <dl className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <ContactDetailField label="Full name" value={contact.fullName} />
           <ContactDetailField label="Preferred name" value={contact.preferredName} />
           <ContactDetailField label="Job title" value={contact.jobTitle} />
@@ -1102,7 +1102,7 @@ function ContactDetailsOverlay({
           <ContactDetailField label="Created" value={createdAt} />
           <ContactDetailField label="Last updated" value={updatedAt} />
           <ContactDetailField label="Archive status" value={contact.archivedAtIso ? `Archived ${archivedAt}` : "Active record"} />
-          <div className="grid min-w-0 gap-1 rounded-lg bg-muted/20 p-3 md:col-span-2">
+          <div className="grid min-w-0 gap-1 rounded-lg bg-muted/20 p-3 md:col-span-2 xl:col-span-4">
             <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Private seller notes</dt>
             <dd className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]">
               {contact.privateNotes || "No private notes captured."}
@@ -1305,13 +1305,13 @@ function ContactDetailsOverlay({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dismissible className="grid w-[calc(100%_-_2rem)] min-w-0 max-w-4xl max-h-[calc(100dvh_-_2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-x-hidden overflow-y-hidden">
-        <DialogHeader>
+      <DialogContent dismissible className="grid w-[calc(100%_-_2rem)] min-w-0 max-h-[calc(100dvh_-_2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-x-hidden overflow-y-hidden sm:w-[calc(100%_-_3rem)] sm:max-w-6xl sm:gap-5 sm:p-6">
+        <DialogHeader className="sm:gap-1.5">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         {body}
-        <DialogFooter>{actions}</DialogFooter>
+        <DialogFooter className="sm:-mx-6 sm:-mb-6 sm:px-6">{actions}</DialogFooter>
       </DialogContent>
     </Dialog>
   )
