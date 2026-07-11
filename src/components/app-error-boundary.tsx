@@ -19,6 +19,8 @@ export class AppErrorBoundary extends React.Component<
   React.PropsWithChildren,
   AppErrorBoundaryState
 > {
+  private recoveryHeadingRef = React.createRef<HTMLHeadingElement>()
+
   state: AppErrorBoundaryState = {
     error: null,
   }
@@ -43,6 +45,12 @@ export class AppErrorBoundary extends React.Component<
         componentStackLines: info.componentStack?.split("\n").filter(Boolean).length ?? 0,
         errorName: error.name || "Error",
       })
+    }
+  }
+
+  componentDidUpdate(_previousProps: React.PropsWithChildren, previousState: AppErrorBoundaryState) {
+    if (!previousState.error && this.state.error) {
+      this.recoveryHeadingRef.current?.focus()
     }
   }
 
@@ -74,7 +82,11 @@ export class AppErrorBoundary extends React.Component<
               <CircleAlertIcon className="size-5" />
             </div>
             <CardDescription>{description}</CardDescription>
-            <CardTitle>{title}</CardTitle>
+            <CardTitle>
+              <h1 ref={this.recoveryHeadingRef} tabIndex={-1} className="outline-none">
+                {title}
+              </h1>
+            </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4">
             <p className="text-sm leading-relaxed text-muted-foreground">

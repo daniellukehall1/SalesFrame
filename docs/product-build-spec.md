@@ -40,7 +40,7 @@ SalesFrame has Supabase Auth connected on the frontend. Netlify deployment, Supa
   - Create workspace opens a modal with required workspace name, default currency, and optional description/role fields.
   - Workspace rows support right-click context actions: open, edit workspace details, duplicate, and delete.
   - Workspace actions should scope accounts, opportunities, calls, settings, and membership by workspace.
-  - Changing the active workspace immediately replaces the main panel and sidebar navigation with shadcn Skeleton loading states and keeps that loading state visible for at least 3 seconds. Loading can exceed 3 seconds for large datasets, but should never resolve faster than the visual transition floor.
+  - Changing the active workspace immediately replaces the main panel and sidebar navigation with shadcn Skeleton loading states only while the next workspace data is unresolved. Never impose an artificial minimum delay after the data is ready.
 - Home
   - Dashboard charts and opportunity focus table.
   - Coverage by opportunity should span the dashboard width rather than competing with a separate focus queue.

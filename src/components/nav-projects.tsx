@@ -22,6 +22,7 @@ import {
   ChevronRightIcon,
   CircleDotIcon,
   ExternalLinkIcon,
+  MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
   TargetIcon,
@@ -35,6 +36,14 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import type { CurrencyCode } from "@/lib/salesframe-core"
 import { cn } from "@/lib/utils"
 
@@ -97,10 +106,6 @@ export function NavProjects({
         })
       ),
     [accounts]
-  )
-  const opportunityCount = sortedAccounts.reduce(
-    (total, account) => total + account.opportunities.length,
-    0
   )
   const expandableAccountIds = React.useMemo(
     () => sortedAccounts.filter((account) => account.opportunities.length > 0).map((account) => account.id),
@@ -170,6 +175,16 @@ export function NavProjects({
     closeMobileNavigation()
   }
 
+  const handleAccountAction = (action: () => void) => {
+    action()
+    closeMobileNavigation()
+  }
+
+  const handleOpportunityAction = (action: () => void) => {
+    action()
+    closeMobileNavigation()
+  }
+
   const handleToggleAllAccounts = () => {
     setExpandedAccountIds((currentIds) => {
       const nextIds = new Set(currentIds)
@@ -233,7 +248,7 @@ export function NavProjects({
                   <SidebarMenuButton
                     tooltip={account.name}
                     size="lg"
-                    className="h-11 py-2"
+                    className="h-11 py-2 pr-[5.75rem] md:pr-16"
                     isActive={account.id === activeAccountId}
                     onClick={() => handleAccountButtonClick(account)}
                   >
@@ -248,12 +263,54 @@ export function NavProjects({
                 </ContextMenuTrigger>
                 <CollapsibleTrigger asChild>
                   <SidebarMenuAction
+                    className="right-11 md:right-8"
                     aria-label={`Toggle ${account.name} opportunities`}
                     onClick={(event) => event.stopPropagation()}
                   >
                     <ChevronRightIcon className="transition-transform duration-200 group-data-[state=open]/account:rotate-90" />
                   </SidebarMenuAction>
                 </CollapsibleTrigger>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <SidebarMenuAction
+                      aria-label={`Actions for ${account.name}`}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <MoreHorizontalIcon aria-hidden="true" />
+                    </SidebarMenuAction>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    className="w-56"
+                    align="end"
+                    side={isMobile ? "bottom" : "right"}
+                  >
+                    <DropdownMenuLabel>{account.name}</DropdownMenuLabel>
+                    <DropdownMenuItem onSelect={() => handleAccountAction(() => onAccountSelect(account.id))}>
+                      <ExternalLinkIcon />
+                      Open account
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => handleAccountAction(() => onEditAccount(account.id))}>
+                      <PencilIcon />
+                      Edit account fields
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => handleAccountAction(() => onCreateOpportunity(account.id))}>
+                      <PlusIcon />
+                      Add opportunity
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => handleAccountAction(() => onArchiveAccount(account.id))}>
+                      <ArchiveIcon />
+                      Archive account
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => handleAccountAction(() => onDeleteAccount(account.id))}
+                    >
+                      <Trash2Icon />
+                      Delete account
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <ContextMenuContent className="w-56">
                   <ContextMenuLabel>{account.name}</ContextMenuLabel>
                   <ContextMenuItem onSelect={() => onAccountSelect(account.id)}>
@@ -290,7 +347,7 @@ export function NavProjects({
                         <ContextMenuTrigger asChild>
                           <SidebarMenuSubButton
                             size="sm"
-                            className="h-11 cursor-pointer text-muted-foreground data-[size=sm]:text-[11px] data-active:text-sidebar-accent-foreground md:h-6 [&>svg]:size-3 [&>svg]:text-muted-foreground"
+                            className="h-11 cursor-pointer pr-12 text-muted-foreground data-[size=sm]:text-[11px] data-active:text-sidebar-accent-foreground md:h-6 md:pr-8 [&>svg]:size-3 [&>svg]:text-muted-foreground"
                             isActive={opportunity.id === activeOpportunityId}
                             onClick={() => {
                               onOpportunitySelect(opportunity.id)
@@ -301,6 +358,48 @@ export function NavProjects({
                             <span className="truncate">{opportunity.name}</span>
                           </SidebarMenuSubButton>
                         </ContextMenuTrigger>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              aria-label={`Actions for ${opportunity.name}`}
+                              className="absolute top-0 right-0 flex size-11 items-center justify-center rounded-md text-sidebar-foreground/70 outline-hidden hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring md:size-6"
+                            >
+                              <MoreHorizontalIcon aria-hidden="true" className="size-4" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            className="w-56"
+                            align="end"
+                            side={isMobile ? "bottom" : "right"}
+                          >
+                            <DropdownMenuLabel>{opportunity.name}</DropdownMenuLabel>
+                            <DropdownMenuItem onSelect={() => handleOpportunityAction(() => onOpportunitySelect(opportunity.id))}>
+                              <TargetIcon />
+                              Open opportunity
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => handleOpportunityAction(() => onEditOpportunity(opportunity.id))}>
+                              <PencilIcon />
+                              Edit opportunity fields
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => handleOpportunityAction(() => onAccountSelect(account.id))}>
+                              <Building2Icon />
+                              View account
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onSelect={() => handleOpportunityAction(() => onArchiveOpportunity(opportunity.id))}>
+                              <ArchiveIcon />
+                              Archive opportunity
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => handleOpportunityAction(() => onDeleteOpportunity(opportunity.id))}
+                            >
+                              <Trash2Icon />
+                              Delete opportunity
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         <ContextMenuContent className="w-56">
                           <ContextMenuLabel>{opportunity.name}</ContextMenuLabel>
                           <ContextMenuItem onSelect={() => onOpportunitySelect(opportunity.id)}>

@@ -191,6 +191,72 @@
   }
 }
 
+@media (pointer: coarse), (any-pointer: coarse) {
+  button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  [data-slot="button"],
+  [data-slot="input"],
+  [data-slot="select-trigger"],
+  [data-slot="tabs-trigger"],
+  [role="menuitem"],
+  [role="option"] {
+    min-height: 2.75rem;
+  }
+
+  [data-slot="button"],
+  [data-slot="switch"],
+  [data-sidebar="menu-action"],
+  [data-sidebar="group-label"] button,
+  [data-sidebar="menu-sub-item"] > button {
+    min-width: 2.75rem;
+  }
+
+  [data-slot="switch"],
+  [data-sidebar="menu-action"],
+  [data-sidebar="group-label"] button {
+    min-height: 2.75rem;
+  }
+
+  [data-slot="switch"]::before {
+    left: 50% !important;
+    top: 50% !important;
+    width: 2rem !important;
+    height: 1.15rem !important;
+    transform: translate(-50%, -50%) !important;
+  }
+
+  [data-slot="switch"] [data-slot="switch-thumb"] {
+    margin-left: 0.5rem !important;
+  }
+
+  [data-slot="switch"][data-size="sm"]::before {
+    width: 1.5rem !important;
+    height: 0.875rem !important;
+  }
+
+  [data-slot="switch"][data-size="sm"] [data-slot="switch-thumb"] {
+    margin-left: 0.75rem !important;
+  }
+
+  [data-slot="calendar"] {
+    padding: 0.375rem;
+  }
+
+  [data-slot="calendar"] .sf-calendar-week {
+    gap: 0;
+  }
+
+  [data-slot="calendar"] .sf-calendar-cell,
+  [data-slot="calendar"] .sf-calendar-button,
+  [data-slot="calendar"] .sf-calendar-nav-button {
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+  }
+}
+
 .salesframe-landing {
   --font-heading: var(--salesframe-landing-font-heading);
   --font-body: var(--salesframe-landing-font-body);

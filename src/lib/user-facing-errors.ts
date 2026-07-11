@@ -53,6 +53,26 @@ function getRawErrorMessage(error: unknown) {
   return ""
 }
 
+function getRawErrorCode(error: unknown) {
+  if (!error || typeof error !== "object" || !("code" in error)) return ""
+
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" ? code.trim().toLowerCase() : ""
+}
+
+export function isWorkspaceSessionExpiredError(error: unknown) {
+  const code = getRawErrorCode(error)
+  if (
+    code === "workspace_session_expired" ||
+    code === "session_expired" ||
+    code === "refresh_token_not_found" ||
+    code === "bad_jwt"
+  ) return true
+
+  const message = getRawErrorMessage(error)
+  return /workspace_session_expired|we signed you out to keep your workspace safe|your session has expired\. sign in again to continue|\bjwt\b.*\bexpired\b|\b(refresh|access) token\b.*\b(expired|not found)\b/i.test(message)
+}
+
 export function isPermissionDeniedError(error: unknown) {
   const message = getRawErrorMessage(error)
 

@@ -8,6 +8,7 @@ import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -78,16 +79,21 @@ export function NavMain({
               className="group/collapsible"
             >
               <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip={item.title}
+                  isActive={activeView === item.id}
+                  onClick={() => handleNavigate(item.id)}
+                >
+                  {item.icon}
+                  <span>{item.title}</span>
+                </SidebarMenuButton>
                 <CollapsibleTrigger asChild>
-                  <SidebarMenuButton
-                    tooltip={item.title}
-                    isActive={activeView === item.id}
-                    onClick={() => handleNavigate(item.id)}
+                  <SidebarMenuAction
+                    aria-label={`Toggle ${item.title} submenu`}
+                    onClick={(event) => event.stopPropagation()}
                   >
-                    {item.icon}
-                    <span>{item.title}</span>
-                    <ChevronRightIcon className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                  </SidebarMenuButton>
+                    <ChevronRightIcon className="transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                  </SidebarMenuAction>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <SidebarMenuSub>

@@ -183,7 +183,7 @@ export function AppSidebar({
         {isWorkspaceLoading ? (
           <SidebarWorkspaceSkeleton />
         ) : (
-          <>
+          <nav aria-label="Workspace navigation" className="flex min-h-0 flex-1 flex-col">
             <NavMain activeView={activeView} items={navMain} onNavigate={onNavigate} />
             <NavProjects
               accounts={accounts}
@@ -200,7 +200,7 @@ export function AppSidebar({
               onEditOpportunity={onEditOpportunity}
               onOpportunitySelect={onOpportunitySelect}
             />
-          </>
+          </nav>
         )}
       </SidebarContent>
       <SidebarFooter>

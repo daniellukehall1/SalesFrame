@@ -10,6 +10,7 @@ async function read(path) {
 
 test("workspace navigation exposes one main landmark and keyboard-operable destinations", async () => {
   const app = await read("src/App.tsx")
+  const appSidebar = await read("src/components/app-sidebar.tsx")
   const sidebar = await read("src/components/ui/sidebar.tsx")
   const breadcrumb = await read("src/components/ui/breadcrumb.tsx")
   const progress = await read("src/components/ui/progress.tsx")
@@ -17,6 +18,8 @@ test("workspace navigation exposes one main landmark and keyboard-operable desti
   assert.match(sidebar, /function SidebarInset\([\s\S]*React\.ComponentProps<"div">[\s\S]*<div[\s\S]*data-slot="sidebar-inset"/)
   assert.match(sidebar, /function SidebarMenuSubButton[\s\S]*React\.ComponentProps<"button">[\s\S]*: "button"/)
   assert.doesNotMatch(sidebar, /\[&>button\]:hidden/)
+  assert.match(sidebar, /showCloseButton[\s\S]*\[&_{1}\[data-sidebar=header\]\]:pr-14/)
+  assert.match(appSidebar, /<nav aria-label="Workspace navigation" className="flex min-h-0 flex-1 flex-col">[\s\S]*<NavMain[\s\S]*<NavProjects[\s\S]*<\/nav>/)
   assert.match(breadcrumb, /React\.ComponentProps<"button">[\s\S]*: "button"/)
   assert.match(app, /<main[\s\S]*aria-label=\{viewLabels\[activeView\][\s\S]*tabIndex=\{-1\}/)
   assert.match(app, /appMainScrollRef\.current\?\.focus\(\{ preventScroll: true \}\)/)
@@ -68,6 +71,10 @@ test("audio setup and live-call transports stop hanging or reconnecting after te
   assert.match(deepgram, /close: \(\) => \{[\s\S]*closedByClient = true[\s\S]*audioBacklog = \[\]/)
   assert.match(app, /liveCoachStateAbortControllerRef\.current\?\.abort\(\)/)
   assert.match(app, /requestLiveState\([\s\S]*\}, \{ signal: stateAbortController\.signal \}\)/)
+  assert.match(app, /const meetingAudioRequestIdRef = React\.useRef\(0\)/)
+  assert.match(app, /requestId !== meetingAudioRequestIdRef\.current \|\| !startCallOpenRef\.current[\s\S]*stopMediaStream\(stream\)/)
+  assert.match(app, /clearMeetingAudioPreview\(\{ invalidateRequest: false \}\)/)
+  assert.match(app, /handleOpenChange\(false\)[\s\S]*onOpenSettings\?\.\(\)/)
 })
 
 test("live question guidance never falls back to pre-call copy during an active call", async () => {

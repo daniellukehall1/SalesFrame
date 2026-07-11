@@ -11,6 +11,7 @@ import {
   PencilIcon,
   PlusIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react"
 
 import { WorkspaceIconPicker } from "@/components/workspace-icon-picker"
@@ -37,7 +38,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
@@ -106,9 +106,10 @@ export function WorkspaceSwitcher({
   onWorkspaceChange?: (workspace: WorkspaceNavItem) => void
   workspaces: WorkspaceNavItem[]
 }) {
-  const { isMobile } = useSidebar()
+  const { isMobile, setOpenMobile } = useSidebar()
   const [editingWorkspaceId, setEditingWorkspaceId] = React.useState<string | null>(null)
   const [deletingWorkspaceId, setDeletingWorkspaceId] = React.useState<string | null>(null)
+  const [pendingMobileWorkspaceId, setPendingMobileWorkspaceId] = React.useState<string | null>(null)
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = React.useState(false)
   const [statusMessage, setStatusMessage] = React.useState("")
   const [isSaving, setIsSaving] = React.useState(false)
@@ -116,6 +117,13 @@ export function WorkspaceSwitcher({
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0]
   const editingWorkspace = workspaces.find((workspace) => workspace.id === editingWorkspaceId) ?? null
   const deletingWorkspace = workspaces.find((workspace) => workspace.id === deletingWorkspaceId) ?? null
+
+  React.useEffect(() => {
+    if (!pendingMobileWorkspaceId || activeWorkspaceId !== pendingMobileWorkspaceId) return
+
+    setPendingMobileWorkspaceId(null)
+    setOpenMobile(false)
+  }, [activeWorkspaceId, pendingMobileWorkspaceId, setOpenMobile])
 
   const openCreateDialog = () => {
     setStatusMessage("")
@@ -130,9 +138,18 @@ export function WorkspaceSwitcher({
     setEditingWorkspaceId(workspaceId)
   }
 
+  const openDeleteDialog = (workspaceId: string) => {
+    setStatusMessage("")
+    setWorkspaceMenuOpen(false)
+    setDeletingWorkspaceId(workspaceId)
+  }
+
   const selectWorkspace = (workspace: WorkspaceNavItem) => {
     if (workspace.id === activeWorkspaceId) return
 
+    if (isMobile && onWorkspaceChange) {
+      setPendingMobileWorkspaceId(workspace.id)
+    }
     setWorkspaceMenuOpen(false)
     onWorkspaceChange?.(workspace)
   }
@@ -156,9 +173,13 @@ export function WorkspaceSwitcher({
 
   const handleDuplicateWorkspace = async (workspace: WorkspaceNavItem) => {
     setWorkspaceMenuOpen(false)
+    setStatusMessage("")
 
     try {
       const duplicatedWorkspace = await onDuplicateWorkspace(workspace)
+      if (isMobile && onWorkspaceChange) {
+        setPendingMobileWorkspaceId(duplicatedWorkspace.id)
+      }
       onWorkspaceChange?.(duplicatedWorkspace)
     } catch (error: unknown) {
       setStatusMessage(getUserFacingErrorMessage(error, "Workspace needs another duplicate attempt."))
@@ -176,6 +197,9 @@ export function WorkspaceSwitcher({
         const nextWorkspace = nextWorkspaces[0]
 
         if (nextWorkspace) {
+          if (isMobile && onWorkspaceChange) {
+            setPendingMobileWorkspaceId(nextWorkspace.id)
+          }
           onWorkspaceChange?.(nextWorkspace)
         }
       }
@@ -216,13 +240,13 @@ export function WorkspaceSwitcher({
               </SidebarMenuButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent
-              className="w-fit"
+              className="w-fit min-w-64"
               align="start"
               side={isMobile ? "bottom" : "right"}
               sideOffset={4}
             >
               <DropdownMenuLabel className="text-xs text-muted-foreground">Workspaces</DropdownMenuLabel>
-              {workspaces.map((workspace, index) => {
+              {workspaces.map((workspace) => {
                 const isActive = workspace.id === activeWorkspaceId
 
                 return (
@@ -239,7 +263,7 @@ export function WorkspaceSwitcher({
                           <span className="truncate">{workspace.name}</span>
                           <span className="truncate text-xs text-muted-foreground">{workspace.role}</span>
                         </div>
-                        {isActive ? <CheckIcon className="ml-auto size-4" /> : <DropdownMenuShortcut>⌘{index + 1}</DropdownMenuShortcut>}
+                        {isActive ? <CheckIcon className="ml-auto size-4" /> : null}
                       </DropdownMenuItem>
                     </ContextMenuTrigger>
                     <ContextMenuContent className="w-56">
@@ -259,10 +283,7 @@ export function WorkspaceSwitcher({
                       <ContextMenuSeparator />
                       <ContextMenuItem
                         variant="destructive"
-                        onSelect={() => {
-                          setWorkspaceMenuOpen(false)
-                          setDeletingWorkspaceId(workspace.id)
-                        }}
+                        onSelect={() => openDeleteDialog(workspace.id)}
                       >
                         <Trash2Icon />
                         Delete workspace
@@ -271,6 +292,40 @@ export function WorkspaceSwitcher({
                   </ContextMenu>
                 )
               })}
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="max-w-64 truncate text-xs text-muted-foreground">
+                Manage {activeWorkspace.name}
+              </DropdownMenuLabel>
+              <DropdownMenuItem
+                className="gap-2"
+                onSelect={() => openEditDialog(activeWorkspace.id)}
+              >
+                <PencilIcon />
+                Edit workspace details
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2"
+                onSelect={() => handleDuplicateWorkspace(activeWorkspace)}
+              >
+                <CopyIcon />
+                Duplicate workspace
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2"
+                variant="destructive"
+                disabled={workspaces.length <= 1}
+                onSelect={() => openDeleteDialog(activeWorkspace.id)}
+              >
+                <Trash2Icon />
+                <span className="grid">
+                  <span>Delete workspace</span>
+                  {workspaces.length <= 1 ? (
+                    <span className="text-xs font-normal text-muted-foreground">
+                      Create another workspace first
+                    </span>
+                  ) : null}
+                </span>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="gap-2 p-2"
@@ -288,6 +343,26 @@ export function WorkspaceSwitcher({
           </DropdownMenu>
         </SidebarMenuItem>
       </SidebarMenu>
+      {statusMessage && !editingWorkspace && !deletingWorkspace ? (
+        <div
+          className="fixed left-1/2 top-[calc(4.75rem+env(safe-area-inset-top))] z-[80] flex w-[min(36rem,calc(100vw-1.5rem))] -translate-x-1/2 items-start gap-2 rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive shadow-lg"
+          role="alert"
+          aria-live="assertive"
+        >
+          <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 break-words">{statusMessage}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="size-11 shrink-0 text-destructive hover:text-destructive md:size-6"
+            aria-label="Dismiss workspace message"
+            onClick={() => setStatusMessage("")}
+          >
+            <XIcon />
+          </Button>
+        </div>
+      ) : null}
 
       <WorkspaceFormDialog
         open={editingWorkspace !== null}

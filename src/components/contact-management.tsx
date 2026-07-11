@@ -744,7 +744,7 @@ function ContactEditor({
 
   const actions = confirmDiscard ? null : (
     <DialogActions
-      className="mt-2"
+      className="mt-2 max-sm:!mx-0 max-sm:!mb-0 max-sm:rounded-xl"
       cancelDisabled={status === "saving"}
       onCancel={requestClose}
       primaryAction={
@@ -780,7 +780,7 @@ function ContactEditor({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : requestClose())}>
-        <DrawerContent className="grid max-h-[94svh] min-h-[min(680px,94svh)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] [&_[data-slot=button]]:min-h-11 [&_[data-slot=input]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11">
+        <DrawerContent className="grid max-h-[94dvh] min-h-[min(680px,94dvh)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] [&_[data-slot=button]]:min-h-11 [&_[data-slot=input]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11">
           <DrawerHeader className="px-0 text-left">
             <DrawerTitle>{title}</DrawerTitle>
             <DrawerDescription>{description}</DrawerDescription>
@@ -793,7 +793,7 @@ function ContactEditor({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : requestClose())}>
-      <DialogContent dismissible className="grid max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-3xl">
+      <DialogContent dismissible className="grid max-h-[calc(100dvh_-_2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -820,7 +820,7 @@ function ContactInsightList({
   const visibleItems = maxItems === null ? items : items.slice(0, maxItems)
 
   return (
-    <div className={cn("min-w-0 rounded-md bg-background/70 p-3", tone === "caution" && "bg-amber-500/10")}>
+    <div className={cn("w-full min-w-0 max-w-full rounded-md bg-background/70 p-3", tone === "caution" && "bg-amber-500/10")}>
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
       <ul className="mt-2 grid gap-1.5 text-sm">
         {visibleItems.map((item) => (
@@ -843,6 +843,7 @@ function ContactEnrichmentDetails({
 }) {
   const enrichment = contact?.enrichment
   const maxItems = showAll ? null : 5
+  const enrichmentInProgress = enrichment?.status === "queued" || enrichment?.status === "running"
   const hasInsights = Boolean(
     enrichment && (
       enrichment.professionalSummary ||
@@ -866,7 +867,17 @@ function ContactEnrichmentDetails({
             : "Enrichment needs another attempt. Use Retry from the contact actions.")}
         </p>
       ) : null}
-      {enrichment && hasInsights ? (
+      {enrichmentInProgress && !hasInsights ? (
+        <div
+          className="rounded-lg bg-primary/5 p-3 text-sm text-muted-foreground"
+          role="status"
+          aria-live="polite"
+        >
+          {enrichment?.status === "queued"
+            ? "Enrichment is queued. You can keep working while SalesFrame prepares professional insights."
+            : "Enrichment is in progress. SalesFrame is reviewing public professional sources without overwriting seller-entered data."}
+        </div>
+      ) : enrichment && hasInsights ? (
         <div className="grid min-w-0 gap-3 overflow-x-hidden rounded-lg bg-muted/30 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-medium">Professional insights</p>
@@ -888,7 +899,7 @@ function ContactEnrichmentDetails({
               <p className="mt-1 text-sm leading-relaxed [overflow-wrap:anywhere]">{enrichment.roleScope}</p>
             </div>
           ) : null}
-          <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+          <div className="grid w-full min-w-0 max-w-full grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] gap-3">
             <ContactInsightList title="Likely priorities" items={enrichment.priorities} maxItems={maxItems} />
             <ContactInsightList title="Likely KPIs" items={enrichment.kpis} maxItems={maxItems} />
             <ContactInsightList title="Relevant experience" items={enrichment.relevantExperience} maxItems={maxItems} />
@@ -1050,8 +1061,27 @@ function ContactDetailsOverlay({
           <ContactDetailField label="Department / function" value={contact.department} />
           <ContactDetailField label="Seniority" value={contact.seniority} />
           <ContactDetailField label="Employment status" value={formatStatusLabel(contact.employmentStatus)} />
-          <ContactDetailField label="Work email" value={contact.workEmail} />
-          <ContactDetailField label="Business phone" value={contact.businessPhone} />
+          <ContactDetailField
+            label="Work email"
+            value={contact.workEmail ? (
+              <a className="inline-flex min-h-11 items-center gap-2 text-primary underline-offset-4 hover:underline md:min-h-8" href={`mailto:${contact.workEmail}`}>
+                <MailIcon className="size-4 shrink-0" />
+                <span className="break-all">{contact.workEmail}</span>
+              </a>
+            ) : null}
+          />
+          <ContactDetailField
+            label="Business phone"
+            value={contact.businessPhone ? (
+              <a
+                className="inline-flex min-h-11 items-center gap-2 text-primary underline-offset-4 hover:underline md:min-h-8"
+                href={`tel:${contact.businessPhone.replace(/[^+\d]/g, "")}`}
+              >
+                <PhoneIcon className="size-4 shrink-0" />
+                <span>{contact.businessPhone}</span>
+              </a>
+            ) : null}
+          />
           <ContactDetailField
             label="Professional profile"
             value={professionalProfileUrl ? (
@@ -1259,7 +1289,7 @@ function ContactDetailsOverlay({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange} showSwipeHandle>
-        <DrawerContent className="grid w-full min-w-0 max-w-full max-h-[94svh] min-h-[min(680px,94svh)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-x-hidden overflow-y-hidden px-3 pb-[env(safe-area-inset-bottom)] [&_[data-slot=button]]:min-h-11">
+        <DrawerContent className="grid w-full min-w-0 max-w-full max-h-[94dvh] min-h-[min(680px,94dvh)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-x-hidden overflow-y-hidden px-3 pb-[env(safe-area-inset-bottom)] [&_[data-slot=button]]:min-h-11">
           <DrawerHeader className="px-0 text-left">
             <DrawerTitle>{title}</DrawerTitle>
             <DrawerDescription>{description}</DrawerDescription>
@@ -1275,7 +1305,7 @@ function ContactDetailsOverlay({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dismissible className="grid w-full min-w-0 max-w-[calc(100%-2rem)] max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-x-hidden overflow-y-hidden sm:max-w-4xl">
+      <DialogContent dismissible className="grid w-[calc(100%_-_2rem)] min-w-0 max-w-4xl max-h-[calc(100dvh_-_2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-x-hidden overflow-y-hidden">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -1529,13 +1559,13 @@ export function ContactsPanel({
         </CardAction>
       </CardHeader>
       <CardContent className="grid gap-4">
-        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_190px]">
+        <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_180px_190px]">
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               aria-label="Search account contacts"
               value={query}
-              className="h-11 !pl-10 md:h-9"
+              className="h-11 !pl-10 xl:h-9"
               placeholder="Search name, title, email, phone or profile"
               onChange={(event) => {
                 setRevealedContactId("")
@@ -1547,7 +1577,7 @@ export function ContactsPanel({
             setRevealedContactId("")
             setEmploymentFilter(value as typeof employmentFilter)
           }}>
-            <SelectTrigger className="h-11 w-full md:h-9" aria-label="Filter contacts by employment status">
+            <SelectTrigger className="h-11 w-full xl:h-9" aria-label="Filter contacts by employment status">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1562,7 +1592,7 @@ export function ContactsPanel({
             setRevealedContactId("")
             setEnrichmentFilter(value as typeof enrichmentFilter)
           }}>
-            <SelectTrigger className="h-11 w-full md:h-9" aria-label="Filter contacts by enrichment status">
+            <SelectTrigger className="h-11 w-full xl:h-9" aria-label="Filter contacts by enrichment status">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1593,7 +1623,7 @@ export function ContactsPanel({
         ) : null}
 
         {visibleContacts.length ? (
-          <div className="grid gap-3 md:hidden" data-testid="account-contacts-mobile-list">
+          <div className="grid gap-3 2xl:hidden" data-testid="account-contacts-mobile-list">
             {visibleContacts.map((contact) => {
               const opportunityNames = linkedOpportunityNames(contact.id)
               const canEnrich = Boolean(contact.fullName && (accountWebsite || contact.linkedinUrl))
@@ -1674,7 +1704,7 @@ export function ContactsPanel({
         ) : null}
 
         {visibleContacts.length ? (
-          <div className="hidden overflow-hidden rounded-lg border md:block" data-testid="account-contacts-table">
+          <div className="hidden overflow-hidden rounded-lg border 2xl:block" data-testid="account-contacts-table">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30">
@@ -1924,12 +1954,43 @@ export function OpportunityContactsCard({
   onSelectionChange: (contactIds: string[]) => Promise<void>
   opportunityContacts: OpportunityContact[]
 }) {
-  const [status, setStatus] = React.useState<"idle" | "saving" | "error">("idle")
+  const [status, setStatus] = React.useState<"idle" | "saving" | "success" | "error">("idle")
   const [message, setMessage] = React.useState("")
+  const [noteDrafts, setNoteDrafts] = React.useState<Record<string, string>>({})
+  const [savingNoteContactId, setSavingNoteContactId] = React.useState("")
   const savingRef = React.useRef(false)
   const isSaving = status === "saving"
   const selectedIds = opportunityContacts.map((relationship) => relationship.contactId)
   const contactById = React.useMemo(() => new Map(contacts.map((contact) => [contact.id, contact])), [contacts])
+  const hasUnsavedNoteDrafts = opportunityContacts.some((relationship) =>
+    Object.prototype.hasOwnProperty.call(noteDrafts, relationship.contactId)
+      && noteDrafts[relationship.contactId] !== relationship.notes
+  )
+
+  React.useEffect(() => {
+    if (!hasUnsavedNoteDrafts) return
+
+    const preventUnsavedNoteLoss = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+    }
+
+    window.addEventListener("beforeunload", preventUnsavedNoteLoss)
+    return () => window.removeEventListener("beforeunload", preventUnsavedNoteLoss)
+  }, [hasUnsavedNoteDrafts])
+
+  const retainNoteDraftsFor = React.useCallback((contactIds: string[]) => {
+    const retainedContactIds = new Set(contactIds)
+    setNoteDrafts((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([contactId]) => retainedContactIds.has(contactId))
+      )
+      return Object.keys(next).length === Object.keys(current).length ? current : next
+    })
+  }, [])
+
+  React.useEffect(() => {
+    retainNoteDraftsFor(selectedIds)
+  }, [retainNoteDraftsFor, selectedIds.join("|")])
 
   const saveSelection = async (contactIds: string[]) => {
     if (savingRef.current) return
@@ -1938,6 +1999,7 @@ export function OpportunityContactsCard({
     setMessage("")
     try {
       await onSelectionChange(contactIds)
+      retainNoteDraftsFor(contactIds)
       setStatus("idle")
     } catch (error: unknown) {
       setStatus("error")
@@ -1947,24 +2009,42 @@ export function OpportunityContactsCard({
     }
   }
 
-  const updateRelationship = async (contactId: string, patch: OpportunityContactPatch) => {
-    if (savingRef.current) return
+  const updateRelationship = async (contactId: string, patch: OpportunityContactPatch): Promise<boolean> => {
+    if (savingRef.current) return false
     savingRef.current = true
     setStatus("saving")
     setMessage("")
     try {
       await onRelationshipChange(contactId, patch)
       setStatus("idle")
+      return true
     } catch (error: unknown) {
       setStatus("error")
       setMessage(error instanceof Error ? error.message : "Contact role needs another save attempt.")
+      return false
     } finally {
       savingRef.current = false
     }
   }
 
+  const saveNotes = async (contact: Contact, notes: string) => {
+    setSavingNoteContactId(contact.id)
+    const saved = await updateRelationship(contact.id, { notes })
+    setSavingNoteContactId("")
+    if (!saved) return
+
+    setNoteDrafts((current) => {
+      if (current[contact.id] !== notes) return current
+      const next = { ...current }
+      delete next[contact.id]
+      return next
+    })
+    setStatus("success")
+    setMessage(`Deal-specific notes saved for ${contact.fullName}.`)
+  }
+
   return (
-    <Card>
+    <Card data-unsaved-contact-notes={hasUnsavedNoteDrafts || undefined}>
       <CardHeader>
         <div>
           <CardTitle>Opportunity contacts</CardTitle>
@@ -1978,18 +2058,27 @@ export function OpportunityContactsCard({
           <ContactMultiSelect
             id="opportunity-contacts"
             contacts={contacts}
-            disabled={isSaving}
+            disabled={isSaving || hasUnsavedNoteDrafts}
             value={selectedIds}
             onChange={(contactIds) => void saveSelection(contactIds)}
           />
-          <p className="text-xs text-muted-foreground">Removing a contact here does not delete the contact or their historical call participation.</p>
+          <p className="text-xs text-muted-foreground">
+            {hasUnsavedNoteDrafts
+              ? "Save note changes before changing linked contacts."
+              : "Removing a contact here does not delete the contact or their historical call participation."}
+          </p>
         </div>
-        {message ? <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive" role="alert">{message}</p> : null}
+        {message && status === "error" ? <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive" role="alert">{message}</p> : null}
+        {message && status === "success" ? <p className="rounded-lg bg-primary/10 p-3 text-sm text-foreground" role="status" aria-live="polite">{message}</p> : null}
         {opportunityContacts.length ? <Separator /> : null}
         <div className="grid gap-3">
           {opportunityContacts.map((relationship) => {
             const contact = contactById.get(relationship.contactId)
             if (!contact) return null
+            const noteDraft = noteDrafts[contact.id] ?? relationship.notes
+            const hasUnsavedNotes = Object.prototype.hasOwnProperty.call(noteDrafts, contact.id)
+              && noteDraft !== relationship.notes
+            const noteStatusId = `contact-deal-notes-status-${contact.id}`
 
             return (
               <article key={relationship.id || relationship.contactId} className="grid gap-3 rounded-lg bg-muted/20 p-3">
@@ -2054,19 +2143,75 @@ export function OpportunityContactsCard({
                     <Label htmlFor={`contact-deal-notes-${contact.id}`}>Deal-specific notes</Label>
                     <Textarea
                       id={`contact-deal-notes-${contact.id}`}
-                      defaultValue={relationship.notes}
+                      value={noteDraft}
                       className="min-h-20 resize-none"
                       disabled={isSaving}
-                      onBlur={(event) => {
-                        if (event.currentTarget.value === relationship.notes) return
-                        void updateRelationship(contact.id, { notes: event.currentTarget.value })
+                      aria-describedby={noteStatusId}
+                      onChange={(event) => {
+                        const notes = event.currentTarget.value
+                        setNoteDrafts((current) => {
+                          if (notes !== relationship.notes) return { ...current, [contact.id]: notes }
+                          if (!Object.prototype.hasOwnProperty.call(current, contact.id)) return current
+                          const next = { ...current }
+                          delete next[contact.id]
+                          return next
+                        })
+                        if (status === "success") {
+                          setStatus("idle")
+                          setMessage("")
+                        }
                       }}
                     />
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p id={noteStatusId} className="text-xs text-muted-foreground">
+                        {hasUnsavedNotes ? "Unsaved note changes. Save before leaving this opportunity." : "Notes are up to date."}
+                      </p>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="min-h-11 shrink-0 md:min-h-8"
+                          aria-label={`Revert deal-specific notes for ${contact.fullName}`}
+                          aria-describedby={noteStatusId}
+                          disabled={isSaving || !hasUnsavedNotes}
+                          onClick={() => {
+                            setNoteDrafts((current) => {
+                              const next = { ...current }
+                              delete next[contact.id]
+                              return next
+                            })
+                          }}
+                        >
+                          <Undo2Icon />Revert
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="min-h-11 shrink-0 md:min-h-8"
+                          aria-label={`Save deal-specific notes for ${contact.fullName}`}
+                          aria-describedby={noteStatusId}
+                          disabled={isSaving || !hasUnsavedNotes}
+                          onClick={() => void saveNotes(contact, noteDraft)}
+                        >
+                          {savingNoteContactId === contact.id ? "Saving notes…" : "Save notes"}
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div className="flex justify-end">
-                  <Button type="button" variant="ghost" size="sm" className="min-h-11 gap-2 text-destructive hover:text-destructive md:min-h-8" disabled={isSaving} onClick={() => void saveSelection(selectedIds.filter((id) => id !== contact.id))}>
-                    <XIcon />Remove from opportunity
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-11 gap-2 text-destructive hover:text-destructive md:min-h-8"
+                    disabled={isSaving || hasUnsavedNotes}
+                    aria-describedby={noteStatusId}
+                    onClick={() => void saveSelection(selectedIds.filter((id) => id !== contact.id))}
+                  >
+                    <XIcon />{hasUnsavedNotes ? "Save notes before removing" : "Remove from opportunity"}
                   </Button>
                 </div>
               </article>

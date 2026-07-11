@@ -33,13 +33,18 @@ export function NavUser({
     avatar: string
   }
 }) {
-  const { isMobile } = useSidebar()
+  const { isMobile, setOpenMobile } = useSidebar()
   const initials = user.name
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || "U"
+
+  const handleNavigate = (view: string) => {
+    onNavigate(view)
+    if (isMobile) setOpenMobile(false)
+  }
 
   return (
     <SidebarMenu>
@@ -82,11 +87,11 @@ export function NavUser({
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => onNavigate("profile-account")}>
+              <DropdownMenuItem onClick={() => handleNavigate("profile-account")}>
                 <BadgeCheckIcon />
                 Account
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onNavigate("settings")}>
+              <DropdownMenuItem onClick={() => handleNavigate("settings")}>
                 <Settings2Icon />
                 Settings
               </DropdownMenuItem>

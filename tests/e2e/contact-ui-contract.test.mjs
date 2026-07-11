@@ -24,7 +24,28 @@ test("account contacts use the shared responsive record-management UI", async ()
   assert.match(contacts, /Linked opportunities<\/TableHead>/)
   assert.match(contacts, /Enrichment status<\/TableHead>/)
   assert.match(contacts, /Created date<\/TableHead>/)
+  assert.match(contacts, /className="grid gap-2 xl:grid-cols-\[minmax\(0,1fr\)_180px_190px\]"/)
+  assert.match(contacts, /className="grid gap-3 2xl:hidden" data-testid="account-contacts-mobile-list"/)
+  assert.match(contacts, /className="hidden overflow-hidden rounded-lg border 2xl:block" data-testid="account-contacts-table"/)
+  assert.match(contacts, /max-sm:!mx-0 max-sm:!mb-0 max-sm:rounded-xl/)
+  assert.doesNotMatch(contacts, /className="grid gap-3 md:hidden" data-testid="account-contacts-mobile-list"/)
+  assert.doesNotMatch(contacts, /className="hidden overflow-hidden rounded-lg border md:block" data-testid="account-contacts-table"/)
   assert.match(table, /data-slot="table"/)
+})
+
+test("contact enrichment distinguishes queued work from a true empty state", async () => {
+  const contacts = await read("src/components/contact-management.tsx")
+  const enrichmentDetails = contacts.slice(
+    contacts.indexOf("function ContactEnrichmentDetails"),
+    contacts.indexOf("function EnrichmentBadge")
+  )
+
+  assert.match(enrichmentDetails, /const enrichmentInProgress = enrichment\?\.status === "queued" \|\| enrichment\?\.status === "running"/)
+  assert.match(enrichmentDetails, /enrichmentInProgress && !hasInsights/)
+  assert.match(enrichmentDetails, /Enrichment is queued\. You can keep working while SalesFrame prepares professional insights\./)
+  assert.match(enrichmentDetails, /Enrichment is in progress\. SalesFrame is reviewing public professional sources without overwriting seller-entered data\./)
+  assert.match(enrichmentDetails, /role="status"/)
+  assert.match(enrichmentDetails, /aria-live="polite"/)
 })
 
 test("contact identities open a complete responsive canonical record", async () => {
@@ -42,8 +63,10 @@ test("contact identities open a complete responsive canonical record", async () 
   assert.match(detailOverlay, /<dl className="grid min-w-0 gap-3 md:grid-cols-2">/)
   assert.match(detailOverlay, /overflow-x-hidden overflow-y-auto overscroll-contain/)
   assert.match(detailOverlay, /overflow-x-hidden overflow-y-hidden/)
+  assert.match(detailOverlay, /w-\[calc\(100%_-_2rem\)\] min-w-0 max-w-4xl/)
   assert.match(detailOverlay, /\[overflow-wrap:anywhere\]/)
   assert.doesNotMatch(detailOverlay, /overflow-x-auto/)
+  assert.doesNotMatch(detailOverlay, /max-w-\[calc\(100%-2rem\)\]/)
   for (const label of [
     "Full name",
     "Preferred name",
@@ -71,6 +94,8 @@ test("contact identities open a complete responsive canonical record", async () 
   assert.match(detailOverlay, /relationship\.attendance/)
   assert.match(detailOverlay, /Primary participant/)
   assert.match(detailOverlay, /<ContactEnrichmentDetails contact=\{contact\} showAll \/>/)
+  assert.match(contacts, /grid-cols-\[repeat\(auto-fit,minmax\(min\(100%,22rem\),1fr\)\)\]/)
+  assert.match(contacts, /w-full min-w-0 max-w-full rounded-md bg-background\/70/)
   assert.match(detailOverlay, /<PencilIcon \/>[\s\S]*Edit/)
   assert.match(detailOverlay, /Refresh enrichment/)
   assert.match(detailOverlay, /<ArchiveIcon \/>[\s\S]*Archive/)
@@ -102,6 +127,37 @@ test("opportunity account directory clearly opens contacts and keeps menus conta
   assert.doesNotMatch(panel, /<ExternalLinkIcon \/>Open \{opportunity!\.name\}/)
 })
 
+test("deal-specific contact notes use explicit failure-safe drafts", async () => {
+  const contacts = await read("src/components/contact-management.tsx")
+  const opportunityContactsCard = contacts.slice(
+    contacts.indexOf("export function OpportunityContactsCard"),
+  )
+
+  assert.match(opportunityContactsCard, /const \[noteDrafts, setNoteDrafts\] = React\.useState<Record<string, string>>\(\{\}\)/)
+  assert.match(opportunityContactsCard, /const updateRelationship = async \(contactId: string, patch: OpportunityContactPatch\): Promise<boolean>/)
+  assert.match(opportunityContactsCard, /if \(savingRef\.current\) return false/)
+  assert.match(opportunityContactsCard, /await onRelationshipChange\(contactId, patch\)[\s\S]*return true/)
+  assert.match(opportunityContactsCard, /catch \(error: unknown\)[\s\S]*return false/)
+  assert.match(opportunityContactsCard, /retainNoteDraftsFor\(contactIds\)/)
+  assert.match(opportunityContactsCard, /React\.useEffect\(\(\) => \{[\s\S]*retainNoteDraftsFor\(selectedIds\)/)
+  assert.match(opportunityContactsCard, /const saved = await updateRelationship\(contact\.id, \{ notes \}\)[\s\S]*if \(!saved\) return[\s\S]*delete next\[contact\.id\]/)
+  assert.match(opportunityContactsCard, /value=\{noteDraft\}/)
+  assert.match(opportunityContactsCard, /onChange=\{\(event\) => \{[\s\S]*setNoteDrafts/)
+  assert.match(opportunityContactsCard, /aria-label=\{`Save deal-specific notes for \$\{contact\.fullName\}`\}/)
+  assert.match(opportunityContactsCard, /disabled=\{isSaving \|\| !hasUnsavedNotes\}/)
+  assert.match(opportunityContactsCard, /Saving notes…[\s\S]*Save notes/)
+  assert.match(opportunityContactsCard, /Deal-specific notes saved for \$\{contact\.fullName\}\./)
+  assert.match(opportunityContactsCard, /window\.addEventListener\("beforeunload", preventUnsavedNoteLoss\)/)
+  assert.match(opportunityContactsCard, /data-unsaved-contact-notes=\{hasUnsavedNoteDrafts \|\| undefined\}/)
+  assert.match(opportunityContactsCard, /disabled=\{isSaving \|\| hasUnsavedNoteDrafts\}/)
+  assert.match(opportunityContactsCard, /disabled=\{isSaving \|\| hasUnsavedNotes\}/)
+  assert.match(opportunityContactsCard, /Save notes before removing/)
+  assert.match(opportunityContactsCard, /Revert deal-specific notes for \$\{contact\.fullName\}/)
+  assert.match(opportunityContactsCard, /role="status" aria-live="polite"/)
+  assert.doesNotMatch(opportunityContactsCard, /defaultValue=\{relationship\.notes\}/)
+  assert.doesNotMatch(opportunityContactsCard, /onBlur=\{\(event\) => \{[\s\S]*updateRelationship\(contact\.id, \{ notes:/)
+})
+
 test("opportunities expose the shared account directory beside deal-specific contact roles", async () => {
   const app = await read("src/App.tsx")
   const opportunityWorkspace = app.slice(
@@ -111,7 +167,7 @@ test("opportunities expose the shared account directory beside deal-specific con
 
   assert.match(app, /opportunities=\{workspaceOpportunities\.filter\(\(item\) => item\.accountId === activeAccount\.id\)\}/)
   assert.match(opportunityWorkspace, /<TabsTrigger className="min-w-24" value="contacts">Contacts<\/TabsTrigger>/)
-  assert.match(opportunityWorkspace, /<TabsContent value="contacts"/)
+  assert.match(opportunityWorkspace, /<TabsContent forceMount value="contacts"/)
   assert.match(opportunityWorkspace, /<OpportunityContactsCard[\s\S]*<ContactsPanel/)
   assert.match(opportunityWorkspace, /relationship\.opportunityId === opportunity\.id/)
   assert.match(opportunityWorkspace, /relationship\.accountId === account\.id/)

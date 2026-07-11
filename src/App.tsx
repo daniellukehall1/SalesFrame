@@ -58,9 +58,10 @@ import {
   type ContactSaveHandler,
   type OpportunityContactPatch,
 } from "@/components/contact-management"
-import type { AuthMode } from "@/components/auth-page"
+import type { AuthMode, AuthPageMode } from "@/components/auth-page"
 import type { LoginFormValues } from "@/components/login-form"
 import { type AccountNavItem } from "@/components/nav-projects"
+import type { PasswordRecoveryFormValues } from "@/components/password-recovery-form"
 import type { SignupFormValues } from "@/components/signup-form"
 import type { WorkspaceNavItem, WorkspaceSavePayload } from "@/components/workspace-switcher"
 import { WorkspaceIconPicker } from "@/components/workspace-icon-picker"
@@ -164,7 +165,7 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   getMeetingAudioDisplayOptions,
-  getMicrophoneAudioConstraints,
+  getMicrophonePreviewAudioConstraints,
   type AudioPreflightResult,
 } from "@/lib/call-audio-preflight"
 import {
@@ -183,7 +184,11 @@ import { formatCurrencyAmount } from "@/lib/currency-utils"
 import { makeFailedRowsCsv, type CsvImportType } from "@/lib/csv-import"
 import { reportClientError } from "@/lib/client-error-reporting"
 import { normalizeCloseDateForPersistence } from "@/lib/date-utils"
-import { getUserFacingErrorMessage, isPermissionDeniedError } from "@/lib/user-facing-errors"
+import {
+  getUserFacingErrorMessage,
+  isPermissionDeniedError,
+  isWorkspaceSessionExpiredError,
+} from "@/lib/user-facing-errors"
 import {
   liveCoachForcedRefreshTurnThreshold,
   shouldForceLiveQuestionRefresh,
@@ -566,6 +571,18 @@ const workspaceSessionTimeoutOptions = [
   { label: "Never", value: "never" },
 ] as const
 
+const opportunityStageOptions = [
+  "Qualification",
+  "Discovery",
+  "Validation",
+  "Demo",
+  "Business case",
+  "Proposal",
+  "Negotiation",
+  "Closed won",
+  "Closed lost",
+] as const
+
 const workspaceSessionExpiredMessage = "We signed you out to keep your workspace safe."
 const workspaceSessionActivityThrottleMs = 60_000
 const workspaceSessionLiveHeartbeatMs = 60_000
@@ -612,8 +629,6 @@ const mobileStartCallViews = [
   "playbooks",
   ...breadcrumbPlaybookDetailViews,
 ]
-const minimumWorkspaceLoadMs = 3000
-const minimumPageLoadMs = 700
 const sellerDomainLookupDebounceMs = 2000
 const colorModeStorageKey = "salesframe.color-mode"
 const captureSettingsStorageKey = "salesframe.capture-settings"
@@ -2219,6 +2234,7 @@ function App() {
   const [authMode, setAuthMode] = React.useState<AuthMode>(() =>
     getPublicAuthRouteFromPath() === "signup" ? "signup" : "login"
   )
+  const [passwordRecoveryActive, setPasswordRecoveryActive] = React.useState(false)
   const [authSession, setAuthSession] = React.useState<AuthSession | null>(null)
   const [authLoading, setAuthLoading] = React.useState(true)
   const [authSubmitting, setAuthSubmitting] = React.useState(false)
@@ -2247,7 +2263,6 @@ function App() {
   const [personalAccountProfile, setPersonalAccountProfile] =
     React.useState<PersonalAccountProfile>(initialPersonalAccountProfile)
   const [workspaceDataState, setWorkspaceDataState] = React.useState<WorkspaceDataState>("loading")
-  const [pageLoadingView, setPageLoadingView] = React.useState<string | null>(null)
   const [workspaceErrorMessage, setWorkspaceErrorMessage] = React.useState("")
   const [workspaceRefreshToken, setWorkspaceRefreshToken] = React.useState(0)
   const [mobileStartCallScrolledPastPrimaryAction, setMobileStartCallScrolledPastPrimaryAction] = React.useState(false)
@@ -2288,8 +2303,8 @@ function App() {
     React.useState<CustomerResearchConfig>(defaultCustomerResearch)
   const [accountResearchById, setAccountResearchById] = React.useState<Record<string, CustomerResearchConfig>>({})
   const [liveGuidanceByCallId, setLiveGuidanceByCallId] = React.useState<Record<string, LiveGuidance>>({})
-  const [postCallGenerating, setPostCallGenerating] = React.useState(false)
-  const [postCallError, setPostCallError] = React.useState("")
+  const [postCallGeneratingCallId, setPostCallGeneratingCallId] = React.useState("")
+  const [postCallError, setPostCallError] = React.useState<{ callId: string; message: string } | null>(null)
   const callCapture = useCallCapture()
   const [isStoppingCall, setIsStoppingCall] = React.useState(false)
   const isCallLive =
@@ -2302,8 +2317,9 @@ function App() {
       isRecording ||
       ["requesting-permission", "connecting", "recording", "paused", "stopping"].includes(callCapture.status))
   const startingRecordingRef = React.useRef(false)
-  const workspaceLoadTimeoutRef = React.useRef<number | null>(null)
-  const pageLoadTimeoutRef = React.useRef<number | null>(null)
+  const postCallRetryInFlightRef = React.useRef("")
+  const workspaceRefreshRequestIdRef = React.useRef(0)
+  const activeWorkspaceIdRef = React.useRef(activeWorkspaceId)
   const activeAccountIdRef = React.useRef(activeAccountId)
   const activeOpportunityIdRef = React.useRef(activeOpportunityId)
   const activeCallIdRef = React.useRef(activeCallId)
@@ -2375,7 +2391,11 @@ function App() {
         return rightTime - leftTime
       })[0]?.id ||
     ""
+  activeWorkspaceIdRef.current = activeWorkspaceId
   const activePostCallOutput = activePostCallCallId ? postCallOutputsByCallId[activePostCallCallId] ?? null : null
+  const activePostCallError = postCallError?.callId === activePostCallCallId ? postCallError.message : ""
+  const activePostCallGenerating = postCallGeneratingCallId === activePostCallCallId
+  const activePostCallRetryBlocked = Boolean(postCallGeneratingCallId && !activePostCallGenerating)
   const activePostCallTranscript =
     activePostCallCallId && activePostCallCallId === activeCallId && transcript.length > 0
       ? transcript
@@ -2530,7 +2550,17 @@ function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setPasswordRecoveryActive(true)
+        setPublicAuthRoute("login")
+        setAuthMode("login")
+        setAuthStatusTone("info")
+        setAuthStatusMessage("")
+        if (window.location.pathname !== "/login") {
+          window.history.replaceState(null, "", "/login")
+        }
+      }
       setAuthSession((current) => preserveAuthSessionIdentity(current, session?.user ?? null))
       setAuthLoading(false)
       if (session?.user) {
@@ -2546,10 +2576,10 @@ function App() {
   }, [supabase])
 
   React.useEffect(() => {
-    if (!authSession) return
+    if (!authSession || passwordRecoveryActive) return
 
     ensureAuthenticatedAppRoute()
-  }, [authSession, ensureAuthenticatedAppRoute])
+  }, [authSession, ensureAuthenticatedAppRoute, passwordRecoveryActive])
 
   React.useEffect(() => {
     if (!authSession) return
@@ -2776,10 +2806,8 @@ function App() {
 
       return status
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, workspaceSessionExpiredMessage)
-
-      if (message === workspaceSessionExpiredMessage || /session/i.test(message)) {
-        handleWorkspaceSessionExpiredRef.current?.(message)
+      if (isWorkspaceSessionExpiredError(caughtError)) {
+        handleWorkspaceSessionExpiredRef.current?.(workspaceSessionExpiredMessage)
       }
 
       throw caughtError
@@ -2801,10 +2829,8 @@ function App() {
         handleWorkspaceSessionStatus(status)
       })
       .catch((caughtError: unknown) => {
-        const message = getUserFacingErrorMessage(caughtError, workspaceSessionExpiredMessage)
-
-        if (!cancelled && (message === workspaceSessionExpiredMessage || /session/i.test(message))) {
-          handleWorkspaceSessionExpiredRef.current?.(message)
+        if (!cancelled && isWorkspaceSessionExpiredError(caughtError)) {
+          handleWorkspaceSessionExpiredRef.current?.(workspaceSessionExpiredMessage)
         }
       })
 
@@ -2860,10 +2886,8 @@ function App() {
       getWorkspaceSessionStatus(activeWorkspaceId)
         .then(handleWorkspaceSessionStatus)
         .catch((caughtError: unknown) => {
-          const message = getUserFacingErrorMessage(caughtError, workspaceSessionExpiredMessage)
-
-          if (message === workspaceSessionExpiredMessage || /session/i.test(message)) {
-            handleWorkspaceSessionExpiredRef.current?.(message)
+          if (isWorkspaceSessionExpiredError(caughtError)) {
+            handleWorkspaceSessionExpiredRef.current?.(workspaceSessionExpiredMessage)
           }
         })
     }, workspaceSessionLiveHeartbeatMs)
@@ -2902,7 +2926,7 @@ function App() {
   }, [activeWorkspaceId, authSession, isCallLive, workspaceSessionStatus])
 
   React.useLayoutEffect(() => {
-    if (pageLoadingView || loadingWorkspace || workspaceDataState === "loading") return
+    if (loadingWorkspace || workspaceDataState === "loading") return
     if (!pendingNavigationScrollResetRef.current && lastScrolledNavigationKeyRef.current === activeNavigationKey) return
 
     scrollAppContentToTop()
@@ -2917,7 +2941,6 @@ function App() {
     activeNavigationKey,
     loadingWorkspace,
     navigationScrollResetNonce,
-    pageLoadingView,
     scrollAppContentToTop,
     workspaceDataState,
   ])
@@ -2990,7 +3013,14 @@ function App() {
   }, [authSession])
 
   const refreshWorkspaceData = React.useCallback(async () => {
+    const requestId = workspaceRefreshRequestIdRef.current + 1
+    workspaceRefreshRequestIdRef.current = requestId
     if (!authSession || !activeWorkspaceId) return
+
+    const requestedWorkspaceId = activeWorkspaceId
+    const isCurrentRequest = () =>
+      workspaceRefreshRequestIdRef.current === requestId &&
+      activeWorkspaceIdRef.current === requestedWorkspaceId
 
     const previousDataState = workspaceDataStateRef.current
     const canPreserveCurrentWorkspace =
@@ -3002,6 +3032,7 @@ function App() {
 
     try {
       await sendWorkspaceSessionActivity("workspace_load", { force: true })
+      if (!isCurrentRequest()) return
 
       const [
         accountRows,
@@ -3022,6 +3053,7 @@ function App() {
         listArchivedOpportunities(activeWorkspaceId),
         listWorkspaceContacts(activeWorkspaceId),
       ])
+      if (!isCurrentRequest()) return
       const activeAccountIds = new Set(accountRows.map((account) => account.id))
       const activeOpportunityRows = opportunityRows.filter((opportunity) => activeAccountIds.has(opportunity.account_id))
       const activeOpportunityIds = new Set(activeOpportunityRows.map((opportunity) => opportunity.id))
@@ -3045,6 +3077,7 @@ function App() {
         listContactEnrichmentRunsForContacts(contactRows.map((contact) => contact.id)),
         listOpportunityContacts(activeOpportunityRows.map((opportunity) => opportunity.id)),
       ])
+      if (!isCurrentRequest()) return
       const callIds = activeCallRows.map((call) => call.id)
       const opportunityIds = activeOpportunityRows.map((opportunity) => opportunity.id)
       const [
@@ -3064,6 +3097,7 @@ function App() {
         listPostCallOutputs(callIds),
         listTranscriptSegments(callIds),
       ])
+      if (!isCurrentRequest()) return
 
       const nextOpportunities = mapOpportunityRowsToUi({
         calls: activeCallRows,
@@ -3080,6 +3114,8 @@ function App() {
       const nextAccounts = mapAccountRowsToNavItems(accountRows, activeOpportunityRows)
       const currentActiveAccountId = activeAccountIdRef.current
       const currentActiveOpportunityId = activeOpportunityIdRef.current
+
+      if (!isCurrentRequest()) return
 
       setWorkspacePlaybooks(playbookRows)
       setWorkspacePlaybookFields(playbookFieldRows)
@@ -3133,6 +3169,8 @@ function App() {
       workspaceDataStateRef.current = nextDataState
       setWorkspaceDataState(nextDataState)
     } catch (caughtError: unknown) {
+      if (!isCurrentRequest()) return
+
       const isPermissionDenied = isPermissionDeniedError(caughtError)
       const message = getUserFacingErrorMessage(caughtError, "SalesFrame needs another moment to load this workspace.")
 
@@ -3166,12 +3204,10 @@ function App() {
   }, [activeWorkspaceId, authSession, sellerResearchProfile])
 
   React.useEffect(() => {
-    return () => {
-      if (workspaceLoadTimeoutRef.current !== null) {
-        window.clearTimeout(workspaceLoadTimeoutRef.current)
-      }
-    }
-  }, [])
+    if (!loadingWorkspace || workspaceDataState === "loading") return
+
+    setLoadingWorkspace(null)
+  }, [loadingWorkspace, workspaceDataState])
 
   React.useEffect(() => {
     setAccountRecordSaveStatus("idle")
@@ -3248,26 +3284,21 @@ function App() {
       return
     }
 
-    if (pageLoadTimeoutRef.current !== null) {
-      window.clearTimeout(pageLoadTimeoutRef.current)
-      pageLoadTimeoutRef.current = null
-    }
-
-    if (workspaceDataState === "ready" && !loadingWorkspace) {
-      setPageLoadingView(view)
-      pageLoadTimeoutRef.current = window.setTimeout(() => {
-        setPageLoadingView(null)
-        pageLoadTimeoutRef.current = null
-      }, minimumPageLoadMs)
-    } else {
-      setPageLoadingView(null)
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before leaving this opportunity.")
+      return
     }
 
     setActiveView(view)
     requestNavigationScrollReset()
-  }, [activeView, blurFocusedNavigationElement, loadingWorkspace, requestNavigationScrollReset, workspaceDataState])
+  }, [activeView, blurFocusedNavigationElement, requestNavigationScrollReset])
 
   const handleAccountSelect = (accountId: string) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before opening another account.")
+      return
+    }
+
     requestNavigationScrollReset()
     setActiveAccountId(accountId)
     setAccountDetailTab("record")
@@ -3281,6 +3312,11 @@ function App() {
   }
 
   const handleOpportunitySelect = (opportunityId: string) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before opening another opportunity.")
+      return
+    }
+
     const selectedOpportunity = workspaceOpportunities.find((opportunity) => opportunity.id === opportunityId)
     if (selectedOpportunity) {
       requestNavigationScrollReset()
@@ -3376,6 +3412,11 @@ function App() {
   }
 
   const handleCallSelect = (callId: string) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before opening another call.")
+      return
+    }
+
     const selectedCall = workspaceCalls.find((call) => call.id === callId)
     if (!selectedCall) return
 
@@ -3387,9 +3428,10 @@ function App() {
     requestNavigationScrollReset()
     setActiveAccountId(selectedOpportunity.accountId)
     setActiveOpportunityId(selectedOpportunity.id)
-    setPostCallFocusCallId(callId)
+    const isActiveSelectedCall = callId === activeCallId || callId === callCapture.activeCallId
 
-    handleNavigate("post-call")
+    setPostCallFocusCallId(isActiveSelectedCall ? "" : callId)
+    handleNavigate(isActiveSelectedCall ? "workspace" : "post-call")
   }
 
   const handleOpenCreateOpportunity = (accountId = activeAccount.id) => {
@@ -3410,6 +3452,11 @@ function App() {
   }
 
   const handleRequestDeleteAccount = (accountId: string) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before deleting an account.")
+      return
+    }
+
     const account = workspaceAccounts.find((item) => item.id === accountId)
     if (!account) return
 
@@ -3430,6 +3477,11 @@ function App() {
   }
 
   const handleRequestDeleteOpportunity = (opportunityId: string) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before deleting an opportunity.")
+      return
+    }
+
     const opportunity = workspaceOpportunities.find((item) => item.id === opportunityId)
     if (!opportunity) return
 
@@ -3464,6 +3516,11 @@ function App() {
   }
 
   const handleRequestArchiveAccount = (accountId: string) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before archiving an account.")
+      return
+    }
+
     const account = workspaceAccounts.find((item) => item.id === accountId)
     if (!account) return
 
@@ -3484,6 +3541,11 @@ function App() {
   }
 
   const handleRequestArchiveOpportunity = (opportunityId: string) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before archiving an opportunity.")
+      return
+    }
+
     const opportunity = workspaceOpportunities.find((item) => item.id === opportunityId)
     if (!opportunity) return
 
@@ -3496,6 +3558,11 @@ function App() {
   }
 
   const handleRequestDeleteCall = (callId: string) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before deleting a call.")
+      return
+    }
+
     const call = workspaceCalls.find((item) => item.id === callId)
     if (!call) return
 
@@ -3521,6 +3588,13 @@ function App() {
   }
 
   const handleConfirmArchiveRecord = async (): Promise<RecordMutationResult> => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      return {
+        message: "Save or revert the contact note changes before archiving this record.",
+        ok: false,
+      }
+    }
+
     if (!pendingArchiveRecord) {
       return {
         message: "Choose a record before archiving.",
@@ -3636,6 +3710,13 @@ function App() {
   }
 
   const handleConfirmDeleteRecord = async (): Promise<RecordMutationResult> => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      return {
+        message: "Save or revert the contact note changes before deleting this record.",
+        ok: false,
+      }
+    }
+
     if (!pendingDeleteRecord) {
       return {
         message: "Choose a record before deleting.",
@@ -3721,7 +3802,7 @@ function App() {
 
     try {
       setIsStoppingCall(true)
-      setPostCallError("")
+      setPostCallError(null)
       const stoppedCall = await callCapture.stopCall({
         endedReason: options.endedReason ?? "seller_stopped",
       })
@@ -3762,13 +3843,15 @@ function App() {
       activeCallIdRef.current = ""
       setActiveCallStartedAt("")
       handleNavigate("post-call")
-      setPostCallError(getUserFacingErrorMessage(caughtError, "The call ended, and a few post-call items need another save attempt."))
+      setPersistentAppAlert(
+        getUserFacingErrorMessage(caughtError, "The call ended, and a few post-call items need another save attempt.")
+      )
     } finally {
       setIsStoppingCall(false)
     }
 
     try {
-      setPostCallGenerating(true)
+      setPostCallGeneratingCallId(stoppedCallId)
       const output = await requestPostCallOutputs(stoppedCallId)
       setPostCallOutputsByCallId((items) => ({
         ...items,
@@ -3776,9 +3859,39 @@ function App() {
       }))
       setWorkspaceRefreshToken((value) => value + 1)
     } catch (caughtError: unknown) {
-      setPostCallError(getUserFacingErrorMessage(caughtError, "Post-call brief needs another pass."))
+      setPostCallError({
+        callId: stoppedCallId,
+        message: getUserFacingErrorMessage(caughtError, "Post-call brief needs another pass."),
+      })
     } finally {
-      setPostCallGenerating(false)
+      setPostCallGeneratingCallId((currentCallId) => currentCallId === stoppedCallId ? "" : currentCallId)
+    }
+  }
+
+  const handleRetryPostCallOutputs = async (callId: string) => {
+    const retryCallId = callId.trim()
+    if (!retryCallId || postCallGeneratingCallId || postCallRetryInFlightRef.current) return
+
+    postCallRetryInFlightRef.current = retryCallId
+    setPostCallFocusCallId(retryCallId)
+    setPostCallError(null)
+    setPostCallGeneratingCallId(retryCallId)
+
+    try {
+      const output = await requestPostCallOutputs(retryCallId)
+      setPostCallOutputsByCallId((items) => ({
+        ...items,
+        [retryCallId]: mapPostCallOutputResponse(output),
+      }))
+      setWorkspaceRefreshToken((value) => value + 1)
+    } catch (caughtError: unknown) {
+      setPostCallError({
+        callId: retryCallId,
+        message: getUserFacingErrorMessage(caughtError, "Post-call brief needs another pass."),
+      })
+    } finally {
+      postCallRetryInFlightRef.current = ""
+      setPostCallGeneratingCallId((currentCallId) => currentCallId === retryCallId ? "" : currentCallId)
     }
   }
 
@@ -3888,7 +4001,7 @@ function App() {
         return nextItems
       })
     } catch (caughtError: unknown) {
-      setPostCallError(getUserFacingErrorMessage(caughtError, "Speaker label needs another save attempt."))
+      setPersistentAppAlert(getUserFacingErrorMessage(caughtError, "Speaker label needs another save attempt."))
     }
   }
 
@@ -4316,6 +4429,12 @@ function App() {
   }
 
   const handleStartRecording = async (payload: StartRecordingPayload) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      const message = "Save or revert the contact note changes before starting a call."
+      setPersistentAppAlert(message)
+      return { message, ok: false as const }
+    }
+
     if (!activeWorkspaceId) {
       return {
         message: "Choose or create a workspace before starting a call.",
@@ -4823,10 +4942,6 @@ function App() {
       }
 
       startingRecordingRef.current = true
-      if (pageLoadTimeoutRef.current !== null) {
-        window.clearTimeout(pageLoadTimeoutRef.current)
-        pageLoadTimeoutRef.current = null
-      }
       setActiveAccountId(accountId)
       setActiveOpportunityId(opportunityId)
       setActiveCallId(call.id)
@@ -4836,7 +4951,6 @@ function App() {
       setActiveCallStartedAt(startedAt)
       setCallType(payload.callType)
       setCallPlaybooks(selectedPlaybooks)
-      setPageLoadingView(null)
       blurFocusedNavigationElement()
       setActiveView("workspace")
       requestNavigationScrollReset()
@@ -5651,6 +5765,7 @@ function App() {
   }
 
   const handleAuthModeChange = (mode: AuthMode) => {
+    setPasswordRecoveryActive(false)
     setPublicMarketingPath(null)
     setAuthMode(mode)
     setPublicAuthRoute(mode)
@@ -5663,6 +5778,7 @@ function App() {
   }
 
   const handleLandingLogin = () => {
+    setPasswordRecoveryActive(false)
     setLegalPage(null)
     setPublicMarketingPath(null)
     setAuthMode("login")
@@ -5675,6 +5791,7 @@ function App() {
   }
 
   const handleLandingSignup = () => {
+    setPasswordRecoveryActive(false)
     setLegalPage(null)
     setPublicMarketingPath(null)
     setAuthMode("signup")
@@ -5840,7 +5957,7 @@ function App() {
     setAuthStatusMessage("")
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: getAuthRedirectUrl("/login"),
+        redirectTo: `${getAuthRedirectUrl("/login")}?recovery=1`,
       })
 
       setAuthStatusTone(error ? "error" : "success")
@@ -5855,6 +5972,65 @@ function App() {
     } finally {
       setAuthSubmitting(false)
     }
+  }
+
+  const handlePasswordRecovery = async (values: PasswordRecoveryFormValues) => {
+    if (values.password.length < 8) {
+      setAuthStatusTone("error")
+      setAuthStatusMessage("Password must be at least 8 characters.")
+      return
+    }
+
+    if (values.password !== values.confirmPassword) {
+      setAuthStatusTone("error")
+      setAuthStatusMessage("Passwords do not match.")
+      return
+    }
+
+    if (!supabase || !passwordRecoveryActive) {
+      setAuthStatusTone("error")
+      setAuthStatusMessage("This password reset link has expired. Request a new one from sign in.")
+      return
+    }
+
+    setAuthSubmitting(true)
+    setAuthStatusTone("info")
+    setAuthStatusMessage("")
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password: values.password })
+      if (error) {
+        setAuthStatusTone("error")
+        setAuthStatusMessage(getUserFacingErrorMessage(error, "Password update needs another try."))
+        return
+      }
+
+      await supabase.auth.signOut()
+      setAuthSession(null)
+      setPasswordRecoveryActive(false)
+      setAuthMode("login")
+      setPublicAuthRoute("login")
+      window.history.replaceState(null, "", "/login")
+      setAuthStatusTone("success")
+      setAuthStatusMessage("Password updated. Sign in with your new password.")
+    } catch (caughtError: unknown) {
+      setAuthStatusTone("error")
+      setAuthStatusMessage(getUserFacingErrorMessage(caughtError, "Password update needs another try."))
+    } finally {
+      setAuthSubmitting(false)
+    }
+  }
+
+  const handlePasswordRecoveryCancel = async () => {
+    if (supabase) await supabase.auth.signOut().catch(() => undefined)
+
+    setAuthSession(null)
+    setPasswordRecoveryActive(false)
+    setAuthMode("login")
+    setPublicAuthRoute("login")
+    window.history.replaceState(null, "", "/login")
+    setAuthStatusTone("info")
+    setAuthStatusMessage("")
   }
 
   const handleAuthLegalClick = (document: "terms" | "privacy") => {
@@ -5912,14 +6088,6 @@ function App() {
   ) => {
     setIsRecording(false)
     setLoadingWorkspace(null)
-    if (workspaceLoadTimeoutRef.current !== null) {
-      window.clearTimeout(workspaceLoadTimeoutRef.current)
-      workspaceLoadTimeoutRef.current = null
-    }
-    if (pageLoadTimeoutRef.current !== null) {
-      window.clearTimeout(pageLoadTimeoutRef.current)
-      pageLoadTimeoutRef.current = null
-    }
 
     const { error } = supabase ? await supabase.auth.signOut() : { error: null }
 
@@ -5989,6 +6157,11 @@ function App() {
   }, [handleWorkspaceSessionExpired])
 
   const handleAuthLogout = async () => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before signing out.")
+      return
+    }
+
     await signOutAndResetAuthState("landing")
   }
 
@@ -6037,23 +6210,20 @@ function App() {
   }
 
   const handleWorkspaceChange = (workspace: WorkspaceNavItem) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before switching workspaces.")
+      return
+    }
+
     if (isCallLive) {
-      setWorkspaceErrorMessage("Stop the active call before changing workspaces.")
+      setPersistentAppAlert("Stop the active call before changing workspaces.")
       return
     }
 
     ensureAuthenticatedAppRoute()
-    if (workspaceLoadTimeoutRef.current !== null) {
-      window.clearTimeout(workspaceLoadTimeoutRef.current)
-    }
-    if (pageLoadTimeoutRef.current !== null) {
-      window.clearTimeout(pageLoadTimeoutRef.current)
-      pageLoadTimeoutRef.current = null
-    }
 
     setIsRecording(false)
     setElapsed(0)
-    setPageLoadingView(null)
     setOnboardingOpen(false)
     setWorkspaceSetupDraft(null)
     setOnboardingInitialStep(1)
@@ -6074,13 +6244,14 @@ function App() {
       .catch(() => undefined)
     setWorkspaceDataState("loading")
     setLoadingWorkspace(workspace)
-    workspaceLoadTimeoutRef.current = window.setTimeout(() => {
-      setLoadingWorkspace(null)
-      workspaceLoadTimeoutRef.current = null
-    }, minimumWorkspaceLoadMs)
   }
 
   const handleOpenCreateWorkspaceSetup = () => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before creating a workspace.")
+      return
+    }
+
     ensureAuthenticatedAppRoute()
     setOnboardingInitialStep(1)
     setOnboardingCsvImportActive(false)
@@ -6164,6 +6335,10 @@ function App() {
     workspaceIcon: WorkspaceIconId
     workspaceName: string
   }) => {
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      throw new Error("Save or revert the contact note changes before switching workspaces.")
+    }
+
     ensureAuthenticatedAppRoute()
     let targetWorkspaceId = activeWorkspaceId
     let createdWorkspaceNavItem: WorkspaceNavItem | null = null
@@ -6274,11 +6449,9 @@ function App() {
   const isWorkspaceIndependentView =
     settingsViews.includes(activeView) || profileViews.includes(activeView) || playbookViews.includes(activeView)
   const shouldShowWorkspaceState = workspaceDataState !== "ready" && !isWorkspaceIndependentView && !isCallLive
-  const shouldShowPageTransition = Boolean(pageLoadingView) && !loadingWorkspace && !shouldShowWorkspaceState
   const shouldShowMobileStartCall =
     !loadingWorkspace &&
     !shouldShowWorkspaceState &&
-    !shouldShowPageTransition &&
     !isCallLive &&
     mobileStartCallViews.includes(activeView)
   const mobileStartCallHasVisiblePrimaryAction = mobileStartCallInlineActionViews.includes(activeView)
@@ -6296,11 +6469,15 @@ function App() {
     try {
       await sendWorkspaceSessionActivity("stay_signed_in", { force: true })
     } catch (caughtError: unknown) {
-      const message = getUserFacingErrorMessage(caughtError, workspaceSessionExpiredMessage)
-
-      if (message === workspaceSessionExpiredMessage || /session/i.test(message)) {
-        handleWorkspaceSessionExpiredRef.current?.(message)
+      if (isWorkspaceSessionExpiredError(caughtError)) {
+        handleWorkspaceSessionExpiredRef.current?.(workspaceSessionExpiredMessage)
+        return
       }
+
+      setWorkspaceSessionWarningOpen(true)
+      setPersistentAppAlert(
+        getUserFacingErrorMessage(caughtError, "SalesFrame needs another moment to confirm your session. Check your connection, then try again.")
+      )
     }
   }
 
@@ -6388,7 +6565,7 @@ function App() {
     return <AuthLoadingView darkMode={darkMode} onDarkModeChange={setDarkMode} />
   }
 
-  if (!authSession) {
+  if (!authSession || passwordRecoveryActive) {
     if (publicAuthRoute === "landing") {
       return (
         <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} surface="landing" />}>
@@ -6397,7 +6574,11 @@ function App() {
       )
     }
 
-    const renderedAuthMode: AuthMode = publicAuthRoute === "signup" ? "signup" : authMode
+    const renderedAuthMode: AuthPageMode = passwordRecoveryActive
+      ? "recovery"
+      : publicAuthRoute === "signup"
+        ? "signup"
+        : authMode
 
     return (
       <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} />}>
@@ -6408,12 +6589,14 @@ function App() {
         statusMessage={authStatusMessage}
         statusTone={authStatusTone}
         onDarkModeChange={setDarkMode}
-        onBackHome={handleAuthBackHome}
+        onBackHome={passwordRecoveryActive ? handlePasswordRecoveryCancel : handleAuthBackHome}
         onFieldChange={handleAuthFieldChange}
         onForgotPassword={handleForgotPassword}
         onLegalClick={handleAuthLegalClick}
         onLogin={handleAuthLogin}
         onModeChange={handleAuthModeChange}
+        onPasswordRecovery={handlePasswordRecovery}
+        onRecoveryCancel={handlePasswordRecoveryCancel}
         onSignup={handleAuthSignup}
       />
       </React.Suspense>
@@ -6444,6 +6627,12 @@ function App() {
         }}
       >
       <SidebarProvider className="h-svh min-h-0 overflow-hidden">
+        <a
+          href="#salesframe-main"
+          className="fixed left-3 top-3 z-[100] -translate-y-20 rounded-md bg-background px-3 py-2 text-sm font-medium shadow-lg ring-2 ring-ring transition-transform focus:translate-y-0"
+        >
+          Skip to main content
+        </a>
         {persistentAppAlert ? (
           <div
             className="fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-[80] flex w-[min(36rem,calc(100vw-1.5rem))] -translate-x-1/2 items-start gap-3 rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive shadow-lg"
@@ -6457,7 +6646,7 @@ function App() {
               variant="ghost"
               size="icon-sm"
               className="size-11 shrink-0 md:size-8"
-              aria-label="Dismiss contact recovery warning"
+              aria-label="Dismiss notification"
               onClick={() => setPersistentAppAlert("")}
             >
               <XIcon />
@@ -6539,6 +6728,7 @@ function App() {
             onOpportunitySelect={handleOpportunitySelect}
           />
           <main
+            id="salesframe-main"
             ref={appMainScrollRef}
             aria-label={viewLabels[activeView] ?? "SalesFrame workspace"}
             tabIndex={-1}
@@ -6551,7 +6741,7 @@ function App() {
                 : "pb-[calc(1rem+env(safe-area-inset-bottom))]"
             )}
           >
-            {loadingWorkspace || shouldShowWorkspaceState || shouldShowPageTransition || activeView === "home" ? null : callSurfaceViews.includes(activeView) ? (
+            {loadingWorkspace || shouldShowWorkspaceState || activeView === "home" ? null : callSurfaceViews.includes(activeView) ? (
               <CommandBar
                 account={activeAccount}
                 callType={callType}
@@ -6600,8 +6790,6 @@ function App() {
                   onRetry={handleRetryWorkspaceState}
                 />
               )
-            ) : shouldShowPageTransition ? (
-              <PageTransitionSkeleton activeView={pageLoadingView ?? activeView} />
             ) : activeView === "home" ? (
               <HomeDashboard
                 accounts={workspaceAccounts}
@@ -6647,8 +6835,9 @@ function App() {
                 playbookFields={workspacePlaybookFields}
                 playbookRows={workspacePlaybooks}
                 postCallFocusCallId={postCallFocusCallId}
-                postCallGenerating={postCallGenerating}
-                postCallError={postCallError}
+                postCallGenerating={activePostCallGenerating}
+                postCallRetryBlocked={activePostCallRetryBlocked}
+                postCallError={activePostCallError}
                 postCallOutput={activePostCallOutput}
                 postCallTranscript={activePostCallTranscript}
                 savedOpenAiKeyState={savedOpenAiKeyState}
@@ -6669,6 +6858,7 @@ function App() {
                 onArchiveOpportunity={handleRequestArchiveOpportunity}
                 onDeleteOpportunity={handleRequestDeleteOpportunity}
                 onSaveOpportunityDraft={handleSaveActiveOpportunityDraft}
+                onRetryPostCallOutputs={handleRetryPostCallOutputs}
                 onScrollToTop={requestNavigationScrollReset}
                 onStartRecording={handleStartRecording}
                 onStopRecording={() => handleRecordingChange(false)}
@@ -7104,7 +7294,7 @@ function WorkspaceOnboardingDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[min(92svh,760px)] overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:max-w-xl"
+        className="grid max-h-[min(92dvh,760px)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden max-sm:max-h-[calc(100dvh_-_0.75rem)] max-sm:max-w-[calc(100%_-_0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:max-w-xl"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -7119,7 +7309,7 @@ function WorkspaceOnboardingDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4">
+        <div className="grid min-h-0 gap-4 overflow-y-auto overscroll-contain pr-1">
           <p className="sr-only" aria-live="polite">
             Step {step} of {stepItems.length}: {currentStepItem.label}
           </p>
@@ -7470,15 +7660,27 @@ function AppHeader({
           onOpportunitySelect={onOpportunitySelect}
         />
         {isRecording ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="hidden h-8 gap-1.5 md:inline-flex"
-            onClick={() => onNavigate("workspace")}
-          >
-            <RadioIcon className="size-3" />
-            Active call
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              size="icon"
+              className="relative size-11 md:hidden"
+              aria-label="Return to active call"
+              onClick={() => onNavigate("workspace")}
+            >
+              <RadioIcon className="size-4" />
+              <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-destructive" aria-hidden="true" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="hidden h-8 gap-1.5 md:inline-flex"
+              onClick={() => onNavigate("workspace")}
+            >
+              <RadioIcon className="size-3" />
+              Active call
+            </Button>
+          </>
         ) : null}
         <Button
           variant="ghost"
@@ -7850,6 +8052,7 @@ function GlobalSearch({
           const nextTarget = event.relatedTarget
           if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
           setFocused(false)
+          setQuery("")
         }}
         onFocusCapture={() => {
           if (!suppressDesktopFocusOpenRef.current) setFocused(true)
@@ -8373,7 +8576,7 @@ function AudioSetupMeter({
           style={{ width: `${meterValue}%` }}
         />
       </div>
-      <p className="truncate text-xs text-muted-foreground" title={guidance}>
+      <p className="break-words text-xs leading-relaxed text-muted-foreground">
         {guidance}
       </p>
     </div>
@@ -8514,6 +8717,8 @@ function StartRecordingDialog({
   const startAbortControllerRef = React.useRef<AbortController | null>(null)
   const microphonePreviewStreamRef = React.useRef<MediaStream | null>(null)
   const meetingAudioPreviewStreamRef = React.useRef<MediaStream | null>(null)
+  const meetingAudioRequestIdRef = React.useRef(0)
+  const startCallOpenRef = React.useRef(open)
   const startCallBodyScrollRef = React.useRef<HTMLDivElement | null>(null)
 
   const selectedAccount = accounts.find((account) => account.id === accountId)
@@ -8656,7 +8861,10 @@ function StartRecordingDialog({
     setMicrophonePreviewChecking(false)
   }, [])
 
-  const clearMeetingAudioPreview = React.useCallback((options: { stop?: boolean } = {}) => {
+  const clearMeetingAudioPreview = React.useCallback((options: { invalidateRequest?: boolean; stop?: boolean } = {}) => {
+    if (options.invalidateRequest ?? true) {
+      meetingAudioRequestIdRef.current += 1
+    }
     if (options.stop ?? true) {
       stopMediaStream(meetingAudioPreviewStreamRef.current)
     }
@@ -8681,12 +8889,19 @@ function StartRecordingDialog({
       setMeetingAudioPreviewError(getSharedAudioUnsupportedMessage())
       return
     }
+    if (meetingAudioSelecting) return
 
+    const requestId = meetingAudioRequestIdRef.current + 1
+    meetingAudioRequestIdRef.current = requestId
     setMeetingAudioSelecting(true)
     setMeetingAudioPreviewError("")
 
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia(getMeetingAudioDisplayOptions())
+      if (requestId !== meetingAudioRequestIdRef.current || !startCallOpenRef.current) {
+        stopMediaStream(stream)
+        return
+      }
       const surface = stream.getVideoTracks()[0]?.getSettings?.().displaySurface
 
       if (stream.getAudioTracks().length === 0) {
@@ -8695,7 +8910,7 @@ function StartRecordingDialog({
         return
       }
 
-      clearMeetingAudioPreview()
+      clearMeetingAudioPreview({ invalidateRequest: false })
       meetingAudioPreviewStreamRef.current = stream
       setMeetingAudioPreviewStream(stream)
       setMeetingAudioSurface(surface)
@@ -8714,11 +8929,14 @@ function StartRecordingDialog({
         )
       })
     } catch (error: unknown) {
+      if (requestId !== meetingAudioRequestIdRef.current || !startCallOpenRef.current) return
       setMeetingAudioPreviewError(
         getUserFacingErrorMessage(error, "Shared audio needs another connection attempt. Try the browser picker again.")
       )
     } finally {
-      setMeetingAudioSelecting(false)
+      if (requestId === meetingAudioRequestIdRef.current && startCallOpenRef.current) {
+        setMeetingAudioSelecting(false)
+      }
     }
   }
 
@@ -8726,9 +8944,11 @@ function StartRecordingDialog({
     const accountResearch = accountResearchById[nextAccountId]
 
     setCustomerResearchEnabled(accountResearch?.enabled ?? false)
-    setSellerCompany(accountResearch?.sellerCompany ?? sellerResearchProfile.sellerCompany)
-    setSellerDomain(accountResearch?.sellerDomain ?? sellerResearchProfile.sellerDomain)
-    setProductContext(accountResearch?.productContext ?? sellerResearchProfile.productContext)
+    // Historical customer-research runs retain their seller snapshot for auditability,
+    // but a new call should always start from the workspace's current seller profile.
+    setSellerCompany(sellerResearchProfile.sellerCompany)
+    setSellerDomain(sellerResearchProfile.sellerDomain)
+    setProductContext(sellerResearchProfile.productContext)
     setResearchProfileMessage("")
     setResearchProfileStatus("idle")
   }
@@ -8840,11 +9060,7 @@ function StartRecordingDialog({
 
       try {
         const permissionRequest = navigator.mediaDevices.getUserMedia({
-          audio: getMicrophoneAudioConstraints({
-            deviceId: selectedAudioInputDeviceId,
-            hasMeetingAudio: selectedAudioSourceChoice === "two_channels",
-            mode: audioCaptureMode,
-          }),
+          audio: getMicrophonePreviewAudioConstraints(selectedAudioInputDeviceId),
         })
         void permissionRequest
           .then((lateStream) => {
@@ -8903,12 +9119,10 @@ function StartRecordingDialog({
       }
     }
   }, [
-    audioCaptureMode,
     clearMicrophonePreview,
     open,
     refreshAudioDevices,
     selectedAudioInputDeviceId,
-    selectedAudioSourceChoice,
     startSubmitting,
     step,
   ])
@@ -8970,6 +9184,7 @@ function StartRecordingDialog({
   const handleOpenChange = (value: boolean) => {
     if (!value && startSubmitting) return
 
+    startCallOpenRef.current = value
     setOpen(value)
     setStep(1)
     if (value) {
@@ -9142,6 +9357,7 @@ function StartRecordingDialog({
     setStartError("")
     clearMicrophonePreview()
     clearMeetingAudioPreview()
+    startCallOpenRef.current = false
     setOpen(false)
     setStep(1)
   }
@@ -9307,6 +9523,7 @@ function StartRecordingDialog({
       setStartProgress(100)
       await new Promise((resolve) => window.setTimeout(resolve, 250))
       startSucceeded = true
+      startCallOpenRef.current = false
       setOpen(false)
       setStep(1)
     } catch (caughtError: unknown) {
@@ -9481,9 +9698,13 @@ function StartRecordingDialog({
                     ) : (
                       <div className="grid gap-2 sm:grid-cols-2">
                         <div className="grid gap-2">
-                          <Label htmlFor="recording-account-name">Account name</Label>
+                          <Label htmlFor="recording-account-name">
+                            Account name <span aria-hidden="true">*</span>
+                          </Label>
                           <Input
                             id="recording-account-name"
+                            required
+                            aria-required="true"
                             value={accountName}
                             placeholder="e.g. Southern Cross Energy"
                             onChange={(event) => setAccountName(event.currentTarget.value)}
@@ -9567,9 +9788,13 @@ function StartRecordingDialog({
                       </div>
                     ) : (
                       <div className="grid gap-2">
-                        <Label htmlFor="recording-opportunity-name">Opportunity name</Label>
+                        <Label htmlFor="recording-opportunity-name">
+                          Opportunity name <span aria-hidden="true">*</span>
+                        </Label>
                         <Input
                           id="recording-opportunity-name"
+                          required
+                          aria-required="true"
                           value={opportunityName}
                           placeholder="e.g. Field Service Modernisation"
                           onChange={(event) => setOpportunityName(event.currentTarget.value)}
@@ -9622,7 +9847,11 @@ function StartRecordingDialog({
                           setMeetingAudioPreviewError("")
                         }}
                       >
-                        <SelectTrigger id="recording-audio-source" className="w-full min-w-0 [&>span]:truncate">
+                        <SelectTrigger
+                          id="recording-audio-source"
+                          aria-describedby="recording-audio-source-help"
+                          className="w-full min-w-0 [&>span]:truncate"
+                        >
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -9635,6 +9864,9 @@ function StartRecordingDialog({
                           </SelectItem>
                         </SelectContent>
                       </Select>
+                      <p id="recording-audio-source-help" className="text-xs leading-snug text-muted-foreground">
+                        Two-channel audio becomes available when browser-tab capture is enabled in Settings. Meeting bot is not available yet.
+                      </p>
                     </div>
                     <div className="grid min-w-0 gap-2">
                       <Label htmlFor="recording-playbooks">Playbooks</Label>
@@ -10027,7 +10259,7 @@ function StartRecordingDialog({
                 <Button
                   className="gap-2"
                   onClick={() => {
-                    setOpen(false)
+                    handleOpenChange(false)
                     onOpenSettings?.()
                   }}
                 >
@@ -10052,7 +10284,7 @@ function StartRecordingDialog({
     return (
       <Drawer open={open} onOpenChange={handleOpenChange} showSwipeHandle>
         <DrawerTrigger asChild>{startCallTrigger}</DrawerTrigger>
-        <DrawerContent className="grid max-h-[92svh] min-h-[min(640px,92svh)] min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] overflow-hidden px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-0 text-left data-[vaul-drawer-direction=bottom]:max-h-[92svh] [&_[data-slot=button]]:min-h-11 [&_[data-slot=button]]:px-4 [&_[data-slot=input]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11">
+        <DrawerContent className="grid max-h-[92dvh] min-h-[min(640px,92dvh)] min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] overflow-hidden px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-0 text-left data-[vaul-drawer-direction=bottom]:max-h-[92dvh] [&_[data-slot=button]]:min-h-11 [&_[data-slot=button]]:px-4 [&_[data-slot=input]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11">
           <DrawerHeader className="relative z-10 bg-background px-0 pb-0 pt-3 text-left group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
             <DrawerTitle>Start call</DrawerTitle>
             <DrawerDescription>{startCallDescription}</DrawerDescription>
@@ -10067,7 +10299,7 @@ function StartRecordingDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>{startCallTrigger}</DialogTrigger>
       <DialogContent
-        className="grid max-h-[calc(100svh-2rem)] min-w-0 overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:gap-3 max-sm:p-3 max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-3xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        className="grid max-h-[calc(100dvh_-_2rem)] min-w-0 overflow-hidden max-sm:max-h-[calc(100dvh_-_0.75rem)] max-sm:max-w-[calc(100%_-_0.75rem)] max-sm:gap-3 max-sm:p-3 max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-3xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -10511,9 +10743,13 @@ function CreateAccountDialog({
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-2">
-                <Label htmlFor="create-account-name">Account name</Label>
+                <Label htmlFor="create-account-name">
+                  Account name <span aria-hidden="true">*</span>
+                </Label>
                 <Input
                   id="create-account-name"
+                  required
+                  aria-required="true"
                   value={accountName}
                   placeholder="e.g. Southern Cross Energy"
                   onChange={(event) => setAccountName(event.currentTarget.value)}
@@ -10569,7 +10805,7 @@ function CreateAccountDialog({
                 </Button>
               </div>
             ) : null}
-            <p className="text-xs text-muted-foreground">Only account name is required. Add what you know now; SalesFrame can help fill the rest from the account record.</p>
+            <p className="text-xs text-muted-foreground">Add an account name and connect the workspace OpenAI key. The remaining account and research fields are optional.</p>
           </div>
         ) : null}
 
@@ -10803,9 +11039,13 @@ function CreateAccountDialog({
             {createOpportunity ? (
               <div className="grid gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="create-opportunity-name">Opportunity name</Label>
+                  <Label htmlFor="create-opportunity-name">
+                    Opportunity name <span aria-hidden="true">*</span>
+                  </Label>
                   <Input
                     id="create-opportunity-name"
+                    required
+                    aria-required="true"
                     value={opportunityName}
                     placeholder="e.g. Digital Service Modernisation"
                     onChange={(event) => setOpportunityName(event.currentTarget.value)}
@@ -10831,7 +11071,7 @@ function CreateAccountDialog({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {["Qualification", "Discovery", "Validation", "Proposal", "Negotiation"].map((item) => (
+                            {opportunityStageOptions.map((item) => (
                               <SelectItem key={item} value={item}>
                                 {item}
                               </SelectItem>
@@ -11082,9 +11322,13 @@ function EditAccountDialog({
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label htmlFor="edit-account-name">Account name</Label>
+              <Label htmlFor="edit-account-name">
+                Account name <span aria-hidden="true">*</span>
+              </Label>
               <Input
                 id="edit-account-name"
+                required
+                aria-required="true"
                 value={accountName}
                 placeholder="Account name"
                 onChange={(event) => setAccountName(event.currentTarget.value)}
@@ -11333,9 +11577,13 @@ function CreateOpportunityDialog({
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="add-opportunity-name">Opportunity name</Label>
+              <Label htmlFor="add-opportunity-name">
+                Opportunity name <span aria-hidden="true">*</span>
+              </Label>
               <Input
                 id="add-opportunity-name"
+                required
+                aria-required="true"
                 value={opportunityName}
                 placeholder="e.g. Customer Service Modernisation"
                 onChange={(event) => setOpportunityName(event.currentTarget.value)}
@@ -11350,7 +11598,7 @@ function CreateOpportunityDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {["Qualification", "Discovery", "Validation", "Demo", "Business case", "Proposal", "Negotiation"].map((item) => (
+                  {opportunityStageOptions.map((item) => (
                     <SelectItem key={item} value={item}>
                       {item}
                     </SelectItem>
@@ -11642,9 +11890,13 @@ function EditOpportunityDialog({
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-opportunity-name">Opportunity name</Label>
+              <Label htmlFor="edit-opportunity-name">
+                Opportunity name <span aria-hidden="true">*</span>
+              </Label>
               <Input
                 id="edit-opportunity-name"
+                required
+                aria-required="true"
                 value={opportunityName}
                 placeholder="Opportunity name"
                 onChange={(event) => setOpportunityName(event.currentTarget.value)}
@@ -11659,7 +11911,7 @@ function EditOpportunityDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {["Qualification", "Discovery", "Validation", "Demo", "Business case", "Proposal", "Negotiation", "Closed won"].map((item) => (
+                  {opportunityStageOptions.map((item) => (
                     <SelectItem key={item} value={item}>
                       {item}
                     </SelectItem>
@@ -11949,6 +12201,8 @@ function PlaybookMultiSelect({
   onChange: (value: CallPlaybook[]) => void
 }) {
   const [open, setOpen] = React.useState(false)
+  const listboxId = React.useId()
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null)
   const selectedPlaybooks = normalizePlaybooks(value)
   const visiblePlaybooks = selectedPlaybooks.slice(0, 2)
   const hiddenPlaybookCount = Math.max(0, selectedPlaybooks.length - visiblePlaybooks.length)
@@ -11979,16 +12233,38 @@ function PlaybookMultiSelect({
     event.preventDefault()
     container.scrollTop = Math.min(maxScrollTop, Math.max(0, container.scrollTop + event.deltaY))
   }
+  const handleOptionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const options = Array.from(
+      event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? []
+    )
+    const currentIndex = options.indexOf(event.currentTarget)
+    const nextIndex = event.key === "ArrowDown"
+      ? Math.min(options.length - 1, currentIndex + 1)
+      : event.key === "ArrowUp"
+        ? Math.max(0, currentIndex - 1)
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? options.length - 1
+            : null
+
+    if (nextIndex !== null) {
+      event.preventDefault()
+      options[nextIndex]?.focus()
+    }
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
+          ref={triggerRef}
           id={id}
           type="button"
           variant="outline"
           className="h-auto min-h-11 w-full min-w-0 justify-between gap-2 px-3 py-2 text-left font-normal md:min-h-9"
           aria-expanded={open}
+          aria-controls={listboxId}
           aria-haspopup="listbox"
           aria-label={`Selected playbooks: ${selectedPlaybookLabel}`}
           title={selectedPlaybookLabel}
@@ -12003,6 +12279,7 @@ function PlaybookMultiSelect({
         </Button>
       </PopoverTrigger>
       <PopoverContent
+        id={listboxId}
         align="end"
         side="top"
         sideOffset={6}
@@ -12016,6 +12293,7 @@ function PlaybookMultiSelect({
           event.preventDefault()
           event.stopPropagation()
           setOpen(false)
+          window.requestAnimationFrame(() => triggerRef.current?.focus())
         }}
       >
         <div
@@ -12035,6 +12313,7 @@ function PlaybookMultiSelect({
                 aria-selected={isSelected}
                 className="grid min-h-11 w-full grid-cols-[20px_1fr] gap-2 rounded-md px-2 py-2 text-left transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => togglePlaybook(playbook)}
+                onKeyDown={handleOptionKeyDown}
               >
                 <span
                   className={cn(
@@ -12184,7 +12463,13 @@ function HomeDashboard({
               const account = accountById.get(opportunity.accountId)
 
               return (
-                <div key={`${opportunity.id}-coverage`} className="grid gap-2">
+                <button
+                  key={`${opportunity.id}-coverage`}
+                  type="button"
+                  className="grid min-h-11 gap-2 rounded-lg p-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={`Open ${opportunity.name}`}
+                  onClick={() => onOpportunitySelect(opportunity.id)}
+                >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{opportunity.name}</p>
@@ -12194,10 +12479,11 @@ function HomeDashboard({
                   </div>
                   <CoverageProgress
                     value={opportunity.coverage}
+                    label={`${opportunity.name} methodology coverage`}
                     className="h-2"
                     data-testid="dashboard-coverage-bar"
                   />
-                </div>
+                </button>
               )
             })
           ) : (
@@ -12328,7 +12614,11 @@ function HomeDashboard({
                           </span>
                           <span className="text-xs font-medium">{opportunity.coverage}%</span>
                         </div>
-                        <CoverageProgress value={opportunity.coverage} className="h-1.5" />
+                        <CoverageProgress
+                          value={opportunity.coverage}
+                          label={`${opportunity.name} methodology coverage`}
+                          className="h-1.5"
+                        />
                       </div>
                     </div>
                   )
@@ -12527,10 +12817,12 @@ function getCoverageBadgeClassName(value: number) {
 
 function CoverageProgress({
   value,
+  label = "Methodology coverage",
   className,
   "data-testid": dataTestId,
 }: {
   value: number
+  label?: string
   className?: string
   "data-testid"?: string
 }) {
@@ -12539,6 +12831,7 @@ function CoverageProgress({
   return (
     <Progress
       value={value}
+      aria-label={`${label}, ${value}%`}
       className={className}
       indicatorClassName={getCoverageIndicatorClassName(value)}
       data-coverage-tone={tone}
@@ -12779,6 +13072,7 @@ function AccountView({
                 <EditableTextField
                   id="account-name"
                   label="Account name"
+                  required
                   value={accountDraft.accountName}
                   onChange={(value) => onAccountDraftChange("accountName", value)}
                 />
@@ -12882,7 +13176,7 @@ function AccountView({
             </CardHeader>
             <CardContent className="grid gap-3">
               {opportunities.length ? (
-                <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_160px]">
+                <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_180px_160px]">
                   <div className="relative">
                     <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
@@ -12923,7 +13217,7 @@ function AccountView({
                 </div>
               ) : null}
               {visibleOpportunities.length ? (
-                <div className="grid gap-2 md:hidden" data-testid="account-opportunities-mobile-list">
+                <div className="grid gap-2 2xl:hidden" data-testid="account-opportunities-mobile-list">
                   {visibleOpportunities.map((opportunity) => (
                     <div
                       key={`${opportunity.id}-mobile`}
@@ -12977,6 +13271,7 @@ function AccountView({
                         </div>
                         <CoverageProgress
                           value={opportunity.coverage}
+                          label={`${opportunity.name} methodology coverage`}
                           className="h-1.5"
                           data-testid="account-opportunity-mobile-coverage-bar"
                         />
@@ -12989,7 +13284,7 @@ function AccountView({
                 </div>
               ) : null}
               {visibleOpportunities.length ? (
-                <div className="hidden w-full overflow-hidden rounded-lg border md:block" data-testid="account-opportunities-table">
+                <div className="hidden w-full overflow-hidden rounded-lg border 2xl:block" data-testid="account-opportunities-table">
                   <table className="w-full table-fixed text-sm">
                     <thead>
                       <tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
@@ -13006,17 +13301,7 @@ function AccountView({
                       {visibleOpportunities.map((opportunity) => (
                         <tr
                           key={opportunity.id}
-                          className="cursor-pointer border-b transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring last:border-b-0"
-                          tabIndex={0}
-                          aria-label={`Open ${opportunity.name}`}
-                          onClick={() => onOpportunitySelect(opportunity.id)}
-                          onKeyDown={(event) => {
-                            if (event.target !== event.currentTarget) return
-                            if (event.key !== "Enter" && event.key !== " ") return
-
-                            event.preventDefault()
-                            onOpportunitySelect(opportunity.id)
-                          }}
+                          className="border-b transition-colors duration-150 hover:bg-muted/30 last:border-b-0"
                         >
                           <td className="min-w-0 px-3 py-3 align-middle">
                             <button
@@ -13053,6 +13338,7 @@ function AccountView({
                               </div>
                               <CoverageProgress
                                 value={opportunity.coverage}
+                                label={`${opportunity.name} methodology coverage`}
                                 className="h-1.5"
                                 data-testid="account-opportunity-coverage-bar"
                               />
@@ -13063,11 +13349,7 @@ function AccountView({
                               {opportunity.missing} missing
                             </span>
                           </td>
-                          <td
-                            className="px-2 py-3 text-right align-middle"
-                            onClick={(event) => event.stopPropagation()}
-                            onKeyDown={(event) => event.stopPropagation()}
-                          >
+                          <td className="px-2 py-3 text-right align-middle">
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button
@@ -13076,13 +13358,12 @@ function AccountView({
                                   variant="outline"
                                   className="min-w-[104px] justify-center gap-1.5"
                                   aria-label={`Actions for ${opportunity.name}`}
-                                  onClick={(event) => event.stopPropagation()}
                                 >
                                   Actions
                                   <ChevronDownIcon className="size-3.5" />
                                 </Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-44" onClick={(event) => event.stopPropagation()}>
+                              <DropdownMenuContent align="end" className="w-44">
                                 <DropdownMenuItem onSelect={() => onOpportunitySelect(opportunity.id)}>
                                   <ExternalLinkIcon />
                                   Open
@@ -13535,6 +13816,7 @@ function WorkspaceView({
   playbookRows,
   postCallFocusCallId,
   postCallGenerating,
+  postCallRetryBlocked,
   postCallError,
   postCallOutput,
   postCallTranscript,
@@ -13554,6 +13836,7 @@ function WorkspaceView({
   onArchiveOpportunity,
   onDeleteOpportunity,
   onSaveOpportunityDraft,
+  onRetryPostCallOutputs,
   onScrollToTop,
   onStartRecording,
   onStopRecording,
@@ -13591,6 +13874,7 @@ function WorkspaceView({
   playbookRows: PlaybookRow[]
   postCallFocusCallId: string
   postCallGenerating: boolean
+  postCallRetryBlocked: boolean
   postCallError: string
   postCallOutput: PostCallOutputView | null
   postCallTranscript: Opportunity["transcript"]
@@ -13610,6 +13894,7 @@ function WorkspaceView({
   onArchiveOpportunity: (id: string) => void
   onDeleteOpportunity: (id: string) => void
   onSaveOpportunityDraft: () => void
+  onRetryPostCallOutputs: (callId: string) => void | Promise<void>
   onScrollToTop: () => void
   onStartRecording: StartRecordingHandler
   onStopRecording: () => void | Promise<void>
@@ -14292,7 +14577,15 @@ function WorkspaceView({
   ])
 
   return (
-    <Tabs key={defaultTab} defaultValue={defaultTab} className="grid w-full min-w-0 gap-4" onValueChange={onScrollToTop}>
+    <Tabs
+      value={defaultTab}
+      className="grid w-full min-w-0 gap-4"
+      onValueChange={(value) => {
+        onScrollToTop()
+        onNavigate(value === "opportunity" ? "opportunity-record" : value === "post-call" ? "post-call" : "workspace")
+      }}
+    >
+      <h1 className="sr-only">{account.name} — {opportunity.name}</h1>
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <TabsList className="grid w-full grid-cols-3 md:w-fit">
           <TabsTrigger value="opportunity">Opportunity</TabsTrigger>
@@ -14301,33 +14594,9 @@ function WorkspaceView({
         </TabsList>
       </div>
 
-      <TabsContent value="cockpit" className="m-0 grid w-full min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="flex w-full flex-wrap justify-start gap-2 2xl:col-span-2">
-          {isRecording ? (
-            <Button
-              className="gap-2"
-              disabled={isStoppingCall}
-              variant="destructive"
-              onClick={() => void onStopRecording()}
-            >
-              <SquareIcon />
-              {isStoppingCall ? "Stopping call" : "Stop call"}
-            </Button>
-          ) : account.id && opportunity.id ? (
-            <StartRecordingDialog
-              accounts={[account]}
-              accountResearchById={accountResearchById}
-              defaultAccountId={account.id}
-              defaultOpportunityId={opportunity.id}
-              opportunityDrafts={opportunityDrafts}
-              opportunities={[opportunity]}
-              savedOpenAiKeyState={savedOpenAiKeyState}
-              sellerResearchProfile={sellerResearchProfile}
-              workspaceId={workspaceId}
-              onOpenSettings={onOpenSettings}
-              onStartRecording={onStartRecording}
-            />
-          ) : null}
+      <TabsContent value="cockpit" className="m-0 grid w-full min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        {shouldShowCoachPopoutButton || coachPopoutMessage ? (
+        <div className="flex w-full flex-wrap justify-start gap-2 xl:col-span-2">
           {shouldShowCoachPopoutButton ? (
             <Button
               type="button"
@@ -14345,6 +14614,7 @@ function WorkspaceView({
             </p>
           ) : null}
         </div>
+        ) : null}
         <div className="grid min-w-0 gap-4">
           <NextQuestionCard
             callType={callType}
@@ -14376,29 +14646,13 @@ function WorkspaceView({
           searchQuery=""
           sellerName={sellerName}
           speakerIdentities={speakerIdentities}
-          startCallAction={
-            account.id && opportunity.id ? (
-              <StartRecordingDialog
-                accounts={[account]}
-                accountResearchById={accountResearchById}
-                defaultAccountId={account.id}
-                defaultOpportunityId={opportunity.id}
-                opportunityDrafts={opportunityDrafts}
-                opportunities={[opportunity]}
-                savedOpenAiKeyState={savedOpenAiKeyState}
-                sellerResearchProfile={sellerResearchProfile}
-                workspaceId={workspaceId}
-                onOpenSettings={onOpenSettings}
-                onStartRecording={onStartRecording}
-              />
-            ) : null
-          }
+          startCallAction={null}
           onStopRecording={onStopRecording}
           transcript={isRecording ? transcript : []}
         />
       </TabsContent>
 
-      <TabsContent value="opportunity" className="m-0 w-full min-w-0">
+      <TabsContent forceMount value="opportunity" className="m-0 w-full min-w-0 data-[state=inactive]:hidden">
         <OpportunityWorkspace
           activeCallId={activeCallId}
           account={account}
@@ -14434,6 +14688,7 @@ function WorkspaceView({
       <TabsContent value="post-call" className="m-0 w-full min-w-0">
         <PostCallPanel
           isProcessing={postCallGenerating}
+          isRetryBlocked={postCallRetryBlocked}
           opportunity={opportunity}
           output={postCallOutput}
           processingError={postCallError}
@@ -14441,6 +14696,7 @@ function WorkspaceView({
           transcript={postCallTranscript}
           transcriptCall={postCallTranscriptCall}
           onDeleteCall={onDeleteCall}
+          onRetryPostCallOutputs={onRetryPostCallOutputs}
           onViewNextCallBrief={() => onNavigate("opportunity-intelligence")}
         />
       </TabsContent>
@@ -14567,7 +14823,7 @@ function OpportunityWorkspace({
         />
         <AccountRecordPanel account={account} accountDraft={accountDraft} onNavigate={onNavigate} />
       </TabsContent>
-      <TabsContent value="contacts" className="m-0 grid w-full min-w-0 gap-4">
+      <TabsContent forceMount value="contacts" className="m-0 grid w-full min-w-0 gap-4 data-[state=inactive]:hidden">
         <OpportunityContactsCard
           contacts={contacts.filter((contact) => contact.accountId === account.id)}
           opportunityContacts={opportunityContacts.filter(
@@ -14820,7 +15076,7 @@ function NextQuestionCard({
         ) : null}
         {flowNote ? (
           <div
-            className="max-w-5xl truncate rounded-lg bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+            className="max-w-5xl break-words rounded-lg bg-muted/30 px-3 py-2 text-sm leading-relaxed text-muted-foreground"
             role="status"
             aria-live="polite"
           >
@@ -15897,7 +16153,6 @@ function LiveRail({
   )
   const hasSearch = normalizeSearchText(searchQuery).length > 0
   const transcriptScrollRef = React.useRef<HTMLDivElement | null>(null)
-  const transcriptEndRef = React.useRef<HTMLDivElement | null>(null)
   const shouldAutoScrollTranscriptRef = React.useRef(true)
   const transcriptScrollSignature = visibleTranscript
     .map((line) => `${line.clientId ?? line.id}:${line.text.length}:${line.isPartial ? "partial" : "final"}`)
@@ -15943,7 +16198,10 @@ function LiveRail({
     if (hasSearch || !shouldAutoScrollTranscriptRef.current) return
 
     const animationFrame = window.requestAnimationFrame(() => {
-      transcriptEndRef.current?.scrollIntoView({ block: "end" })
+      const container = transcriptScrollRef.current
+      if (!container) return
+
+      container.scrollTo({ top: container.scrollHeight, behavior: "auto" })
     })
 
     return () => window.cancelAnimationFrame(animationFrame)
@@ -15966,7 +16224,7 @@ function LiveRail({
                   : "Waiting for call"
 
   return (
-    <div className="grid gap-4 2xl:sticky 2xl:top-20">
+    <div className="grid gap-4 xl:sticky xl:top-20">
       <Card className="order-2">
         <CardHeader>
           <div>
@@ -16065,6 +16323,11 @@ function LiveRail({
                   <p className="text-muted-foreground">{item.detail}</p>
                 </div>
               ))}
+              {visibleEvidence.length > 6 ? (
+                <p className="rounded-lg bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  Showing 6 of {visibleEvidence.length} evidence items. Review the Methodology tab for the complete qualification record.
+                </p>
+              ) : null}
               {visibleEvidence.length === 0 ? (
                 <LiveCaptureEmptyState
                   icon={<FileTextIcon className="size-4 text-muted-foreground" />}
@@ -16131,7 +16394,6 @@ function LiveRail({
                   message={hasSearch ? "No transcript lines match this search." : "The transcript will appear here as people speak."}
                 />
               ) : null}
-              <div ref={transcriptEndRef} aria-hidden="true" />
             </TabsContent>
           </Tabs>
         </CardContent>
@@ -16475,6 +16737,7 @@ function OpportunityProfile({
           <EditableTextField
             id="opportunity-name"
             label="Opportunity name"
+            required
             value={opportunityDraft.opportunityName}
             onChange={(value) => onOpportunityDraftChange("opportunityName", value)}
           />
@@ -16488,7 +16751,7 @@ function OpportunityProfile({
                 <SelectValue placeholder="Select stage" />
               </SelectTrigger>
               <SelectContent>
-                {["Qualification", "Discovery", "Validation", "Demo", "Business case", "Negotiation", "Closed won"].map((stage) => (
+                {opportunityStageOptions.map((stage) => (
                   <SelectItem key={stage} value={stage}>
                     {stage}
                   </SelectItem>
@@ -16910,6 +17173,7 @@ function OpportunityRecordingHistory({
 
 function PostCallPanel({
   isProcessing,
+  isRetryBlocked,
   opportunity,
   output,
   processingError,
@@ -16917,9 +17181,11 @@ function PostCallPanel({
   transcript,
   transcriptCall,
   onDeleteCall,
+  onRetryPostCallOutputs,
   onViewNextCallBrief,
 }: {
   isProcessing: boolean
+  isRetryBlocked: boolean
   opportunity: Opportunity
   output: PostCallOutputView | null
   processingError: string
@@ -16927,8 +17193,10 @@ function PostCallPanel({
   transcript: Opportunity["transcript"]
   transcriptCall: CallSummary | null
   onDeleteCall: (callId: string) => void
+  onRetryPostCallOutputs: (callId: string) => void | Promise<void>
   onViewNextCallBrief: () => void
 }) {
+  const [transcriptQuery, setTranscriptQuery] = React.useState("")
   const nextCallItems =
     output?.nextCallPlan
       .split(/\n+/)
@@ -16937,6 +17205,19 @@ function PostCallPanel({
   const hasTranscriptLines = transcript.some((line) => line.text.trim())
   const completedCall = replayCall ?? transcriptCall
   const didReachCallLimit = completedCall?.endedReason === "time_limit_reached"
+  const normalizedTranscriptQuery = normalizeSearchText(transcriptQuery)
+  const visibleTranscriptLines = normalizedTranscriptQuery
+    ? transcript.filter((line) => normalizeSearchText([
+        getTranscriptSpeakerDisplayName(line),
+        getTranscriptSpeakerLabel(line),
+        line.time,
+        line.text,
+      ].join(" ")).includes(normalizedTranscriptQuery))
+    : transcript
+
+  React.useEffect(() => {
+    setTranscriptQuery("")
+  }, [completedCall?.id])
 
   return (
     <div className="grid gap-4">
@@ -16959,16 +17240,95 @@ function PostCallPanel({
       {completedCall ? (
         <CallParticipantsSummary callId={completedCall.id} transcript={transcript} />
       ) : null}
+      {completedCall && hasTranscriptLines ? (
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Transcript</CardTitle>
+              <CardDescription>
+                {completedCall.title} · {transcript.length} saved turn{transcript.length === 1 ? "" : "s"}
+              </CardDescription>
+            </div>
+            {!replayCall ? (
+              <CardAction className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => downloadTranscriptFile(completedCall, transcript)}
+                >
+                  <DownloadIcon />
+                  Download
+                </Button>
+                <Button size="sm" variant="destructive" className="gap-2" onClick={() => onDeleteCall(completedCall.id)}>
+                  <Trash2Icon />
+                  Delete
+                </Button>
+              </CardAction>
+            ) : null}
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={transcriptQuery}
+                className="min-h-11 !pl-10 md:min-h-8"
+                aria-label="Search saved transcript"
+                placeholder="Search transcript"
+                onChange={(event) => setTranscriptQuery(event.currentTarget.value)}
+              />
+            </div>
+            <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+              {normalizedTranscriptQuery
+                ? `${visibleTranscriptLines.length} transcript turn${visibleTranscriptLines.length === 1 ? "" : "s"} match your search.`
+                : `${visibleTranscriptLines.length} transcript turn${visibleTranscriptLines.length === 1 ? "" : "s"}.`}
+            </p>
+            <div className="grid max-h-[28rem] gap-2 overflow-y-auto overscroll-contain pr-1">
+              {visibleTranscriptLines.map((line, index) => (
+                <article
+                  key={line.clientId ?? line.id ?? `${line.time}-${index}`}
+                  className="grid min-w-0 gap-2 rounded-lg bg-muted/30 p-3"
+                >
+                  <div className="flex min-w-0 items-center justify-between gap-3">
+                    <p className="truncate text-sm font-medium">{getTranscriptSpeakerDisplayName(line)}</p>
+                    <span className="shrink-0 text-xs text-muted-foreground">{line.time}</span>
+                  </div>
+                  <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-muted-foreground">{line.text}</p>
+                </article>
+              ))}
+              {!visibleTranscriptLines.length ? (
+                <div className="rounded-lg bg-muted/30 p-4 text-sm text-muted-foreground">
+                  No transcript turns match that search.
+                </div>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
       {processingError ? (
         <Card>
           <CardHeader>
             <CardTitle>Post-call AI needs another pass</CardTitle>
             <CardDescription>Your recording and transcript are still saved.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-              SalesFrame did not finish the notes and next-call brief in this attempt. Your recording and transcript are safe. Reopen this call later; if it still fails, contact support.
+          <CardContent className="grid gap-3">
+            <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground" role="alert">
+              SalesFrame did not finish the notes and next-call brief in this attempt. Your recording and transcript are safe. Try the brief again; if it still fails, contact support.
             </div>
+            <Button
+              className="w-fit"
+              disabled={isProcessing || isRetryBlocked || !completedCall}
+              onClick={() => {
+                if (completedCall) void onRetryPostCallOutputs(completedCall.id)
+              }}
+            >
+              {isProcessing ? "Retrying post-call brief..." : "Retry post-call brief"}
+            </Button>
+            {isRetryBlocked ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                Another post-call brief is still finishing. Retry this brief when it completes.
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       ) : isProcessing ? (
@@ -16981,41 +17341,6 @@ function PostCallPanel({
             <div className="grid gap-2">
               <Skeleton className="h-10 rounded-lg" />
               <Skeleton className="h-10 rounded-lg" />
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-      {!replayCall && transcriptCall && hasTranscriptLines ? (
-        <Card>
-          <CardHeader>
-            <div>
-              <CardDescription>Transcript</CardDescription>
-              <CardTitle>{transcriptCall.title}</CardTitle>
-            </div>
-            <CardAction className="col-start-1 row-span-1 row-start-auto mt-3 flex w-full flex-col items-stretch gap-2 justify-self-start sm:col-start-1 sm:row-span-1 sm:row-start-auto sm:mt-3 sm:w-full sm:flex-row sm:items-center sm:justify-self-start">
-              <Button
-                size="sm"
-                variant="outline"
-                className="w-full gap-2 sm:w-auto"
-                onClick={() => downloadTranscriptFile(transcriptCall, transcript)}
-              >
-                <DownloadIcon />
-                Download transcript
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                className="w-full gap-2 sm:w-auto"
-                onClick={() => onDeleteCall(transcriptCall.id)}
-              >
-                <Trash2Icon />
-                Delete call
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-              Audio replay is not available for this call, but the transcript can be downloaded.
             </div>
           </CardContent>
         </Card>
@@ -17098,7 +17423,8 @@ function SortableHeaderButton({
         active && "text-foreground",
         align === "right" && "justify-self-end text-right"
       )}
-      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
+      aria-label={`Sort by ${label}${active ? `, currently ${direction === "asc" ? "ascending" : "descending"}` : ""}`}
+      aria-pressed={active}
       onClick={onClick}
     >
       <span>{label}</span>
@@ -17285,7 +17611,12 @@ function OpportunitiesView({
   const paginatedOpportunities = visibleOpportunities.slice((currentPage - 1) * pageSize, currentPage * pageSize)
   const opportunityRangeStart = visibleOpportunities.length === 0 ? 0 : (currentPage - 1) * pageSize + 1
   const opportunityRangeEnd = Math.min(currentPage * pageSize, visibleOpportunities.length)
-  const hasOpportunityFilters = Boolean(query.trim()) || stageFilter !== "all" || coverageFilter !== "all"
+  const hasOpportunityFilters =
+    Boolean(query.trim()) ||
+    stageFilter !== "all" ||
+    coverageFilter !== "all" ||
+    sort.key !== defaultOpportunityTableSort.key ||
+    sort.direction !== defaultOpportunityTableSort.direction
 
   React.useEffect(() => {
     setPage(1)
@@ -17397,8 +17728,7 @@ function OpportunitiesView({
           <div className="grid gap-3">
             {paginatedOpportunities.length > 0 ? (
               <div
-                className="hidden px-4 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_110px_150px_110px_110px_112px] md:items-center"
-                role="row"
+                className="hidden px-4 text-xs font-medium text-muted-foreground xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_110px_150px_110px_110px_112px] xl:items-center"
               >
                 <SortableHeaderButton
                   active={sort.key === "opportunity"}
@@ -17445,22 +17775,13 @@ function OpportunitiesView({
               return (
                 <div
                   key={opportunity.id}
-                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_110px_150px_110px_110px_112px] md:items-center"
-                  tabIndex={0}
-                  aria-label={`Open ${opportunity.name}`}
+                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-colors duration-150 hover:bg-muted/50 xl:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_110px_150px_110px_110px_112px] xl:items-center"
                   onClick={() => onOpportunitySelect(opportunity.id)}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return
-                    if (event.key !== "Enter" && event.key !== " ") return
-
-                    event.preventDefault()
-                    onOpportunitySelect(opportunity.id)
-                  }}
                 >
                   <div className="min-w-0">
                     <button
                       type="button"
-                      className="flex min-h-11 items-center text-left font-medium leading-snug underline-offset-4 outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring md:min-h-0"
+                      className="flex min-h-11 items-center text-left font-medium leading-snug underline-offset-4 outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring xl:min-h-0"
                       aria-label={`Open ${opportunity.name}`}
                       onClick={(event) => {
                         event.stopPropagation()
@@ -17474,18 +17795,19 @@ function OpportunitiesView({
                     </p>
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground md:hidden">Account</p>
+                    <p className="text-xs text-muted-foreground xl:hidden">Account</p>
                     <p className="truncate text-sm font-medium">{account?.name ?? "No account linked"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground md:hidden">Created</p>
+                    <p className="text-xs text-muted-foreground xl:hidden">Created</p>
                     <p className="truncate text-sm font-medium">{opportunity.createdAt}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground md:hidden">Coverage</p>
+                    <p className="text-xs text-muted-foreground xl:hidden">Coverage</p>
                     <div className="mt-1 flex items-center gap-2">
                       <CoverageProgress
                         value={opportunity.coverage}
+                        label={`${opportunity.name} methodology coverage`}
                         className="h-2"
                         data-testid="opportunity-list-coverage-bar"
                       />
@@ -17493,15 +17815,15 @@ function OpportunitiesView({
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground md:hidden">Missing</p>
+                    <p className="text-xs text-muted-foreground xl:hidden">Missing</p>
                     <p className="text-sm font-medium">{opportunity.missing} fields</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground md:hidden">Close</p>
+                    <p className="text-xs text-muted-foreground xl:hidden">Close</p>
                     <p className="truncate text-sm font-medium">{opportunity.closeDate}</p>
                   </div>
                   <div
-                    className="flex md:justify-end"
+                    className="flex xl:justify-end"
                     onClick={(event) => event.stopPropagation()}
                     onKeyDown={(event) => event.stopPropagation()}
                   >
@@ -17511,7 +17833,7 @@ function OpportunitiesView({
                           type="button"
                           size="sm"
                           variant="outline"
-                          className="h-11 min-w-[104px] justify-center gap-1.5 md:h-7"
+                          className="h-11 min-w-[104px] justify-center gap-1.5 xl:h-7"
                           aria-label={`Actions for ${opportunity.name}`}
                         >
                           Actions
@@ -17680,7 +18002,12 @@ function CallsView({
   )
   const callRangeStart = visibleCalls.length === 0 ? 0 : (safeCallsPage - 1) * callsPageSize + 1
   const callRangeEnd = Math.min(safeCallsPage * callsPageSize, visibleCalls.length)
-  const hasCallFilters = Boolean(query.trim()) || typeFilter !== "all" || statusFilter !== "all"
+  const hasCallFilters =
+    Boolean(query.trim()) ||
+    typeFilter !== "all" ||
+    statusFilter !== "all" ||
+    callSort.key !== defaultCallTableSort.key ||
+    callSort.direction !== defaultCallTableSort.direction
   React.useEffect(() => {
     setCallsPage(1)
   }, [callSort, query, statusFilter, typeFilter])
@@ -17782,8 +18109,7 @@ function CallsView({
           <div className="grid gap-3">
             {paginatedCalls.length > 0 ? (
               <div
-                className="hidden px-4 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_140px_110px_110px_112px] md:items-center"
-                role="row"
+                className="hidden px-4 text-xs font-medium text-muted-foreground xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_140px_110px_110px_112px] xl:items-center"
               >
                 <SortableHeaderButton
                   active={callSort.key === "call"}
@@ -17827,42 +18153,43 @@ function CallsView({
               return (
                 <div
                   key={call.id}
-                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-[background-color,color,box-shadow,opacity] duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_140px_110px_110px_112px] md:items-center"
-                  tabIndex={0}
-                  aria-label={`Open ${call.title}`}
+                  className="grid cursor-pointer gap-3 rounded-lg bg-muted/30 p-4 transition-colors duration-150 hover:bg-muted/50 xl:grid-cols-[minmax(0,1fr)_minmax(8rem,0.75fr)_140px_110px_110px_112px] xl:items-center"
                   onClick={() => onCallSelect(call.id)}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return
-                    if (event.key !== "Enter" && event.key !== " ") return
-
-                    event.preventDefault()
-                    onCallSelect(call.id)
-                  }}
                 >
                   <div className="min-w-0">
-                    <p className="font-medium">{call.title}</p>
+                    <button
+                      type="button"
+                      className="flex min-h-11 items-center text-left font-medium leading-snug underline-offset-4 outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring xl:min-h-0"
+                      aria-label={`Open ${call.title}`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onCallSelect(call.id)
+                      }}
+                    >
+                      {call.title}
+                    </button>
                     <p className="truncate text-sm text-muted-foreground">
                       {relatedOpportunity?.name ?? "No opportunity linked"} · {call.type}
                     </p>
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground md:hidden">Account</p>
+                    <p className="text-xs text-muted-foreground xl:hidden">Account</p>
                     <p className="truncate text-sm font-medium">{relatedAccount?.name ?? "No account linked"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground md:hidden">Status</p>
+                    <p className="text-xs text-muted-foreground xl:hidden">Status</p>
                     <p className={cn("text-sm font-medium", getCallStatusTextClassName(displayStatus))}>{displayStatus}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground md:hidden">Duration</p>
+                    <p className="text-xs text-muted-foreground xl:hidden">Duration</p>
                     <p className="text-sm font-medium">{displayDuration}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground md:hidden">Date</p>
+                    <p className="text-xs text-muted-foreground xl:hidden">Date</p>
                     <p className="truncate text-sm font-medium">{call.date}</p>
                   </div>
                   <div
-                    className="flex md:justify-end"
+                    className="flex xl:justify-end"
                     onClick={(event) => event.stopPropagation()}
                     onKeyDown={(event) => event.stopPropagation()}
                   >
@@ -17872,7 +18199,7 @@ function CallsView({
                           type="button"
                           size="sm"
                           variant="outline"
-                          className="h-11 min-w-[104px] justify-center gap-1.5 md:h-7"
+                          className="h-11 min-w-[104px] justify-center gap-1.5 xl:h-7"
                           aria-label={`Actions for ${call.title}`}
                         >
                           Actions
@@ -20074,12 +20401,15 @@ function SettingsView({
 }) {
   const [apiKey, setApiKey] = React.useState("")
   const [isSavingKey, setIsSavingKey] = React.useState(false)
+  const [keyStatusLoading, setKeyStatusLoading] = React.useState(true)
+  const [keyStatusUnavailable, setKeyStatusUnavailable] = React.useState(false)
   const [saveMessage, setSaveMessage] = React.useState("")
   const [saveMessageTone, setSaveMessageTone] = React.useState<"success" | "error">("success")
   const [captureSettings, setCaptureSettings] = React.useState<CaptureSettings>(() => readCaptureSettings(workspaceId))
   const [captureSettingsMessage, setCaptureSettingsMessage] = React.useState("")
   const [captureSettingsTone, setCaptureSettingsTone] = React.useState<"success" | "warning">("success")
   const [sessionPolicy, setSessionPolicy] = React.useState<WorkspaceSessionPolicy | null>(null)
+  const [sessionPolicyLoading, setSessionPolicyLoading] = React.useState(true)
   const [sessionPolicyMessage, setSessionPolicyMessage] = React.useState("")
   const [sessionPolicyTone, setSessionPolicyTone] = React.useState<"success" | "error">("success")
   const [sessionPolicySaving, setSessionPolicySaving] = React.useState(false)
@@ -20099,6 +20429,7 @@ function SettingsView({
     let cancelled = false
 
     setSessionPolicy(null)
+    setSessionPolicyLoading(Boolean(workspaceId))
     setSessionPolicyMessage("")
     setSessionPolicyTone("success")
 
@@ -20108,9 +20439,11 @@ function SettingsView({
       .then((policy) => {
         if (cancelled) return
         setSessionPolicy(policy)
+        setSessionPolicyLoading(false)
       })
       .catch((caughtError: unknown) => {
         if (cancelled) return
+        setSessionPolicyLoading(false)
         setSessionPolicyMessage(getUserFacingErrorMessage(caughtError, "Session timeout needs another check."))
         setSessionPolicyTone("error")
       })
@@ -20124,19 +20457,27 @@ function SettingsView({
     let cancelled = false
 
     if (!workspaceId) {
+      setKeyStatusLoading(false)
+      setKeyStatusUnavailable(false)
       onSavedKeyStateChange(null)
       return
     }
+
+    setKeyStatusLoading(true)
+    setKeyStatusUnavailable(false)
 
     getOpenAiKeyStatus(workspaceId)
       .then((status) => {
         if (cancelled) return
 
+        setKeyStatusLoading(false)
         onSavedKeyStateChange(mapOpenAiKeyStatusToSavedState(status))
       })
       .catch((caughtError: unknown) => {
         if (cancelled) return
 
+        setKeyStatusLoading(false)
+        setKeyStatusUnavailable(true)
         setSaveMessageTone("error")
         setSaveMessage(getUserFacingErrorMessage(caughtError, "OpenAI key status needs another check."))
       })
@@ -20166,6 +20507,7 @@ function SettingsView({
         }
 
       onSavedKeyStateChange(nextState)
+      setKeyStatusUnavailable(false)
       onKeySaved()
       setApiKey("")
       setSaveMessageTone("success")
@@ -20251,10 +20593,11 @@ function SettingsView({
 
   const keyFeedbackMessage = saveMessage || keyStatusMessage
   const keyFeedbackIsError = saveMessage ? saveMessageTone === "error" : Boolean(keyStatusMessage)
-  const sessionPolicyValue =
-    sessionPolicy?.idle_timeout_seconds === null
+  const sessionPolicyValue = sessionPolicy === null
+    ? undefined
+    : sessionPolicy.idle_timeout_seconds === null
       ? "never"
-      : String(sessionPolicy?.idle_timeout_seconds ?? 3600)
+      : String(sessionPolicy.idle_timeout_seconds)
 
   return (
     <div className="grid gap-4">
@@ -20288,7 +20631,7 @@ function SettingsView({
                     setSaveMessageTone("success")
                   }}
                 />
-                <Button type="button" className="gap-2" disabled={!hasApiKey || isSavingKey} onClick={handleSaveKey}>
+                <Button type="button" className="gap-2" disabled={!hasApiKey || isSavingKey || keyStatusLoading} onClick={handleSaveKey}>
                   {hasSavedKey ? <CheckCircle2Icon /> : <KeyRoundIcon />}
                   {isSavingKey ? "Saving..." : hasSavedKey ? "Replace key" : "Save key"}
                 </Button>
@@ -20296,7 +20639,7 @@ function SettingsView({
                   <Button
                     variant="outline"
                     className="gap-2"
-                    disabled={isSavingKey}
+                    disabled={isSavingKey || keyStatusLoading || keyStatusUnavailable}
                     onClick={() => {
                       setRemoveKeyError("")
                       setRemoveKeyDialogOpen(true)
@@ -20327,13 +20670,23 @@ function SettingsView({
                       <KeyRoundIcon className="size-4 text-muted-foreground" />
                     )}
                     <p className="text-sm font-medium">
-                      {hasSavedKey ? "OpenAI key connected" : "OpenAI key not connected"}
+                      {keyStatusLoading
+                        ? "Checking OpenAI connection"
+                        : keyStatusUnavailable
+                          ? "OpenAI connection unavailable"
+                          : hasSavedKey
+                            ? "OpenAI key connected"
+                            : "OpenAI key not connected"}
                     </p>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {hasSavedKey
-                      ? "AI-assisted workflows can use this connection for enabled features."
-                      : "Add your key to power live questions, notes, enrichment, and post-call outputs for this workspace."}
+                    {keyStatusLoading
+                      ? "SalesFrame is confirming this workspace's saved connection."
+                      : keyStatusUnavailable
+                        ? "SalesFrame needs another connection check. Try again before replacing or removing a key."
+                        : hasSavedKey
+                          ? "AI-assisted workflows can use this connection for enabled features."
+                          : "Add your key to power live questions, notes, enrichment, and post-call outputs for this workspace."}
                   </p>
                 </div>
               </div>
@@ -20455,11 +20808,11 @@ function SettingsView({
               <Label htmlFor="workspace-session-timeout">Auto sign-out after inactivity</Label>
               <Select
                 value={sessionPolicyValue}
-                disabled={!isWorkspaceOwner || sessionPolicySaving || !workspaceId}
+                disabled={!isWorkspaceOwner || sessionPolicyLoading || sessionPolicySaving || !workspaceId || sessionPolicy === null}
                 onValueChange={handleSessionPolicyChange}
               >
                 <SelectTrigger id="workspace-session-timeout" className="w-full sm:max-w-xs">
-                  <SelectValue />
+                  <SelectValue placeholder={sessionPolicyLoading ? "Checking setting…" : "Setting unavailable"} />
                 </SelectTrigger>
                 <SelectContent>
                   {workspaceSessionTimeoutOptions.map((option) => (
@@ -20608,6 +20961,7 @@ function ContextRow({ label, value }: { label: string; value: string }) {
 function EditableTextField({
   id,
   label,
+  required = false,
   value,
   onChange,
   onBlur,
@@ -20615,6 +20969,7 @@ function EditableTextField({
 }: {
   id: string
   label: string
+  required?: boolean
   value: string
   onChange: (value: string) => void
   onBlur?: () => void
@@ -20622,9 +20977,14 @@ function EditableTextField({
 }) {
   return (
     <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}>
+        {label}
+        {required ? <span aria-hidden="true"> *</span> : null}
+      </Label>
       <Input
         id={id}
+        required={required}
+        aria-required={required || undefined}
         value={value}
         placeholder={placeholder}
         onBlur={onBlur}

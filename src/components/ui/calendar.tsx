@@ -18,6 +18,7 @@ function Calendar({
 }: DayPickerProps) {
   return (
     <DayPicker
+      data-slot="calendar"
       showOutsideDays={showOutsideDays}
       className={cn("p-3", className)}
       classNames={{
@@ -29,21 +30,21 @@ function Calendar({
         [UI.Nav]: "absolute inset-x-0 top-1 flex items-center justify-between",
         [UI.PreviousMonthButton]: cn(
           buttonVariants({ variant: "outline" }),
-          "size-7 bg-transparent p-0 opacity-60 hover:opacity-100"
+          "sf-calendar-nav-button size-7 bg-transparent p-0 opacity-60 hover:opacity-100"
         ),
         [UI.NextMonthButton]: cn(
           buttonVariants({ variant: "outline" }),
-          "size-7 bg-transparent p-0 opacity-60 hover:opacity-100"
+          "sf-calendar-nav-button size-7 bg-transparent p-0 opacity-60 hover:opacity-100"
         ),
         [UI.MonthGrid]: "w-full border-collapse",
         [UI.Weekdays]: "flex",
-        [UI.Weekday]: "w-8 rounded-md text-[0.8rem] font-normal text-muted-foreground",
+        [UI.Weekday]: "sf-calendar-cell w-8 rounded-md text-[0.8rem] font-normal text-muted-foreground",
         [UI.Weeks]: "grid gap-1",
-        [UI.Week]: "flex w-full gap-1",
-        [UI.Day]: "relative size-8 p-0 text-center text-sm",
+        [UI.Week]: "sf-calendar-week flex w-full gap-1",
+        [UI.Day]: "sf-calendar-cell relative size-8 p-0 text-center text-sm",
         [UI.DayButton]: cn(
           buttonVariants({ variant: "ghost" }),
-          "size-8 p-0 font-normal aria-selected:opacity-100"
+          "sf-calendar-button size-8 p-0 font-normal aria-selected:opacity-100"
         ),
         [DayFlag.today]: "rounded-md bg-accent text-accent-foreground",
         [DayFlag.outside]: "text-muted-foreground opacity-50",

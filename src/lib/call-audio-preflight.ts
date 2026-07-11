@@ -427,6 +427,28 @@ export function getMicrophoneAudioConstraints({
     : constraints
 }
 
+export function getMicrophonePreviewAudioConstraints(deviceId?: string): MediaTrackConstraints {
+  // The setup meter is a user-facing comparison, so it must not change calibration
+  // when the capture mode changes. The live call still uses its mode-specific profile.
+  const constraints = getSupportedAudioConstraints({
+    autoGainControl: false,
+    channelCount: 1,
+    echoCancellation: true,
+    latency: 0.06,
+    noiseSuppression: true,
+    sampleRate: 48000,
+    sampleSize: 16,
+  })
+  const resolvedDeviceId = resolveConstrainedAudioDeviceId(deviceId)
+
+  return resolvedDeviceId
+    ? {
+        ...constraints,
+        deviceId: { exact: resolvedDeviceId },
+      }
+    : constraints
+}
+
 function getSupportedAudioConstraints(
   constraints: Record<string, boolean | number>
 ): MediaTrackConstraints {
