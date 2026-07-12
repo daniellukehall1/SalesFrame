@@ -977,7 +977,7 @@ export async function generateNextCallBrief({
     )
     const rawResult = await callOpenAiJson<NextCallGenerationResult>({
       apiKey,
-      model: getEnv("OPENAI_NEXT_CALL_BRIEF_MODEL", getEnv("OPENAI_TEXT_MODEL", "gpt-5.4-mini")),
+      model: getEnv("OPENAI_NEXT_CALL_BRIEF_MODEL", "gpt-5.4-mini"),
       maxOutputTokens: 2200,
       reasoningEffort: "low",
       schema: nextCallBriefSchema,

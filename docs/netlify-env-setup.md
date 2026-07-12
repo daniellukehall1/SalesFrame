@@ -122,6 +122,8 @@ Use the generated value only in the Netlify secret form; do not include it in th
 
 ## Non-secret defaults
 
+Next Call uses its dedicated `OPENAI_NEXT_CALL_BRIEF_MODEL` setting and defaults directly to `gpt-5.4-mini` when the setting is omitted. It does not inherit `OPENAI_TEXT_MODEL`.
+
 ```bash
 netlify env:set OPENAI_TEXT_MODEL "gpt-5.4-mini"
 netlify env:set OPENAI_LIVE_STATE_MODEL "gpt-5.4-nano"

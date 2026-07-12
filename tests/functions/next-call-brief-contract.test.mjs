@@ -172,7 +172,8 @@ test("freshness tracks material conversation context and accepted actions", () =
 
 test("next-call model selection is optional server-only configuration", () => {
   assert.match(env, /optionalServerEnvNames[\s\S]*"OPENAI_NEXT_CALL_BRIEF_MODEL"/)
-  assert.match(helper, /OPENAI_NEXT_CALL_BRIEF_MODEL/)
+  assert.match(helper, /getEnv\("OPENAI_NEXT_CALL_BRIEF_MODEL", "gpt-5\.4-mini"\)/)
+  assert.doesNotMatch(helper, /OPENAI_NEXT_CALL_BRIEF_MODEL"\s*,\s*getEnv\("OPENAI_TEXT_MODEL"/)
   assert.doesNotMatch(env, /VITE_OPENAI_NEXT_CALL_BRIEF_MODEL/)
 })
 

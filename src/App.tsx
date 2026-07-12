@@ -21,6 +21,7 @@ import {
   Clock3Icon,
   DatabaseIcon,
   DownloadIcon,
+  EllipsisIcon,
   ExternalLinkIcon,
   FileAudioIcon,
   FileTextIcon,
@@ -19099,16 +19100,18 @@ function OpportunityIntelligence({
 
   if (!hasConversationEvidence && isLoadingBrief) {
     return (
-      <Card data-testid="next-call-mode-loading" aria-busy="true">
-        <CardHeader>
-          <div>
-            <h1 className="font-heading text-base font-medium leading-snug">Next call</h1>
-            <CardDescription>Checking the conversation evidence for this opportunity.</CardDescription>
-          </div>
+      <Card data-testid="next-call-mode-loading" className="gap-0 py-0" aria-busy="true">
+        <CardHeader className="border-b px-4 py-5 sm:px-6 sm:py-6">
+          <h1 className="font-heading text-lg font-medium leading-snug">Next call</h1>
+          <CardDescription>Checking the conversation evidence for this opportunity.</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 py-6" role="status" aria-live="polite">
-          <Skeleton className="h-5 w-2/3 rounded-md" />
-          <Skeleton className="h-16 rounded-lg" />
+        <CardContent
+          className="mx-auto grid w-full max-w-5xl gap-4 px-4 py-8 sm:px-6 sm:py-10"
+          role="status"
+          aria-live="polite"
+        >
+          <Skeleton className="h-5 w-full max-w-lg rounded-md" />
+          <Skeleton className="h-20 w-full max-w-3xl rounded-lg" />
           <span className="sr-only">Loading Next call preparation</span>
         </CardContent>
       </Card>
@@ -19127,18 +19130,25 @@ function OpportunityIntelligence({
 
   return (
     <>
-      <Card data-testid="next-call-brief">
-        <CardHeader>
-          <div>
-            <h1 className="font-heading text-base font-medium leading-snug">Next call</h1>
-            <CardDescription>Prepare the themes that matter. Live coaching will follow the conversation.</CardDescription>
+      <Card data-testid="next-call-brief" className="gap-0 py-0">
+        <CardHeader className="border-b px-4 py-5 sm:px-6 sm:py-6">
+          <div className="grid min-w-0 gap-1.5">
+            <h1 className="font-heading text-lg font-medium leading-snug">Next call</h1>
+            <CardDescription className="max-w-2xl leading-relaxed">
+              Prepare the themes that matter. Live coaching will follow the conversation.
+            </CardDescription>
           </div>
-          <CardAction>
+          <CardAction className="col-start-2 row-span-2 row-start-1 mt-0 w-auto justify-self-end">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button type="button" size="sm" variant="ghost" className="min-h-11 gap-1.5 md:min-h-8">
-                  Actions
-                  <ChevronDownIcon className="size-3.5" />
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Next call actions"
+                  title="Next call actions"
+                >
+                  <EllipsisIcon />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -19150,22 +19160,22 @@ function OpportunityIntelligence({
             </DropdownMenu>
           </CardAction>
         </CardHeader>
-        <CardContent className="grid gap-6">
+        <CardContent className="mx-auto grid w-full max-w-5xl gap-0 px-4 pb-8 sm:px-6 sm:pb-10">
           {briefState?.hasNewerContext && !isUpdating ? (
-            <div className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 border-b py-4 text-sm sm:flex-row sm:items-center sm:justify-between">
               <span className="text-muted-foreground">There is newer information available.</span>
-              <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" onClick={() => void handleRefresh()}>
+              <Button type="button" size="sm" variant="ghost" className="w-fit px-0 hover:bg-transparent" onClick={() => void handleRefresh()}>
                 Update brief
               </Button>
             </div>
           ) : null}
           {isUpdating ? (
-            <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
+            <p className="border-b py-4 text-sm text-muted-foreground" role="status" aria-live="polite">
               Updating this brief from the latest information…
             </p>
           ) : statusMessage ? (
             <p
-              className={cn("text-sm", statusTone === "error" ? "text-destructive" : "text-muted-foreground")}
+              className={cn("border-b py-4 text-sm", statusTone === "error" ? "text-destructive" : "text-muted-foreground")}
               role={statusTone === "error" ? "alert" : "status"}
               aria-live="polite"
             >
@@ -19175,47 +19185,33 @@ function OpportunityIntelligence({
 
           {brief ? (
             <>
-              <NextCallSection title="Aim for">
-                <p className="max-w-4xl break-words text-base leading-relaxed">{brief.outcome}</p>
+              <NextCallSection title="Aim for" className="py-7 sm:py-8">
+                <p className="max-w-3xl break-words text-lg font-medium leading-relaxed sm:text-xl">{brief.outcome}</p>
               </NextCallSection>
               <Separator />
-              <div className="grid min-w-0 gap-8 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
-                <NextCallSection title="Questions to have ready">
-                  {brief.questions.length ? (
-                    <div className="grid gap-5">
-                      {brief.questions.slice(0, 3).map((question) => (
-                        <NextCallQuestion
-                          key={question.id}
-                          item={question}
-                          onOpenEvidence={handleOpenEvidence}
-                          onReviewMethodology={() => handleReviewMethodology(question.playbookFieldIds?.[0])}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      No preparation questions are available yet. Live coaching will still follow the conversation.
-                    </p>
-                  )}
-                </NextCallSection>
-                <div className="min-w-0 border-t pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
-                  <NextCallSection title="Leave with">
-                    <p className="break-words text-sm leading-relaxed">{brief.leaveWith}</p>
-                    <NextStepConfirmation
-                      brief={brief}
-                      currentNextStep={opportunityDraft.nextStep}
-                      expectedOpportunityUpdatedAt={opportunity.updatedAtIso}
-                      opportunityId={opportunity.id}
-                      onApplied={onNextStepApplied}
-                    />
-                  </NextCallSection>
-                </div>
-              </div>
+              <NextCallSection title="Questions to have ready" className="py-7 sm:py-8">
+                {brief.questions.length ? (
+                  <div className="max-w-3xl divide-y">
+                    {brief.questions.slice(0, 3).map((question) => (
+                      <NextCallQuestion
+                        key={question.id}
+                        item={question}
+                        onOpenEvidence={handleOpenEvidence}
+                        onReviewMethodology={() => handleReviewMethodology(question.playbookFieldIds?.[0])}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                    No preparation questions are available yet. Live coaching will still follow the conversation.
+                  </p>
+                )}
+              </NextCallSection>
               {brief.watchItems.length ? (
                 <>
                   <Separator />
-                  <NextCallSection title="Watch for">
-                    <div className="grid gap-5 lg:grid-cols-2 lg:gap-8">
+                  <NextCallSection title="Watch for" className="py-7 sm:py-8">
+                    <div className="max-w-4xl divide-y">
                       {brief.watchItems.slice(0, 2).map((item) => (
                         <NextCallWatchItem
                           key={item.id}
@@ -19228,6 +19224,17 @@ function OpportunityIntelligence({
                   </NextCallSection>
                 </>
               ) : null}
+              <Separator />
+              <NextCallSection title="Leave with" className="py-7 sm:py-8">
+                <p className="max-w-3xl break-words text-base leading-relaxed">{brief.leaveWith}</p>
+                <NextStepConfirmation
+                  brief={brief}
+                  currentNextStep={opportunityDraft.nextStep}
+                  expectedOpportunityUpdatedAt={opportunity.updatedAtIso}
+                  opportunityId={opportunity.id}
+                  onApplied={onNextStepApplied}
+                />
+              </NextCallSection>
               {brief.opening ? (
                 <>
                   <Separator />
@@ -19237,16 +19244,15 @@ function OpportunityIntelligence({
             </>
           ) : (
             isLoadingBrief || isUpdating ? (
-              <div className="grid gap-3 py-6" role="status" aria-live="polite">
-                <Skeleton className="h-5 w-2/3 rounded-md" />
-                <Skeleton className="h-16 rounded-lg" />
-                <Skeleton className="h-16 rounded-lg" />
+              <div className="grid gap-4 py-10" role="status" aria-live="polite">
+                <Skeleton className="h-5 w-full max-w-lg rounded-md" />
+                <Skeleton className="h-20 w-full max-w-3xl rounded-lg" />
                 {showExtendedPreparingMessage ? (
                   <p className="text-sm text-muted-foreground">Still preparing your brief. You can keep working.</p>
                 ) : <span className="sr-only">Preparing your Next call guidance</span>}
               </div>
             ) : (
-              <div className="grid gap-3 py-8 text-center">
+              <div className="mx-auto grid max-w-md gap-3 py-12 text-center">
                 <p className="font-medium">Next call guidance isn’t ready yet</p>
                 <p className="text-sm text-muted-foreground">
                   SalesFrame can prepare it from the saved conversation and methodology evidence.
@@ -19279,27 +19285,28 @@ function FirstConversationCard({
   onNavigate: (view: string) => void
 }) {
   return (
-    <Card data-testid="first-conversation-state">
-      <CardHeader>
-        <div>
-          <h1 className="font-heading text-base font-medium leading-snug">First conversation</h1>
-          <CardDescription>
+    <Card data-testid="first-conversation-state" className="gap-0 py-0">
+      <CardHeader className="border-b px-4 py-5 sm:px-6 sm:py-6">
+        <div className="grid gap-1.5">
+          <h1 className="font-heading text-lg font-medium leading-snug">First conversation</h1>
+          <CardDescription className="max-w-2xl leading-relaxed">
             There is no customer conversation evidence yet. Prepare the themes that matter and SalesFrame will adapt once the call begins.
           </CardDescription>
         </div>
       </CardHeader>
-      <CardContent className="grid gap-6">
-        <NextCallSection title="What to learn first">
+      <CardContent className="mx-auto grid w-full max-w-5xl gap-0 px-4 pb-8 sm:px-6 sm:pb-10">
+        <NextCallSection title="What to learn first" className="py-7 sm:py-8">
           {hasSelectedMethodology ? (
-            <div className="grid gap-3">
+            <ul className="grid max-w-3xl gap-4">
               {learningThemes.map((theme) => (
-                <div key={theme.id} className="border-l-2 border-muted pl-4 text-sm leading-relaxed">
+                <li key={theme.id} className="flex min-w-0 gap-3 text-sm leading-relaxed">
+                  <span className="mt-[0.55rem] size-1.5 shrink-0 rounded-full bg-muted-foreground/60" aria-hidden="true" />
                   {theme.title}
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           ) : (
-            <p className="text-sm text-muted-foreground">Choose a methodology to shape the first conversation.</p>
+            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">Choose a methodology to shape the first conversation.</p>
           )}
         </NextCallSection>
         <div className="flex flex-col gap-2 border-t pt-5 sm:flex-row sm:flex-wrap">
@@ -19315,10 +19322,18 @@ function FirstConversationCard({
   )
 }
 
-function NextCallSection({ children, title }: { children: React.ReactNode; title: string }) {
+function NextCallSection({
+  children,
+  className,
+  title,
+}: {
+  children: React.ReactNode
+  className?: string
+  title: string
+}) {
   return (
-    <section className="grid min-w-0 gap-3">
-      <h2 className="text-sm font-medium">{title}</h2>
+    <section className={cn("grid min-w-0 gap-4", className)}>
+      <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
       {children}
     </section>
   )
@@ -19364,8 +19379,8 @@ function NextCallQuestion({
   onReviewMethodology: () => void
 }) {
   return (
-    <article className="grid min-w-0 gap-2 border-l-2 border-muted pl-4">
-      <p className="break-words text-sm leading-relaxed">{item.text}</p>
+    <article className="grid min-w-0 gap-2.5 py-5 first:pt-0 last:pb-0">
+      <p className="break-words text-base leading-relaxed">{item.text}</p>
       {item.learningTarget ? (
         <p className="text-xs text-muted-foreground">Explore: {item.learningTarget}</p>
       ) : null}
@@ -19397,7 +19412,7 @@ function NextCallWatchItem({
   )
 
   return (
-    <article className="grid min-w-0 gap-2 border-l-2 border-muted pl-4">
+    <article className="grid min-w-0 gap-2.5 py-5 first:pt-0 last:pb-0">
       <p className="break-words text-sm font-medium leading-relaxed">{item.text}</p>
       {item.whyItMatters ? (
         <p className="break-words text-sm leading-relaxed text-muted-foreground">
@@ -19441,7 +19456,7 @@ function PossibleOpening({
   }
 
   return (
-    <Accordion type="single" collapsible>
+    <Accordion type="single" collapsible className="py-1">
       <AccordionItem value="possible-opening">
         <AccordionTrigger className="min-h-11 py-2">Possible opening</AccordionTrigger>
         <AccordionContent className="grid gap-3">

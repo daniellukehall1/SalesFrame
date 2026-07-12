@@ -34,6 +34,11 @@ function buildOpenAiSystemPrompt(system: string) {
   return `${system}\n\n${promptInjectionDefenseInstruction}`
 }
 
+export function supportsOpenAiReasoningEffort(model: string) {
+  const normalizedModel = model.trim().toLowerCase()
+  return /^(?:gpt-5(?:[.-]|$)|o(?:1|3|4)(?:[.-]|$))/.test(normalizedModel)
+}
+
 export async function callOpenAiJson<T>({
   apiKey,
   input,
@@ -55,7 +60,10 @@ export async function callOpenAiJson<T>({
       model,
       max_output_tokens: maxOutputTokens,
       prompt_cache_key: promptCacheKey,
-      reasoning: reasoningEffort ? { effort: reasoningEffort } : undefined,
+      reasoning:
+        reasoningEffort && supportsOpenAiReasoningEffort(model)
+          ? { effort: reasoningEffort }
+          : undefined,
       store: false,
       input: [
         {
@@ -299,6 +307,10 @@ function getOpenAiFailureCode(data: unknown, fallback: string) {
 
   if (/model_not_found|model .* does not exist|unsupported model|model .* unavailable/i.test(combined)) {
     return "openai_model_error"
+  }
+
+  if (/unsupported.*parameter|parameter .*not supported|reasoning.*not supported/i.test(combined)) {
+    return "openai_parameter_error"
   }
 
   return fallback
