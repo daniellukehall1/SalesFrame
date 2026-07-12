@@ -760,10 +760,6 @@ function isAudioCaptureModeEnabled(settings: CaptureSettings, mode: CallAudioCap
   return true
 }
 
-function getAudioSourceChoice(mode: CallAudioCaptureMode): AudioSourceChoice {
-  return mode === "meeting_audio" ? "two_channels" : "one_channel"
-}
-
 function getAudioCaptureModeForChoice(choice: AudioSourceChoice, settings: CaptureSettings): CallAudioCaptureMode {
   if (choice === "two_channels") return "meeting_audio"
   if (choice === "one_channel") return settings.inPersonMic ? "in_person_microphone" : "microphone"
@@ -10167,9 +10163,7 @@ function StartRecordingDialog({
   const [audioCaptureMode, setAudioCaptureMode] = React.useState<CallAudioCaptureMode>(() =>
     getPreferredAudioCaptureMode(readCaptureSettings(workspaceId))
   )
-  const [audioSourceChoice, setAudioSourceChoice] = React.useState<AudioSourceChoice>(() =>
-    getAudioSourceChoice(getPreferredAudioCaptureMode(readCaptureSettings(workspaceId)))
-  )
+  const [audioSourceChoice, setAudioSourceChoice] = React.useState<AudioSourceChoice | "">("")
   const [meetingUrl, setMeetingUrl] = React.useState("")
   const [selectedPlaybooks, setSelectedPlaybooks] = React.useState<CallPlaybook[]>(() =>
     parsePlaybookSelection(opportunityDrafts[opportunityId]?.frameworks)
@@ -10232,8 +10226,11 @@ function StartRecordingDialog({
       : Boolean(opportunityId)
   const meetingUrlValidation = validateMeetingBotUrl(meetingUrl)
   const selectedAudioSourceChoice = audioSourceChoice
+  const isBrowserAudioChoice =
+    selectedAudioSourceChoice === "one_channel" || selectedAudioSourceChoice === "two_channels"
   const canContinueCall =
     Boolean(callType) &&
+    Boolean(selectedAudioSourceChoice) &&
     selectedPlaybooks.length > 0 &&
     (selectedAudioSourceChoice !== "meeting_bot" || meetingUrlValidation.valid)
   const canUseResearch =
@@ -10474,7 +10471,7 @@ function StartRecordingDialog({
     setSelectedAudioInputDeviceId(readPreferredAudioInputDeviceId(workspaceId))
     const nextAudioCaptureMode = getPreferredAudioCaptureMode(nextPreferences)
     setAudioCaptureMode(nextAudioCaptureMode)
-    setAudioSourceChoice(getAudioSourceChoice(nextAudioCaptureMode))
+    setAudioSourceChoice("")
     setMeetingUrl("")
     clearMicrophonePreview()
     clearMeetingAudioPreview()
@@ -10495,7 +10492,7 @@ function StartRecordingDialog({
   }, [clearMeetingAudioPreview, clearMicrophonePreview])
 
   React.useEffect(() => {
-    if (!open || step !== 3 || selectedAudioSourceChoice === "meeting_bot") return
+    if (!open || step !== 3 || !isBrowserAudioChoice) return
 
     void refreshAudioDevices()
 
@@ -10509,7 +10506,7 @@ function StartRecordingDialog({
     mediaDevices.addEventListener("devicechange", handleDeviceChange)
 
     return () => mediaDevices.removeEventListener("devicechange", handleDeviceChange)
-  }, [open, refreshAudioDevices, selectedAudioSourceChoice, step])
+  }, [isBrowserAudioChoice, open, refreshAudioDevices, step])
 
   React.useEffect(() => {
     if (!open) return
@@ -10528,7 +10525,7 @@ function StartRecordingDialog({
   }, [isMobile, open, startSubmitting, step])
 
   React.useEffect(() => {
-    if (!open || step !== 3 || startSubmitting || selectedAudioSourceChoice === "meeting_bot") {
+    if (!open || step !== 3 || startSubmitting || !isBrowserAudioChoice) {
       clearMicrophonePreview()
       return
     }
@@ -10620,10 +10617,10 @@ function StartRecordingDialog({
     }
   }, [
     clearMicrophonePreview,
+    isBrowserAudioChoice,
     open,
     refreshAudioDevices,
     selectedAudioInputDeviceId,
-    selectedAudioSourceChoice,
     startSubmitting,
     step,
   ])
@@ -10709,7 +10706,7 @@ function StartRecordingDialog({
       setCapturePreferences(nextCapturePreferences)
       const nextAudioCaptureMode = getPreferredAudioCaptureMode(nextCapturePreferences)
       setAudioCaptureMode(nextAudioCaptureMode)
-      setAudioSourceChoice(getAudioSourceChoice(nextAudioCaptureMode))
+      setAudioSourceChoice("")
       setMeetingUrl("")
       setStartError("")
       setStartSubmitting(false)
@@ -11373,10 +11370,9 @@ function StartRecordingDialog({
                       >
                         <SelectTrigger
                           id="recording-audio-source"
-                          aria-describedby="recording-audio-source-help"
                           className="w-full min-w-0 [&>span]:truncate"
                         >
-                          <SelectValue />
+                          <SelectValue placeholder="Select audio source" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="one_channel">One channel</SelectItem>
@@ -11386,11 +11382,6 @@ function StartRecordingDialog({
                           <SelectItem value="meeting_bot">Meeting bot</SelectItem>
                         </SelectContent>
                       </Select>
-                      <p id="recording-audio-source-help" className="text-xs leading-snug text-muted-foreground">
-                        {selectedAudioSourceChoice === "meeting_bot"
-                          ? "Paste a direct Zoom, Google Meet, Microsoft Teams, or Webex link. No microphone access is needed."
-                          : "Two-channel audio becomes available when browser-tab capture is enabled in Settings."}
-                      </p>
                     </div>
                     <div className="grid min-w-0 gap-2">
                       <Label htmlFor="recording-playbooks">Playbooks</Label>
@@ -11553,7 +11544,7 @@ function StartRecordingDialog({
                     ) : null}
                   </div>
 
-                  {selectedAudioSourceChoice !== "meeting_bot" ? (
+                  {isBrowserAudioChoice ? (
                   <div className="grid min-w-0 gap-3 rounded-lg border bg-background p-3">
                     <div className="grid min-w-0 gap-1">
                       <div className="min-w-0">
