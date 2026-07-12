@@ -232,6 +232,14 @@
     margin-left: 0.5rem !important;
   }
 
+  [data-slot="switch"][data-state="checked"] [data-slot="switch-thumb"] {
+    transform: translateX(0.75rem) !important;
+  }
+
+  [data-slot="switch"][data-state="unchecked"] [data-slot="switch-thumb"] {
+    transform: translateX(0) !important;
+  }
+
   [data-slot="switch"][data-size="sm"]::before {
     width: 1.5rem !important;
     height: 0.875rem !important;
@@ -239,6 +247,10 @@
 
   [data-slot="switch"][data-size="sm"] [data-slot="switch-thumb"] {
     margin-left: 0.75rem !important;
+  }
+
+  [data-slot="switch"][data-size="sm"][data-state="checked"] [data-slot="switch-thumb"] {
+    transform: translateX(0.5rem) !important;
   }
 
   [data-slot="calendar"] {

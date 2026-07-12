@@ -13660,7 +13660,7 @@ function AccountView({
           <TabsTrigger className="min-w-28" value="intelligence">Intelligence</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="record" className="m-0 w-full min-w-0">
+        <TabsContent value="record" className="m-0 grid w-full min-w-0 gap-4">
           <Card className="w-full min-w-0">
             <CardHeader>
               <div>
@@ -13753,6 +13753,20 @@ function AccountView({
               </div>
             </CardContent>
           </Card>
+          {account.id ? (
+            <div className="flex justify-start">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                onClick={() => onArchiveAccount(account.id)}
+              >
+                <ArchiveIcon />
+                Archive account
+              </Button>
+            </div>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="contacts" className="m-0 w-full min-w-0">
@@ -14056,20 +14070,6 @@ function AccountView({
           </Card>
         </TabsContent>
       </Tabs>
-      {account.id ? (
-        <div className="flex justify-start pt-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="gap-2"
-            onClick={() => onArchiveAccount(account.id)}
-          >
-            <ArchiveIcon />
-            Archive account
-          </Button>
-        </div>
-      ) : null}
     </div>
   )
 }

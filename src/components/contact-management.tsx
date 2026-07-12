@@ -734,7 +734,7 @@ function ContactEditor({
             Add a full name plus either the account domain or a professional profile URL to enrich this contact.
           </p>
         ) : null}
-        <ContactEnrichmentDetails contact={contact} />
+        {contact ? <ContactEnrichmentDetails contact={contact} /> : null}
       </section>
       {message ? (
         <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive" role="alert">{message}</p>
@@ -742,21 +742,29 @@ function ContactEditor({
     </div>
   )
 
-  const actions = confirmDiscard ? null : (
+  const saveButton = (
+    <Button
+      type="submit"
+      disabled={!draft.fullName.trim() || Boolean(blockingDuplicate) || invalidEmail || invalidLinkedInUrl || (enrichAfterSave && !canEnrich) || status === "saving"}
+      className="gap-2"
+    >
+      <CheckIcon />
+      {status === "saving" ? "Saving..." : contact ? "Save contact" : "Add contact"}
+    </Button>
+  )
+  const actions = confirmDiscard ? null : isMobile ? (
+    <DrawerFooter className="-mx-3 mt-2 border-t px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3">
+      {saveButton}
+      <Button type="button" variant="outline" disabled={status === "saving"} onClick={requestClose}>
+        Cancel
+      </Button>
+    </DrawerFooter>
+  ) : (
     <DialogActions
-      className="mt-2 max-sm:!mx-0 max-sm:!mb-0 max-sm:rounded-xl"
+      className="mt-2"
       cancelDisabled={status === "saving"}
       onCancel={requestClose}
-      primaryAction={
-        <Button
-          type="submit"
-          disabled={!draft.fullName.trim() || Boolean(blockingDuplicate) || invalidEmail || invalidLinkedInUrl || (enrichAfterSave && !canEnrich) || status === "saving"}
-          className="gap-2"
-        >
-          <CheckIcon />
-          {status === "saving" ? "Saving..." : contact ? "Save contact" : "Add contact"}
-        </Button>
-      }
+      primaryAction={saveButton}
     />
   )
 
@@ -820,13 +828,13 @@ function ContactInsightList({
   const visibleItems = maxItems === null ? items : items.slice(0, maxItems)
 
   return (
-    <div className={cn("w-full min-w-0 max-w-full rounded-md bg-background/70 p-3", tone === "caution" && "bg-amber-500/10")}>
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
-      <ul className="mt-2 grid gap-1.5 text-sm">
+    <div className={cn("w-full min-w-0 max-w-full overflow-hidden rounded-md bg-background/70 p-3", tone === "caution" && "bg-amber-500/10")}>
+      <p className="min-w-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+      <ul className="mt-2 grid min-w-0 gap-1.5 text-sm">
         {visibleItems.map((item) => (
-          <li key={item} className="flex min-w-0 gap-2">
+          <li key={item} className="flex w-full min-w-0 max-w-full items-start gap-2">
             <span className={cn("mt-2 size-1.5 shrink-0 rounded-full bg-primary", tone === "caution" && "bg-amber-600")} />
-            <span className="min-w-0 [overflow-wrap:anywhere]">{item}</span>
+            <span className="min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere]">{item}</span>
           </li>
         ))}
       </ul>
@@ -878,28 +886,28 @@ function ContactEnrichmentDetails({
             : "Enrichment is in progress. SalesFrame is reviewing public professional sources without overwriting seller-entered data."}
         </div>
       ) : enrichment && hasInsights ? (
-        <div className="grid min-w-0 gap-3 overflow-x-hidden rounded-lg bg-muted/30 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-medium">Professional insights</p>
-            <Badge variant="outline">
+        <div className="grid w-full min-w-0 max-w-full gap-3 overflow-x-hidden rounded-lg bg-muted/30 p-3">
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+            <p className="min-w-0 text-sm font-medium">Professional insights</p>
+            <span className="shrink-0 text-xs text-muted-foreground">
               {enrichment.confidence === null
                 ? "Confidence not scored"
                 : `${Math.round(enrichment.confidence * 100)}% confidence`}
-            </Badge>
+            </span>
           </div>
           {enrichment.professionalSummary ? (
-            <div>
+            <div className="w-full min-w-0 max-w-full">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Professional summary</p>
-              <p className="mt-1 text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{enrichment.professionalSummary}</p>
+              <p className="mt-1 min-w-0 max-w-full whitespace-normal break-words text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{enrichment.professionalSummary}</p>
             </div>
           ) : null}
           {enrichment.roleScope ? (
-            <div>
+            <div className="w-full min-w-0 max-w-full">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Role scope</p>
-              <p className="mt-1 text-sm leading-relaxed [overflow-wrap:anywhere]">{enrichment.roleScope}</p>
+              <p className="mt-1 min-w-0 max-w-full whitespace-normal break-words text-sm leading-relaxed [overflow-wrap:anywhere]">{enrichment.roleScope}</p>
             </div>
           ) : null}
-          <div className="grid w-full min-w-0 max-w-full grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] gap-3">
+          <div className="grid w-full min-w-0 max-w-full grid-cols-1 items-start gap-3 lg:grid-cols-2">
             <ContactInsightList title="Likely priorities" items={enrichment.priorities} maxItems={maxItems} />
             <ContactInsightList title="Likely KPIs" items={enrichment.kpis} maxItems={maxItems} />
             <ContactInsightList title="Relevant experience" items={enrichment.relevantExperience} maxItems={maxItems} />
@@ -942,17 +950,27 @@ function ContactEnrichmentDetails({
   )
 }
 
-function EnrichmentBadge({ status }: { status: ContactEnrichmentStatus }) {
-  const className =
+function ContactEnrichmentStatusText({ status }: { status: ContactEnrichmentStatus }) {
+  const label =
     status === "completed"
-      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+      ? "Ready"
       : status === "failed" || status === "ambiguous"
-        ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+        ? "Needs attention"
         : status === "queued" || status === "running"
-          ? "border-primary/30 bg-primary/10 text-primary"
-          : "text-muted-foreground"
+          ? "Updating…"
+          : "—"
 
-  return <Badge variant="outline" className={className}>{formatStatusLabel(status)}</Badge>
+  return (
+    <span
+      aria-label={`Enrichment: ${formatStatusLabel(status)}`}
+      className={cn(
+        "text-sm text-muted-foreground",
+        (status === "failed" || status === "ambiguous") && "text-amber-700 dark:text-amber-300"
+      )}
+    >
+      {label}
+    </span>
+  )
 }
 
 type ContactAction = "archive" | "enrich" | "restore"
@@ -1039,16 +1057,7 @@ function ContactDetailsOverlay({
   const archivedAt = formatContactTimestamp(contact.archivedAtIso)
 
   const body = (
-    <div className="grid min-h-0 w-full min-w-0 max-w-full gap-6 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 sm:pr-2">
-      <div className="flex w-full min-w-0 max-w-full flex-col gap-4 rounded-lg border bg-background p-4 md:flex-row md:items-center md:justify-between">
-        <ContactIdentity contact={contact} />
-        <div className="flex flex-wrap gap-2">
-          <EnrichmentBadge status={enrichmentStatus} />
-          <Badge variant="outline">{formatStatusLabel(contact.employmentStatus)}</Badge>
-          {contact.archivedAtIso ? <Badge variant="outline">Archived</Badge> : null}
-        </div>
-      </div>
-
+    <div className="grid min-h-0 w-full min-w-0 max-w-full gap-6 overflow-x-hidden overflow-y-auto overscroll-contain pr-3 [scrollbar-gutter:stable] sm:pr-4">
       <section className="grid w-full min-w-0 max-w-full gap-3" aria-labelledby={contactDetailsHeadingId}>
         <div>
           <h3 id={contactDetailsHeadingId} className="text-sm font-medium">Contact details</h3>
@@ -1101,7 +1110,7 @@ function ContactDetailsOverlay({
           <ContactDetailField label="Source" value={contact.source ? formatStatusLabel(contact.source) : ""} />
           <ContactDetailField label="Created" value={createdAt} />
           <ContactDetailField label="Last updated" value={updatedAt} />
-          <ContactDetailField label="Archive status" value={contact.archivedAtIso ? `Archived ${archivedAt}` : "Active record"} />
+          {contact.archivedAtIso ? <ContactDetailField label="Archive status" value={`Archived ${archivedAt}`} /> : null}
           <div className="grid min-w-0 gap-1 rounded-lg bg-muted/20 p-3 md:col-span-2 xl:col-span-4">
             <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Private seller notes</dt>
             <dd className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]">
@@ -1284,7 +1293,7 @@ function ContactDetailsOverlay({
   )
 
   const title = contact.preferredName.trim() || contact.fullName
-  const description = `Contact profile and available relationship context for ${contact.fullName}.`
+  const description = [contact.jobTitle, contact.department].filter(Boolean).join(" · ") || "Professional details, relationships, and AI insights."
 
   if (isMobile) {
     return (
@@ -1559,8 +1568,8 @@ export function ContactsPanel({
         </CardAction>
       </CardHeader>
       <CardContent className="grid gap-4">
-        <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_180px_190px]">
-          <div className="relative">
+        <div className="grid grid-cols-2 gap-2 xl:grid-cols-[minmax(0,1fr)_180px_190px]">
+          <div className="relative col-span-2 xl:col-span-1">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               aria-label="Search account contacts"
@@ -1581,11 +1590,11 @@ export function ContactsPanel({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="active">Active contacts</SelectItem>
-              <SelectItem value="former">Former contacts</SelectItem>
-              <SelectItem value="unknown">Unknown employment</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="former">Former</SelectItem>
+              <SelectItem value="unknown">Unknown</SelectItem>
               <SelectItem value="all">All contacts</SelectItem>
-              <SelectItem value="archived">Archived contacts</SelectItem>
+              <SelectItem value="archived">Archived</SelectItem>
             </SelectContent>
           </Select>
           <Select value={enrichmentFilter} onValueChange={(value) => {
@@ -1596,9 +1605,9 @@ export function ContactsPanel({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All enrichment</SelectItem>
+              <SelectItem value="all">All insights</SelectItem>
               <SelectItem value="enriched">Enriched</SelectItem>
-              <SelectItem value="needs-enrichment">Needs enrichment</SelectItem>
+              <SelectItem value="needs-enrichment">Needs insights</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -1626,8 +1635,6 @@ export function ContactsPanel({
           <div className="grid gap-3 2xl:hidden" data-testid="account-contacts-mobile-list">
             {visibleContacts.map((contact) => {
               const opportunityNames = linkedOpportunityNames(contact.id)
-              const canEnrich = Boolean(contact.fullName && (accountWebsite || contact.linkedinUrl))
-
               return (
                 <article
                   key={contact.id}
@@ -1644,7 +1651,7 @@ export function ContactsPanel({
                     )
                   }}
                 >
-                  <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
                     <button
                       type="button"
                       className="grid min-h-11 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
@@ -1655,30 +1662,6 @@ export function ContactsPanel({
                       <ContactIdentity contact={contact} />
                       <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                     </button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button type="button" variant="outline" size="icon" className="size-11 shrink-0" aria-label={`Actions for ${contact.fullName}`}>
-                          <MoreHorizontalIcon />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {!contact.archivedAtIso ? <DropdownMenuItem onSelect={() => openEditContact(contact)}><PencilIcon />Edit</DropdownMenuItem> : null}
-                        {contact.archivedAtIso ? (
-                          <DropdownMenuItem disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "restore")}>
-                            <Undo2Icon />Restore contact
-                          </DropdownMenuItem>
-                        ) : (
-                          <>
-                            <DropdownMenuItem disabled={!canEnrich || pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "enrich")}>
-                              <SparklesIcon />{getEnrichmentStatus(contact) === "completed" ? "Refresh enrichment" : "Enrich contact"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem variant="destructive" disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "archive")}>
-                              <ArchiveIcon />Archive
-                            </DropdownMenuItem>
-                          </>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                   </div>
                   <div className="grid gap-2 text-sm text-muted-foreground">
                     {contact.workEmail ? <span className="flex items-center gap-2 break-all"><MailIcon className="size-4 shrink-0" />{contact.workEmail}</span> : null}
@@ -1689,13 +1672,8 @@ export function ContactsPanel({
                       </a>
                     ) : null}
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <EnrichmentBadge status={getEnrichmentStatus(contact)} />
-                    <Badge variant="outline">{formatStatusLabel(contact.employmentStatus)}</Badge>
-                    {contact.archivedAtIso ? <Badge variant="outline">Archived</Badge> : null}
-                  </div>
                   <p className="text-xs text-muted-foreground">
-                    {opportunityNames.length ? opportunityNames.join(" · ") : "Not linked to an opportunity"} · Created {contact.createdAt}
+                    {opportunityNames.length ? opportunityNames.join(" · ") : "Not linked to an opportunity"}
                   </p>
                 </article>
               )
@@ -1766,12 +1744,12 @@ export function ContactsPanel({
                       <TableCell className="max-w-0 whitespace-normal">
                         <p className="line-clamp-2 text-sm">{opportunityNames.length ? opportunityNames.join(", ") : "None"}</p>
                       </TableCell>
-                      <TableCell><EnrichmentBadge status={getEnrichmentStatus(contact)} /></TableCell>
+                      <TableCell><ContactEnrichmentStatusText status={getEnrichmentStatus(contact)} /></TableCell>
                       <TableCell className="text-sm text-muted-foreground">{contact.createdAt}</TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button type="button" size="icon" variant="ghost" className="size-11" aria-label={`Actions for ${contact.fullName}`}>
+                            <Button type="button" size="icon" variant="ghost" aria-label={`Actions for ${contact.fullName}`}>
                               <MoreHorizontalIcon />
                             </Button>
                           </DropdownMenuTrigger>
@@ -1783,8 +1761,16 @@ export function ContactsPanel({
                               </DropdownMenuItem>
                             ) : (
                               <>
-                                <DropdownMenuItem disabled={!canEnrich || pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "enrich")}>
-                                  <SparklesIcon />{getEnrichmentStatus(contact) === "completed" ? "Refresh enrichment" : "Enrich contact"}
+                                <DropdownMenuItem
+                                  disabled={!canEnrich || pendingContactId === contact.id || ["queued", "running"].includes(getEnrichmentStatus(contact))}
+                                  onSelect={() => void runContactAction(contact, "enrich")}
+                                >
+                                  <SparklesIcon />
+                                  {["queued", "running"].includes(getEnrichmentStatus(contact))
+                                    ? "Enrichment in progress"
+                                    : getEnrichmentStatus(contact) === "completed"
+                                      ? "Refresh enrichment"
+                                      : "Enrich contact"}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem variant="destructive" disabled={pendingContactId === contact.id} onSelect={() => void runContactAction(contact, "archive")}>
                                   <ArchiveIcon />Archive

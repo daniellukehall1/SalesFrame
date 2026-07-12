@@ -48,7 +48,7 @@ test("workspace search retains results for keyboard focus and exposes combobox s
 test("contacts remain restorable and editor errors are programmatically associated", async () => {
   const contacts = await read("src/components/contact-management.tsx")
 
-  assert.match(contacts, /<SelectItem value="archived">Archived contacts<\/SelectItem>/)
+  assert.match(contacts, /<SelectItem value="archived">Archived<\/SelectItem>/)
   assert.match(contacts, /runContactAction\(contact, "restore"\)/)
   assert.match(contacts, /<Undo2Icon \/>Restore contact/)
   assert.match(contacts, /Archived contacts will appear here and can be restored later\./)
