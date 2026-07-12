@@ -28,6 +28,7 @@ export type MeetingBotPostCallOutput = {
 
 export type MeetingBotPostCallGenerator = (options: {
   apiKey: string
+  apiKeyUserId: string
   callId: string
   sourceMeetingBotSessionId: string
   supabase: SupabaseClient<Database>
@@ -120,20 +121,30 @@ async function getExistingMeetingBotPostCallOutput(
   sessionId: string
 ) {
   const db = asMeetingBotDb(supabase)
-  const [{ data: postCallOutput, error: outputError }, { data: nextCallBrief, error: briefError }] =
-    await Promise.all([
-      db
-        .from("post_call_outputs")
-        .select("*")
-        .eq("source_meeting_bot_session_id", sessionId)
-        .maybeSingle(),
-      db
+  const [{ data: postCallOutput, error: outputError }, { data: session, error: sessionError }] = await Promise.all([
+    db
+      .from("post_call_outputs")
+      .select("*")
+      .eq("source_meeting_bot_session_id", sessionId)
+      .maybeSingle(),
+    db
+      .from("meeting_bot_sessions")
+      .select("call_id")
+      .eq("id", sessionId)
+      .maybeSingle(),
+  ])
+  if (outputError) throw new Error(outputError.message)
+  if (sessionError) throw new Error(sessionError.message)
+  const { data: nextCallBrief, error: briefError } = session?.call_id
+    ? await db
         .from("next_call_briefs")
         .select("*")
-        .eq("source_meeting_bot_session_id", sessionId)
-        .maybeSingle(),
-    ])
-  if (outputError) throw new Error(outputError.message)
+        .eq("previous_call_id", session.call_id)
+        .eq("schema_version", 2)
+        .order("generated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : { data: null, error: null }
   if (briefError) throw new Error(briefError.message)
   if (!postCallOutput || !nextCallBrief) return null
 
@@ -221,6 +232,7 @@ export async function runMeetingBotPostCallGeneration({
     const apiKey = await getDecryptedOpenAiKey(supabase, keyUserId, session.workspace_id)
     const output = await generateOutputs({
       apiKey,
+      apiKeyUserId: keyUserId,
       callId: session.call_id,
       sourceMeetingBotSessionId: session.id,
       supabase,

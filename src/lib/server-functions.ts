@@ -19,6 +19,10 @@ import type {
   MeetingBotPresenceRequest,
   MeetingBotSessionSnapshot,
 } from "@/lib/meeting-bot"
+import type {
+  NextCallBriefEvidence,
+  NextCallBriefResponse,
+} from "@/lib/salesframe-core"
 
 export type OpenAiKeyStatus = {
   connected: boolean
@@ -384,6 +388,10 @@ function createClientRequestId() {
   return `sf_${Date.now().toString(36)}_${randomPart}`
 }
 
+function createUuidClientRequestId() {
+  return crypto.randomUUID()
+}
+
 export function getOpenAiKeyStatus(workspaceId: string) {
   return callFunction<OpenAiKeyStatus>(`/api/openai/key?workspaceId=${encodeURIComponent(workspaceId)}`)
 }
@@ -461,6 +469,51 @@ export function requestPostCallOutputs(callId: string) {
     method: "POST",
     body: { callId },
   })
+}
+
+export function getNextCallBrief(opportunityId: string, options: { signal?: AbortSignal } = {}) {
+  return callFunction<NextCallBriefResponse>(
+    `/api/opportunities/${encodeURIComponent(opportunityId)}/next-call-brief`,
+    {
+      signal: options.signal,
+      timeoutMs: 12_000,
+    }
+  )
+}
+
+export function refreshNextCallBrief(opportunityId: string) {
+  return callFunction<{ briefId: string | null; status: "queued" | "processing" | "completed" }>(
+    `/api/opportunities/${encodeURIComponent(opportunityId)}/next-call-brief`,
+    {
+      method: "POST",
+      body: { clientRequestId: createUuidClientRequestId() },
+      timeoutMs: 12_000,
+    }
+  )
+}
+
+export function getNextCallBriefEvidence(briefId: string, itemId: string, options: { signal?: AbortSignal } = {}) {
+  return callFunction<{ evidence: NextCallBriefEvidence[] }>(
+    `/api/next-call-briefs/${encodeURIComponent(briefId)}/items/${encodeURIComponent(itemId)}/evidence`,
+    {
+      signal: options.signal,
+      timeoutMs: 12_000,
+    }
+  )
+}
+
+export function applyNextCallBriefNextStep(
+  briefId: string,
+  body: { expectedOpportunityUpdatedAt: string | null; nextStep: string }
+) {
+  return callFunction<{ opportunity: { id: string; next_step: string | null; updated_at: string } }>(
+    `/api/next-call-briefs/${encodeURIComponent(briefId)}/apply-next-step`,
+    {
+      method: "POST",
+      body,
+      timeoutMs: 12_000,
+    }
+  )
 }
 
 export function createMeetingBot(

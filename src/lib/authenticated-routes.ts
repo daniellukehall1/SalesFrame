@@ -33,6 +33,7 @@ const opportunityViewBySegment: Record<string, string> = {
   contacts: "opportunity-contacts",
   history: "opportunity-history",
   intelligence: "opportunity-intelligence",
+  "next-call": "opportunity-intelligence",
   methodology: "methodology",
   "post-call": "post-call",
 }
@@ -41,7 +42,7 @@ const opportunitySegmentByView: Record<string, string> = {
   methodology: "/methodology",
   "opportunity-contacts": "/contacts",
   "opportunity-history": "/history",
-  "opportunity-intelligence": "/intelligence",
+  "opportunity-intelligence": "/next-call",
   "opportunity-record": "",
   "post-call": "/post-call",
   workspace: "/cockpit",

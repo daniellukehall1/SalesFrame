@@ -557,6 +557,16 @@ export async function listWorkspaceOpportunities(
   return requireData(await query, "No opportunities returned.")
 }
 
+export async function getOpportunity(opportunityId: string, client?: SalesFrameClient) {
+  const response = await getSupabase(client)
+    .from("opportunities")
+    .select("*")
+    .eq("id", opportunityId)
+    .single()
+
+  return requireData(response, "Opportunity was not found.")
+}
+
 export async function listArchivedOpportunities(workspaceId: string, client?: SalesFrameClient) {
   const response = await getSupabase(client)
     .from("opportunities")

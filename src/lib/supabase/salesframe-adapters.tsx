@@ -562,7 +562,8 @@ export function mapOpportunityRowToUi({
           }
         })
     : []
-  const latestBrief = nextCallBriefs.find((brief) => brief.opportunity_id === opportunity.id)
+  const opportunityBriefs = nextCallBriefs.filter((brief) => brief.opportunity_id === opportunity.id)
+  const latestBrief = opportunityBriefs.find((brief) => brief.schema_version === 2) ?? opportunityBriefs[0]
   const persistedEvidenceFields = mapEvidenceRowsToMethodFields({
     evidenceRows: opportunityFieldEvidence.filter((evidence) => evidence.opportunity_id === opportunity.id),
     playbookFields,
@@ -575,6 +576,7 @@ export function mapOpportunityRowToUi({
     closeDate: formatCloseDateValue(opportunity.close_date_note ?? opportunity.close_date ?? starter.closeDate),
     createdAt: formatCloseDateValue(opportunity.created_at),
     createdAtIso: opportunity.created_at,
+    updatedAtIso: opportunity.updated_at,
     coverage: opportunity.coverage_score,
     missing: opportunity.missing_count,
     weak: opportunity.weak_count,
@@ -669,6 +671,9 @@ function jsonStringArray(value: unknown): string[] {
 
 function mapNextCallBriefRow(row: NextCallBriefRow, previousCall?: CallRow): NextCallBrief {
   return {
+    id: row.id,
+    generatedAtIso: row.updated_at,
+    schemaVersion: 1,
     previousCall: previousCall?.title ?? "Previous call",
     objective: row.objective ?? "Confirm the next decision step and close the remaining methodology gaps.",
     opening: row.suggested_opening ?? "Recap the previous conversation and confirm what has changed since then.",

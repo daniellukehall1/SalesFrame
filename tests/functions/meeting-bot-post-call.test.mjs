@@ -104,6 +104,10 @@ test("meeting-bot post-call generation is database-idempotent across recovery an
     "the canonical model result must be durable before evidence side effects"
   )
   assert.match(bridgeSource, /const existingOutput = await getExistingMeetingBotPostCallOutput/)
+  assert.match(bridgeSource, /\.eq\("previous_call_id", session\.call_id\)[\s\S]*\.eq\("schema_version", 2\)/)
+  assert.doesNotMatch(bridgeSource, /\.from\("next_call_briefs"\)[\s\S]*\.eq\("source_meeting_bot_session_id", sessionId\)/)
+  assert.match(generatorSource, /apiKeyUserId: string/)
+  assert.match(bridgeSource, /apiKeyUserId: keyUserId/)
   assert.ok(
     bridgeSource.indexOf("if (existingOutput)") <
       bridgeSource.indexOf("const apiKey = await getDecryptedOpenAiKey"),

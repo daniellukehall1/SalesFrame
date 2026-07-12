@@ -5,6 +5,10 @@ import {
   resolveLiveIntentStatusTransition,
   shouldKeepCurrentLiveQuestion,
 } from "../../src/lib/live-question-policy"
+import {
+  buildSuggestedIntentLedgerRowsFromNextCallBrief,
+  derivePreparationHintDisposition,
+} from "../../src/lib/next-call-brief-intent-ledger"
 import { buildPlaybookIntentClusters, type PlaybookIntentCluster } from "../../src/lib/salesframe-intent-clusters"
 import { loadCallContactCoachingContext } from "./_shared/contact-context"
 import { getEnv } from "./_shared/env"
@@ -88,6 +92,8 @@ type LiveParkedIntent = {
 type CurrentGuidanceSnapshot = {
   activeIntentStatus: string
   alsoCovers: LiveQuestionResult["alsoCovers"]
+  buyerMood: string
+  conversationStage: string
   evidenceCommit: LiveQuestionResult["evidenceCommit"] | null
   parkedIntents: LiveParkedIntent[]
   playbookLabel: string
@@ -309,8 +315,6 @@ function compactRecordContext({
       pain: cleanText(opportunity.pain),
       decisionProcess: cleanText(opportunity.decision_process),
       nextStep: cleanText(opportunity.next_step),
-      priorPlannedQuestion: cleanText(opportunity.next_question),
-      priorQuestionReason: cleanText(opportunity.question_reason),
       manualNotes: cleanText(opportunity.manual_notes),
       callType: selectedCallType || cleanText(opportunity.call_type),
       coverageScore: cleanNumber(opportunity.coverage_score),
@@ -322,6 +326,7 @@ function compactRecordContext({
       "Selected playbooks and intent clusters decide what must be learned.",
       "Account and opportunity record fields shape wording, depth, timing, and redundancy checks.",
       "Do not mark methodology fields complete from record context alone.",
+      "Next Call Preparation is separate from live coaching and is never a queued live question.",
       "Prefer one natural seller move that fits the current conversation flow.",
     ],
   }
@@ -424,6 +429,105 @@ function compactIntentLedgerRows(rows: Record<string, unknown>[]) {
   }))
 }
 
+function isUnavailableNextCallBriefV2Error(error: { code?: string; message?: string } | null | undefined) {
+  if (!error) return false
+
+  return isMissingRelationError(error) ||
+    error.code === "PGRST204" ||
+    error.code === "42703" ||
+    (
+      /schema_version|next_call_brief_items/i.test(error.message ?? "") &&
+      /column|relation|schema cache|does not exist|could not find/i.test(error.message ?? "")
+    )
+}
+
+async function seedNextCallBriefIntentHints({
+  accountId,
+  callId,
+  existingIntentLedgerRows,
+  intentClusters,
+  opportunityId,
+  supabase,
+  workspaceId,
+}: {
+  accountId: string
+  callId: string
+  existingIntentLedgerRows: Record<string, unknown>[]
+  intentClusters: PlaybookIntentCluster[]
+  opportunityId: string
+  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"]
+  workspaceId: string
+}): Promise<Record<string, unknown>[]> {
+  const latestBriefResponse = await supabase
+    .from("next_call_briefs")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("account_id", accountId)
+    .eq("opportunity_id", opportunityId)
+    .eq("schema_version", 2)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (latestBriefResponse.error) {
+    if (isUnavailableNextCallBriefV2Error(latestBriefResponse.error)) return existingIntentLedgerRows
+    throw new Error(latestBriefResponse.error.message)
+  }
+  if (!latestBriefResponse.data) return existingIntentLedgerRows
+
+  const briefQuestionResponse = await supabase
+    .from("next_call_brief_items")
+    .select("intent_cluster_id,kind")
+    .eq("workspace_id", workspaceId)
+    .eq("account_id", accountId)
+    .eq("opportunity_id", opportunityId)
+    .eq("brief_id", latestBriefResponse.data.id)
+    .eq("kind", "question")
+    .order("position", { ascending: true })
+
+  if (briefQuestionResponse.error) {
+    if (isUnavailableNextCallBriefV2Error(briefQuestionResponse.error)) return existingIntentLedgerRows
+    throw new Error(briefQuestionResponse.error.message)
+  }
+
+  const suggestedRows = buildSuggestedIntentLedgerRowsFromNextCallBrief({
+    callId,
+    existingIntentClusterIds: existingIntentLedgerRows.flatMap((row) => {
+      const intentClusterId = cleanText(row.intent_cluster_id)
+      return intentClusterId ? [intentClusterId] : []
+    }),
+    intentClusters,
+    opportunityId,
+    questions: (briefQuestionResponse.data ?? []).flatMap((row) => {
+      const intentClusterId = cleanText(row.intent_cluster_id)
+      return intentClusterId
+        ? [{ intentClusterId, kind: "question" as const }]
+        : []
+    }),
+    workspaceId,
+  })
+  if (!suggestedRows.length) return existingIntentLedgerRows
+
+  const { error: insertError } = await supabase
+    .from("call_intent_ledger")
+    .upsert(suggestedRows, {
+      ignoreDuplicates: true,
+      onConflict: "call_id,intent_cluster_id",
+    })
+
+  if (insertError) throw new Error(insertError.message)
+
+  const refreshedLedgerResponse = await supabase
+    .from("call_intent_ledger")
+    .select("*")
+    .eq("call_id", callId)
+    .order("updated_at", { ascending: false })
+
+  if (refreshedLedgerResponse.error) throw new Error(refreshedLedgerResponse.error.message)
+
+  return (refreshedLedgerResponse.data ?? []) as Record<string, unknown>[]
+}
+
 function compactStakeholders(rows: Record<string, unknown>[]) {
   return rows.slice(0, 24).map((row) => ({
     confidence: clampConfidence(row.confidence),
@@ -492,6 +596,8 @@ function compactCurrentGuidance(value: unknown): CurrentGuidanceSnapshot | null 
   return {
     activeIntentStatus: cleanText(record.activeIntentStatus),
     alsoCovers,
+    buyerMood: cleanText(record.buyerMood),
+    conversationStage: cleanText(record.conversationStage),
     evidenceCommit,
     parkedIntents: normalizeParkedIntents(record.parkedIntents),
     playbookLabel: cleanText(record.playbookLabel),
@@ -1664,9 +1770,31 @@ export default async (request: Request, _context: Context) => {
       throw upstreamFailure("Live question needs selected playbook intents.", "live_question_intent_clusters_empty")
     }
 
+    const transcript = cleanTranscript(payload.transcript)
+    let effectiveIntentLedgerRows = intentLedgerError
+      ? []
+      : (intentLedgerRows ?? []) as Record<string, unknown>[]
+    if (!intentLedgerError) {
+      try {
+        effectiveIntentLedgerRows = await seedNextCallBriefIntentHints({
+          accountId,
+          callId: authorizedCall.id,
+          existingIntentLedgerRows: effectiveIntentLedgerRows,
+          intentClusters,
+          opportunityId,
+          supabase,
+          workspaceId: authorizedCall.workspace_id,
+        })
+      } catch (seedError) {
+        logSafeEvent("warn", "live_question_preparation_hint_seed_failed", {
+          diagnostic: getMemoryPersistenceDiagnostic(seedError),
+          functionName: "live-question",
+        })
+      }
+    }
+
     const apiKey = await getDecryptedOpenAiKey(supabase, user.id, authorizedCall.workspace_id)
     const selectedCallType = payload.callType ?? call.call_type
-    const transcript = cleanTranscript(payload.transcript)
     const recordContext = compactRecordContext({
       account: account as Record<string, unknown>,
       accountEnrichmentProfile: accountEnrichmentError ? null : accountEnrichmentProfile as Record<string, unknown> | null,
@@ -1674,6 +1802,25 @@ export default async (request: Request, _context: Context) => {
       opportunity: opportunity as Record<string, unknown>,
       selectedCallType: cleanText(selectedCallType),
     })
+    const compactedIntentLedger = intentLedgerError
+      ? []
+      : compactIntentLedgerRows(effectiveIntentLedgerRows)
+    const suggestedPreparationHint = compactedIntentLedger.find((row) =>
+      row.status === "suggested" && row.reason === "pre_call_brief"
+    )
+    const preparationHintPolicy = suggestedPreparationHint
+      ? {
+          intentClusterId: suggestedPreparationHint.intentClusterId,
+          ...derivePreparationHintDisposition({
+            briefIntentClusterId: suggestedPreparationHint.intentClusterId,
+            buyerMood: currentGuidance?.buyerMood,
+            conversationStage: currentGuidance?.conversationStage,
+            currentIntentClusterId: currentGuidance?.primaryIntentClusterId,
+            hasLiveTranscript: transcript.length > 0,
+            sellerFeedbackAction: sellerFeedback.at(-1)?.action,
+          }),
+        }
+      : null
     const liveQuestionModel = getEnv("OPENAI_LIVE_QUESTION_MODEL", "gpt-5.4-mini")
     const modelStartedAt = Date.now()
     const rawResult = await callOpenAiJson<unknown>({
@@ -1686,7 +1833,7 @@ export default async (request: Request, _context: Context) => {
       schemaName: "salesframe_live_question",
       system:
         untrustedSalesContextInstruction + "\n\n" +
-        "You are SalesFrame's low-latency live sales coach. Return only schema-valid JSON for the single visible Ask this next card. Every response must first commit what the latest provider-neutral, finalized and stable conversation turns taught SalesFrame, then choose the next best seller move. Use context in this strict order: (1) live transcript, seller feedback, and question lifecycle; (2) intent ledger and customer-confirmed opportunity evidence; (3) seller-maintained selected contact and opportunity buying-role context; (4) confidence-scored contact enrichment; (5) general opportunity, account, and account-enrichment context. Use selected intent clusters, current intentLedger, opportunityFieldEvidence, stakeholders, and sellerFeedback to decide what is already asked, answered, weakly evidenced, confirmed, parked, skipped, or blocked. Use account, opportunity, and selected-contact context to make wording specific and avoid asking what is already known. Contact enrichment may shape wording and depth but is never buyer-confirmed evidence and cannot complete methodology fields. When several contacts are selected without a seller-confirmed speaker mapping or a sufficiently reliable automatic mapping, address the customer group generically and never attribute speech to a named person. The transcript window contains committed final turns from either browser Deepgram Flux capture or Recall-managed Deepgram Nova-3 meeting-bot capture. Use audioSourceKind, captureProvider, transcriptionProvider, providerTurnIndex, diarizationSpeaker, endOfTurnConfidence, and wordConfidence when present to understand source separation, turn order, speaker confidence, and whether a turn is reliable enough to act on. Never treat changing partial transcript text, participant lifecycle events, or speech-activity events as buyer evidence. Keep the exact current question stable when it still fits; a hold decision must not paraphrase or cosmetically rewrite it. Do not change the visible question solely because a participant joined or left, a short silence occurred, or one finalized utterance was appended to a still-open human turn. If the buyer gives a partial answer, deflects, gets interrupted, or moves to another valuable thread, do not interrogate them repeatedly. Mark the original intent weak or parked, add it to parkedIntents with a concrete re-entry cue and bridge question, follow the buyer's current thread, and recover at most one high-value parked intent when the cue appears or the call is wrapping. If sellerFeedback says asked, skip, or too_soon, do not repeat the acted-on question or the same intent. Asked means mark the intent asked and either wait/listen if there is no buyer answer yet, or move to the next best intent if the buyer answered. Skip means mark the exact question and intent do_not_repeat_this_call and choose another intent or a listen/acknowledge move. Too soon means park that intent until the buyer naturally reopens it or wrap-up recovery starts. Softer means keep the same intent but change the wording and lower pressure. Never ask lazy label-confirmation questions such as 'So Bob is the champion, right?' after the buyer has already confirmed or implied it. If champion or coach evidence is weak, ask for proof, actions, influence, access, or who they need to bring with them, not the same label again. Do not ask yes/no confirmation questions unless in wrap-up validation. Never invent deterministic fallback copy; return one AI-ranked seller move. Never ask heavy budget, procurement, economic buyer, metrics, or decision-process questions in opening unless the buyer raised the topic. Keep the question concise, natural, and customer-language led.",
+        "You are SalesFrame's low-latency live sales coach. Return only schema-valid JSON for the single visible Ask this next card. Every response must first commit what the latest provider-neutral, finalized and stable conversation turns taught SalesFrame, then choose the next best seller move. Use context in this strict order: (1) live transcript, seller feedback, and question lifecycle; (2) active non-preparation intent-ledger state and customer-confirmed opportunity evidence; (3) call type, selected methodologies and playbooks, and seller-maintained selected contacts and opportunity buying roles; (4) suggested pre_call_brief learning-intent hints; (5) confidence-scored contact and account enrichment plus general opportunity and account context. Rows with status suggested and reason pre_call_brief are low-priority learning-intent hints imported from Next Call Preparation. They are not queued live questions, planned wording, question history, buyer evidence, or methodology completion. Never reconstruct preparation wording from a hint; re-rank its intent against the active call opening and actual buyer flow, and ignore it when a more natural live move fits. Use selected intent clusters, current intentLedger, opportunityFieldEvidence, stakeholders, and sellerFeedback to decide what is already asked, answered, weakly evidenced, confirmed, parked, skipped, or blocked. Use account, opportunity, and selected-contact context to make wording specific and avoid asking what is already known. Contact enrichment may shape wording and depth but is never buyer-confirmed evidence and cannot complete methodology fields. When several contacts are selected without a seller-confirmed speaker mapping or a sufficiently reliable automatic mapping, address the customer group generically and never attribute speech to a named person. The transcript window contains committed final turns from either browser Deepgram Flux capture or Recall-managed Deepgram Nova-3 meeting-bot capture. Use audioSourceKind, captureProvider, transcriptionProvider, providerTurnIndex, diarizationSpeaker, endOfTurnConfidence, and wordConfidence when present to understand source separation, turn order, speaker confidence, and whether a turn is reliable enough to act on. Never treat changing partial transcript text, participant lifecycle events, or speech-activity events as buyer evidence. Keep the exact current question stable when it still fits; a hold decision must not paraphrase or cosmetically rewrite it. Do not change the visible question solely because a participant joined or left, a short silence occurred, or one finalized utterance was appended to a still-open human turn. If the buyer gives a partial answer, deflects, gets interrupted, or moves to another valuable thread, do not interrogate them repeatedly. Mark the original intent weak or parked, add it to parkedIntents with a concrete re-entry cue and bridge question, follow the buyer's current thread, and recover at most one high-value parked intent when the cue appears or the call is wrapping. If sellerFeedback says asked, skip, or too_soon, do not repeat the acted-on question or the same intent. Asked means mark the intent asked and either wait/listen if there is no buyer answer yet, or move to the next best intent if the buyer answered. Skip means mark the exact question and intent do_not_repeat_this_call and choose another intent or a listen/acknowledge move. Too soon means park that intent until the buyer naturally reopens it or wrap-up recovery starts. Softer means keep the same intent but change the wording and lower pressure. Never ask lazy label-confirmation questions such as 'So Bob is the champion, right?' after the buyer has already confirmed or implied it. If champion or coach evidence is weak, ask for proof, actions, influence, access, or who they need to bring with them, not the same label again. Do not ask yes/no confirmation questions unless in wrap-up validation. Never invent deterministic fallback copy; return one AI-ranked seller move. Never ask heavy budget, procurement, economic buyer, metrics, or decision-process questions in opening unless the buyer raised the topic. Keep the question concise, natural, and customer-language led.",
       input: JSON.stringify({
         selectedContext: {
           call: {
@@ -1709,9 +1856,8 @@ export default async (request: Request, _context: Context) => {
           })),
           intentClusters,
           currentGuidance,
-          intentLedger: intentLedgerError
-            ? []
-            : compactIntentLedgerRows((intentLedgerRows ?? []) as Record<string, unknown>[]),
+          intentLedger: compactedIntentLedger,
+          preparationHintPolicy,
           opportunityEvidence: compactEvidenceRows((opportunityEvidence ?? []) as Record<string, unknown>[]),
           stakeholders: stakeholderError
             ? []
@@ -1730,6 +1876,8 @@ export default async (request: Request, _context: Context) => {
           "Treat low-confidence Deepgram turns as useful context but avoid making brittle evidence decisions from them.",
           "If the right move is to listen or acknowledge, still return the exact words the seller can say if they need to speak.",
           "Do not repeat any blockedQuestions.",
+          "Treat a suggested pre_call_brief ledger row only as a low-priority learning-intent hint; it does not mean the preparation question was asked, answered, or selected for display.",
+          "Never copy or reconstruct Next Call Preparation wording, and never create evidence or completion solely from a pre_call_brief hint.",
           "Do not repeat any intent in intentLedger with status answered, confirmed, do_not_repeat_this_call, dropped, or parked unless there is a clear buyer re-entry cue.",
           "For each parked intent, return reasonParked, a specific buyer reentryCue, a natural bridgeQuestion, priority, and the latest safe revisit moment. Also emit a matching parked intentLedgerUpdate.",
           "If a re-entry cue is present, recover only the highest-value parked intent that fits the buyer's current words; otherwise keep it parked without changing the visible question for its own sake.",
@@ -1871,7 +2019,7 @@ export default async (request: Request, _context: Context) => {
           existingEvidenceRows: (opportunityEvidence ?? []) as Record<string, unknown>[],
           existingIntentLedgerRows: intentLedgerError
             ? []
-            : (intentLedgerRows ?? []) as Record<string, unknown>[],
+            : effectiveIntentLedgerRows,
           intentClusters,
           opportunityId,
           result,

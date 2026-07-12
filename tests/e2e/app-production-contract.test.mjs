@@ -329,6 +329,7 @@ test("record mutation dialogs use the shared modal action footer", async () => {
   const editAccountDialog = app.slice(app.indexOf("function EditAccountDialog("), app.indexOf("function CreateOpportunityDialog("))
   const createOpportunityDialog = app.slice(app.indexOf("function CreateOpportunityDialog("), app.indexOf("function EditOpportunityDialog("))
   const editOpportunityDialog = app.slice(app.indexOf("function EditOpportunityDialog("), app.indexOf("function DeleteRecordDialog("))
+  const startCallDialog = app.slice(app.indexOf("function StartRecordingDialog("), app.indexOf("function MobileStartCallBar("))
 
   for (const dialogSource of [
     createAccountDialog,
@@ -344,6 +345,10 @@ test("record mutation dialogs use the shared modal action footer", async () => {
   assert.match(editAccountDialog, /onCancel=\{\(\) => onOpenChange\(false\)\}[\s\S]*Save account/)
   assert.match(createOpportunityDialog, /onCancel=\{\(\) => handleOpenChange\(false\)\}[\s\S]*Create opportunity/)
   assert.match(editOpportunityDialog, /onCancel=\{\(\) => onOpenChange\(false\)\}[\s\S]*Save changes/)
+  assert.match(startCallDialog, /<DialogActions/)
+  assert.match(startCallDialog, /max-sm:\[&_\[data-slot=button\]\]:min-h-11/)
+  assert.doesNotMatch(startCallDialog, /variant="destructive"\s+className="h-11 gap-2"/)
+  assert.doesNotMatch(startCallDialog, /max-sm:p-3 \[&_\[data-slot=button\]\]:min-h-11/)
   assert.doesNotMatch(
     `${editAccountDialog}\n${createOpportunityDialog}\n${editOpportunityDialog}`,
     /className="grid gap-4 rounded-lg border p-4"/
@@ -1243,10 +1248,18 @@ test("call cockpit requires AI guidance instead of deterministic frontend questi
   assert.doesNotMatch(liveGuidanceFunction, /localGuidance\?:/)
 })
 
-test("starter opportunities do not expose placeholder AI guidance as a real question", async () => {
+test("starter opportunities render calm deterministic first-conversation preparation", async () => {
   const app = await read("src/App.tsx")
   const fuzzySearch = await read("src/lib/fuzzy-search.ts")
   const recordFactories = await read("src/lib/record-factories.ts")
+  const firstConversationCard = app.slice(
+    app.indexOf("function FirstConversationCard("),
+    app.indexOf("function NextCallSection(")
+  )
+  const themeBuilder = app.slice(
+    app.indexOf("function getFirstConversationLearningThemes("),
+    app.indexOf("function getLegacyQuestionLearningTarget(")
+  )
 
   assert.match(recordFactories, /starterOpportunityGuidance/)
   assert.match(recordFactories, /Ready for your first live question/)
@@ -1255,11 +1268,25 @@ test("starter opportunities do not expose placeholder AI guidance as a real ques
   assert.doesNotMatch(recordFactories, /Start a call to generate the next question with OpenAI live guidance/)
   assert.doesNotMatch(recordFactories, /Start a call to generate live guidance, transcript, and post-call outputs with OpenAI/)
 
-  assert.match(app, /function getOpportunityGuidancePreview/)
-  assert.match(app, /hasStarterOpportunityGuidance\(opportunity\) \? "Live question" : "Next best question"/)
-  assert.match(app, /SalesFrame will prepare the first live question from the account, opportunity, and selected playbooks/)
-  assert.match(app, /getOpportunityGuidancePreview\(opportunity\)/)
+  assert.match(app, /function getFirstConversationLearningThemes/)
+  assert.match(app, /function FirstConversationCard/)
+  assert.match(app, /There is no customer conversation evidence yet\. Prepare the themes that matter and SalesFrame will adapt once the call begins\./)
+  assert.match(app, /What to learn first/)
+  assert.match(app, /Current priorities and why they matter now/)
+  assert.match(app, /The outcome the customer wants to achieve/)
+  assert.match(app, /Choose a methodology to shape the first conversation\./)
+  assert.match(app, /Review methodology/)
+  assert.match(themeBuilder, /return ordered\.slice\(0, 3\)/)
+  assert.match(themeBuilder, /isEvaluationStage/)
+  assert.match(themeBuilder, /What would make this stage useful to the customer/)
+  assert.match(themeBuilder, /lowPressure\.slice\(0, 2\)[\s\S]*heavierContext/)
+  assert.doesNotMatch(themeBuilder, /request|fetch|OpenAI|AI inference/)
+  assert.doesNotMatch(firstConversationCard, /refreshNextCallBrief|getNextCallBrief|SparklesIcon/)
   assert.doesNotMatch(app, /\{opportunity\.nextQuestion\}/)
+  assert.match(app, /briefState\?\.hasCustomerConversation/)
+  assert.match(app, /line\.speakerNeedsReview !== true/)
+  assert.match(app, /line\.speaker === "Customer" \|\| line\.speaker === "Customer 2" \|\| line\.speaker === "Customer 3"/)
+  assert.match(app, /data-testid="next-call-mode-loading"/)
 
   assert.match(fuzzySearch, /const hasLiveGuidanceText = !hasStarterOpportunityGuidance\(opportunity\)/)
   assert.match(fuzzySearch, /hasLiveGuidanceText \? opportunity\.nextQuestion : ""/)
@@ -1888,8 +1915,8 @@ test("pre-call prep brief uses opportunity context instead of static scripts", a
   assert.match(commandBar, /opportunityDraft: OpportunityDraft/)
   assert.match(commandBar, /<CallPrepDialog opportunity=\{opportunity\} opportunityDraft=\{opportunityDraft\}/)
   assert.match(callPrepDialog, /const prepItems = buildCallPrepBriefItems\(opportunity, opportunityDraft\)/)
-  assert.match(callPrepDialog, /opportunity\.nextCallBrief\?\.opening\.trim\(\)/)
-  assert.match(callPrepDialog, /SalesFrame will generate the opener from the account context, opportunity record, call type, selected playbooks, and previous evidence before recording begins\./)
+  assert.match(callPrepDialog, /SalesFrame will create its first recommendation independently/)
+  assert.doesNotMatch(callPrepDialog, /opportunity\.nextCallBrief|Suggested opening from next-call brief/)
   assert.doesNotMatch(app, /prepChecklist/)
   assert.doesNotMatch(playbookReferenceData, /prepChecklist/)
   assert.doesNotMatch(app, /Current recommended opening/)
@@ -2112,7 +2139,7 @@ test("methodology tab keeps AI scoring source copy hidden", async () => {
   assert.doesNotMatch(methodologyGrid, /className="rounded-lg border bg-muted\/20 p-3"/)
 })
 
-test("opportunity gap counts use selected playbook checklist across list and intel views", async () => {
+test("opportunity gap counts use selected playbook checklists while Next call avoids duplicate coverage", async () => {
   const app = await read("src/App.tsx")
   const homeDashboard = app.slice(
     app.indexOf("function HomeDashboard("),
@@ -2128,7 +2155,11 @@ test("opportunity gap counts use selected playbook checklist across list and int
   )
   const opportunityIntelligence = app.slice(
     app.indexOf("function OpportunityIntelligence("),
-    app.indexOf("function NextCallBriefCard(")
+    app.indexOf("function FirstConversationCard(")
+  )
+  const methodologyGrid = app.slice(
+    app.indexOf("function MethodologyGrid("),
+    app.indexOf("function AccountRecordPanel(")
   )
 
   assert.match(app, /type OpportunityMethodologySummary =/)
@@ -2181,14 +2212,11 @@ test("opportunity gap counts use selected playbook checklist across list and int
   assert.match(opportunitiesView, /Showing \{opportunityRangeStart\}-\{opportunityRangeEnd\} of \{visibleOpportunities\.length\}/)
   assert.match(opportunitiesView, /Page \{currentPage\} of \{pageCount\}/)
   assert.match(opportunitiesView, /displayOpportunities[\s\S]*matchesCoverageFilter/)
-  assert.match(opportunityIntelligence, /const methodologySummary = getOpportunityMethodologySummary/)
-  assert.match(opportunityIntelligence, /\["Missing required", methodologySummary\.missing\]/)
-  assert.doesNotMatch(opportunityIntelligence, /\["Missing required", opportunity\.missing\]/)
-  assert.match(opportunityIntelligence, /<div className="rounded-lg bg-muted\/30 p-3">/)
-  assert.match(opportunityIntelligence, /<div className="mt-2 rounded-lg bg-background\/70 p-3 text-sm leading-relaxed text-muted-foreground">/)
-  assert.match(opportunityIntelligence, /className="rounded-lg bg-muted\/20 p-3"/)
-  assert.doesNotMatch(opportunityIntelligence, /rounded-lg border bg-muted\/30 p-3/)
-  assert.doesNotMatch(opportunityIntelligence, /rounded-lg border bg-muted\/20 p-3/)
+  assert.doesNotMatch(opportunityIntelligence, /getOpportunityMethodologySummary/)
+  assert.doesNotMatch(opportunityIntelligence, /Confirmed fields|Weak evidence|Missing required/)
+  assert.doesNotMatch(opportunityIntelligence, /CoverageBadge/)
+  assert.match(methodologyGrid, /const methodologyCoverage = requiredFieldCount \? Math\.round/)
+  assert.match(methodologyGrid, /Methodology coverage/)
 })
 
 test("persisted opportunity evidence feeds methodology coverage", async () => {
@@ -2240,10 +2268,10 @@ test("opportunity post-call tab hides generic output summary card", async () => 
   )
 
   assert.match(postCallPanel, /<CallReplayCard/)
-  assert.match(postCallPanel, /Next-call plan/)
-  assert.match(postCallPanel, /View next-call brief/)
-  assert.match(postCallPanel, /opportunity\.nextCallBrief \? \([\s\S]*View next-call brief[\s\S]*\) : null/)
-  assert.doesNotMatch(postCallPanel, /disabled=\{!opportunity\.nextCallBrief\}/)
+  assert.match(postCallPanel, /Prepare for the next conversation/)
+  assert.match(postCallPanel, /Open Next call/)
+  assert.doesNotMatch(postCallPanel, /Next-call plan/)
+  assert.doesNotMatch(postCallPanel, /Strict methodology checklist/)
   assert.match(postCallPanel, /return \(\s*<div className="grid gap-4">/)
   assert.doesNotMatch(postCallPanel, /Post-call outputs/)
   assert.doesNotMatch(postCallPanel, /Update account fields/)
@@ -2257,20 +2285,89 @@ test("opportunity post-call tab hides generic output summary card", async () => 
 test("post-call and next-call planning surfaces stay calm and unframed", async () => {
   const app = await read("src/App.tsx")
   const nextCallBriefCard = app.slice(
-    app.indexOf("function NextCallBriefCard("),
-    app.indexOf("function OpportunityRecordingHistory(")
+    app.indexOf("function OpportunityIntelligence("),
+    app.indexOf("function CallParticipantsSummary(")
   )
   const postCallPanel = app.slice(
     app.indexOf("function PostCallPanel("),
     app.indexOf("function OpportunitiesView(")
   )
 
-  assert.match(nextCallBriefCard, /function BriefTextBlock/)
-  assert.match(nextCallBriefCard, /function BriefList/)
-  assert.match(nextCallBriefCard, /className="rounded-lg bg-muted\/20 p-3"/)
-  assert.doesNotMatch(nextCallBriefCard, /className="rounded-lg border bg-muted\/20 p-3"/)
-  assert.match(postCallPanel, /className="flex items-start gap-3 rounded-lg bg-muted\/30 p-3"/)
-  assert.doesNotMatch(postCallPanel, /className="flex items-start gap-3 rounded-lg border p-3"/)
+  assert.match(nextCallBriefCard, /Prepare the themes that matter\. Live coaching will follow the conversation\./)
+  assert.match(nextCallBriefCard, /Aim for/)
+  assert.match(nextCallBriefCard, /Questions to have ready/)
+  assert.match(nextCallBriefCard, /Watch for/)
+  assert.match(nextCallBriefCard, /Leave with/)
+  assert.match(nextCallBriefCard, /Possible opening/)
+  assert.match(nextCallBriefCard, /<h1 className="font-heading text-base font-medium leading-snug">Next call<\/h1>/)
+  assert.match(nextCallBriefCard, /<h1 className="font-heading text-base font-medium leading-snug">First conversation<\/h1>/)
+  assert.match(nextCallBriefCard, /\{\[source\.callTitle, formatEvidenceDate\(source\.callDateIso\), source\.timestamp, source\.speaker\][\s\S]*\.join\(" · "\)\}/)
+  assert.doesNotMatch(nextCallBriefCard, /document\.querySelector<HTMLButtonElement>\("\[data-opportunity-start-call\]"\)/)
+  assert.doesNotMatch(nextCallBriefCard, /Opportunity intelligence|Next best question|Missing evidence|BriefList/)
+  assert.match(postCallPanel, /className="flex flex-col gap-3 border-t pt-4/)
+})
+
+test("Next call preparation is bounded, evidence-linked, and explicitly seller-applied", async () => {
+  const app = await read("src/App.tsx")
+  const functionsClient = await read("src/lib/server-functions.ts")
+  const nextCallSurface = app.slice(
+    app.indexOf("function OpportunityIntelligence("),
+    app.indexOf("function CallParticipantsSummary(")
+  )
+  const postCallPanel = app.slice(
+    app.indexOf("function PostCallPanel("),
+    app.indexOf("function OpportunitiesView(")
+  )
+  const callPrepDialog = app.slice(
+    app.indexOf("function CallPrepDialog("),
+    app.indexOf("\ntype StartCallPreparationStep =")
+  )
+
+  assert.match(nextCallSurface, /brief\.questions\.slice\(0, 3\)/)
+  assert.match(nextCallSurface, /brief\.watchItems\.slice\(0, 2\)/)
+  assert.match(nextCallSurface, /function NextCallEvidencePanel/)
+  assert.match(nextCallSurface, /evidenceTriggerRef\.current = trigger/)
+  assert.match(nextCallSurface, /evidenceTriggerRef\.current\?\.focus\(\{ preventScroll: true \}\)/)
+  assert.match(nextCallSurface, /<Drawer open=\{open\} onOpenChange=\{onOpenChange\} showSwipeHandle>/)
+  assert.match(nextCallSurface, /<Sheet open=\{open\} onOpenChange=\{onOpenChange\}>/)
+  assert.match(nextCallSurface, /Source no longer available/)
+  assert.match(nextCallSurface, /item\.needsConfirmation \? \(/)
+  assert.match(nextCallSurface, /item\.basis === "inference" \? "AI inference · Needs confirmation" : "Needs confirmation"/)
+  assert.match(nextCallSurface, /Open full call/)
+  assert.match(nextCallSurface, /function NextStepConfirmation/)
+  assert.match(nextCallSurface, /triggerRef\.current\?\.focus\(\{ preventScroll: true \}\)/)
+  assert.match(nextCallSurface, /Review and edit the recommendation before it is saved\./)
+  assert.match(nextCallSurface, /caughtError instanceof SalesFrameFunctionError && caughtError\.status === 409/)
+  assert.match(nextCallSurface, /await getOpportunity\(opportunityId\)/)
+  assert.match(nextCallSurface, /The current value has been reloaded; review it, then confirm again\./)
+  assert.match(nextCallSurface, /expectedOpportunityUpdatedAt: currentSnapshot\.updatedAtIso/)
+  assert.match(functionsClient, /\/api\/opportunities\/\$\{encodeURIComponent\(opportunityId\)\}\/next-call-brief/)
+  assert.match(functionsClient, /body: \{ clientRequestId: createUuidClientRequestId\(\) \}/)
+  assert.match(functionsClient, /\/api\/next-call-briefs\/\$\{encodeURIComponent\(briefId\)\}\/apply-next-step/)
+  assert.match(functionsClient, /expectedOpportunityUpdatedAt: string \| null; nextStep: string/)
+  assert.doesNotMatch(nextCallSurface, /updateSupabaseOpportunity/)
+  assert.match(nextCallSurface, /onNavigate\("opportunity-contacts"\)/)
+  assert.match(nextCallSurface, /#methodology-field-\$\{encodeURIComponent\(playbookFieldId\)\}/)
+  assert.match(nextCallSurface, /We couldn’t confirm the update\. Your previous guidance is still available\./)
+  assert.match(postCallPanel, /Open Next call/)
+  assert.doesNotMatch(postCallPanel, /Next-call plan|Strict methodology checklist/)
+  assert.match(callPrepDialog, /SalesFrame will create its first recommendation independently/)
+  assert.doesNotMatch(callPrepDialog, /nextCallBrief|Suggested opening from next-call brief/)
+})
+
+test("exact transcript evidence links restore focus without forcing motion", async () => {
+  const app = await read("src/App.tsx")
+  const postCallPanel = app.slice(
+    app.indexOf("function PostCallPanel("),
+    app.indexOf("function OpportunitiesView(")
+  )
+
+  assert.match(app, /#transcript-turn-\$\{encodeURIComponent\(transcriptSegmentId\)\}/)
+  assert.match(postCallPanel, /window\.location\.hash\.startsWith\("#transcript-turn-"\)/)
+  assert.match(postCallPanel, /prefers-reduced-motion: reduce/)
+  assert.match(postCallPanel, /behavior: prefersReducedMotion \? "auto" : "smooth"/)
+  assert.match(postCallPanel, /target\.focus\(\{ preventScroll: true \}\)/)
+  assert.match(postCallPanel, /line\.id === highlightedTranscriptSegmentId && "bg-primary\/10 ring-2 ring-ring"/)
 })
 
 test("opportunity summary action row stays minimal", async () => {
@@ -2284,8 +2381,8 @@ test("opportunity summary action row stays minimal", async () => {
     app.indexOf("function OpportunitySummaryStrip(")
   )
 
-  assert.match(summaryStrip, /<CoverageBadge value=\{opportunity\.coverage\} \/>/)
   assert.match(summaryStrip, /startCallAction/)
+  assert.doesNotMatch(summaryStrip, /CoverageBadge/)
   assert.doesNotMatch(summaryStrip, /deleteAction/)
   assert.doesNotMatch(summaryStrip, /Delete opportunity/)
   assert.match(opportunityWorkspace, /<TabsContent value="history"[\s\S]*<\/TabsContent>[\s\S]*Delete opportunity/)
@@ -4457,7 +4554,9 @@ test("transcript speaker labels are confidence-aware and editable", async () => 
   assert.match(app, /distanceFromBottom <= 96/)
   assert.match(app, /if \(hasSearch \|\| !shouldAutoScrollTranscriptRef\.current\) return/)
   assert.match(app, /const container = transcriptScrollRef\.current[\s\S]*container\.scrollTo\(\{ top: container\.scrollHeight, behavior: "auto" \}\)/)
-  assert.doesNotMatch(app, /scrollIntoView\(/)
+  assert.match(app, /prefers-reduced-motion: reduce/)
+  assert.match(app, /target\.scrollIntoView\(\{ behavior: prefersReducedMotion \? "auto" : "smooth", block: "center" \}\)/)
+  assert.match(app, /target\.focus\(\{ preventScroll: true \}\)/)
   assert.match(transcriptTab, /ref=\{transcriptScrollRef\}[\s\S]*onScroll=\{handleTranscriptScroll\}/)
   assert.doesNotMatch(app, /transcriptEndRef/)
   assert.match(app, /from "@\/components\/ui\/message"/)

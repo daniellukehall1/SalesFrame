@@ -23,7 +23,7 @@ const routeCases = [
   ["/accounts/account-1/intelligence", { accountId: "account-1", kind: "account", tab: "intelligence", view: "account-detail" }],
   ["/opportunities/opportunity-1", { kind: "opportunity", opportunityId: "opportunity-1", view: "opportunity-record" }],
   ["/opportunities/opportunity-1/contacts", { kind: "opportunity", opportunityId: "opportunity-1", view: "opportunity-contacts" }],
-  ["/opportunities/opportunity-1/intelligence", { kind: "opportunity", opportunityId: "opportunity-1", view: "opportunity-intelligence" }],
+  ["/opportunities/opportunity-1/next-call", { kind: "opportunity", opportunityId: "opportunity-1", view: "opportunity-intelligence" }],
   ["/opportunities/opportunity-1/methodology", { kind: "opportunity", opportunityId: "opportunity-1", view: "methodology" }],
   ["/opportunities/opportunity-1/history", { kind: "opportunity", opportunityId: "opportunity-1", view: "opportunity-history" }],
   ["/opportunities/opportunity-1/cockpit", { kind: "opportunity", opportunityId: "opportunity-1", view: "workspace" }],
@@ -43,6 +43,17 @@ test("authenticated routes parse and serialize canonically", () => {
     assert.equal(getAuthenticatedRoutePath(expectedRoute), path)
     assert.deepEqual(parseAuthenticatedRoute(`${path}/`), expectedRoute)
   }
+})
+
+test("legacy opportunity intelligence links normalize to the canonical Next call route", () => {
+  const legacyRoute = parseAuthenticatedRoute("/opportunities/opportunity-1/intelligence")
+
+  assert.deepEqual(legacyRoute, {
+    kind: "opportunity",
+    opportunityId: "opportunity-1",
+    view: "opportunity-intelligence",
+  })
+  assert.equal(getAuthenticatedRoutePath(legacyRoute), "/opportunities/opportunity-1/next-call")
 })
 
 test("authenticated routes reject public, malformed, and unknown paths", () => {
@@ -83,6 +94,10 @@ test("route state builds entity paths without relying on asynchronous React stat
   assert.equal(
     getAuthenticatedPathForState({ activeView: "opportunity-contacts", opportunityId: "opportunity-1" }),
     "/opportunities/opportunity-1/contacts"
+  )
+  assert.equal(
+    getAuthenticatedPathForState({ activeView: "opportunity-intelligence", opportunityId: "opportunity-1" }),
+    "/opportunities/opportunity-1/next-call"
   )
   assert.equal(
     getAuthenticatedPathForState({ activeView: "post-call", callId: "call-1", opportunityId: "opportunity-1" }),

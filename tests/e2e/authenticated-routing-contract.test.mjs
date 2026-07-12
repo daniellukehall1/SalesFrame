@@ -193,6 +193,7 @@ test("authenticated routes set meaningful browser and bookmark titles", async ()
 
 test("account and opportunity tabs are controlled by their authenticated routes", async () => {
   const app = await read("src/App.tsx")
+  const routes = await import("../../src/lib/authenticated-routes.ts")
 
   assert.match(app, /const handleAccountTabChange = React\.useCallback/)
   assert.match(app, /getAuthenticatedRoutePath\(\{ accountId, kind: "account", tab, view: "account-detail" \}\)/)
@@ -200,6 +201,19 @@ test("account and opportunity tabs are controlled by their authenticated routes"
   assert.match(app, /activeView === "opportunity-contacts"[\s\S]*\? "contacts"/)
   assert.match(app, /activeView === "opportunity-history"[\s\S]*\? "history"/)
   assert.match(app, /<Tabs[\s\S]*value=\{defaultTab\}[\s\S]*value === "contacts"[\s\S]*"opportunity-contacts"[\s\S]*value === "history"[\s\S]*"opportunity-history"/)
+  assert.deepEqual(routes.parseAuthenticatedRoute("/opportunities/opportunity-1/next-call"), {
+    kind: "opportunity",
+    opportunityId: "opportunity-1",
+    view: "opportunity-intelligence",
+  })
+  assert.equal(
+    routes.getAuthenticatedRoutePath({ kind: "opportunity", opportunityId: "opportunity-1", view: "opportunity-intelligence" }),
+    "/opportunities/opportunity-1/next-call"
+  )
+  assert.deepEqual(
+    routes.parseAuthenticatedRoute("/opportunities/opportunity-1/intelligence"),
+    routes.parseAuthenticatedRoute("/opportunities/opportunity-1/next-call")
+  )
 })
 
 test("settings detail routes expose only their matching settings page", async () => {

@@ -1701,9 +1701,17 @@ export type Database = {
       next_call_briefs: TableDefinition<
         {
           id: string
+          workspace_id: string
+          account_id: string
           opportunity_id: string
           previous_call_id: string | null
           source_meeting_bot_session_id: string | null
+          schema_version: number
+          generated_at: string
+          completed_context_fingerprint: string | null
+          applied_next_step: string | null
+          applied_next_step_by: string | null
+          applied_next_step_at: string | null
           objective: string | null
           suggested_opening: string | null
           focus_questions: Json
@@ -1715,9 +1723,17 @@ export type Database = {
         },
         {
           id?: string
+          workspace_id: string
+          account_id: string
           opportunity_id: string
           previous_call_id?: string | null
           source_meeting_bot_session_id?: string | null
+          schema_version?: number
+          generated_at?: string
+          completed_context_fingerprint?: string | null
+          applied_next_step?: string | null
+          applied_next_step_by?: string | null
+          applied_next_step_at?: string | null
           objective?: string | null
           suggested_opening?: string | null
           focus_questions?: Json
@@ -1729,9 +1745,17 @@ export type Database = {
         },
         {
           id?: string
+          workspace_id?: string
+          account_id?: string
           opportunity_id?: string
           previous_call_id?: string | null
           source_meeting_bot_session_id?: string | null
+          schema_version?: number
+          generated_at?: string
+          completed_context_fingerprint?: string | null
+          applied_next_step?: string | null
+          applied_next_step_by?: string | null
+          applied_next_step_at?: string | null
           objective?: string | null
           suggested_opening?: string | null
           focus_questions?: Json
@@ -1740,6 +1764,209 @@ export type Database = {
           recommended_next_step?: string | null
           created_at?: string
           updated_at?: string
+        }
+      >
+      next_call_brief_attempts: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          source_call_id: string
+          brief_id: string | null
+          requested_by_user_id: string | null
+          client_request_id: string
+          status: "queued" | "processing" | "completed" | "failed"
+          attempt_count: number
+          pending_context_fingerprint: string
+          safe_error_code: string | null
+          worker_locked_at: string | null
+          worker_locked_by: string | null
+          dispatch_locked_at: string | null
+          dispatch_locked_by: string | null
+          started_at: string | null
+          completed_at: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          source_call_id: string
+          brief_id?: string | null
+          requested_by_user_id?: string | null
+          client_request_id: string
+          status?: "queued" | "processing" | "completed" | "failed"
+          attempt_count?: number
+          pending_context_fingerprint: string
+          safe_error_code?: string | null
+          worker_locked_at?: string | null
+          worker_locked_by?: string | null
+          dispatch_locked_at?: string | null
+          dispatch_locked_by?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          source_call_id?: string
+          brief_id?: string | null
+          requested_by_user_id?: string | null
+          client_request_id?: string
+          status?: "queued" | "processing" | "completed" | "failed"
+          attempt_count?: number
+          pending_context_fingerprint?: string
+          safe_error_code?: string | null
+          worker_locked_at?: string | null
+          worker_locked_by?: string | null
+          dispatch_locked_at?: string | null
+          dispatch_locked_by?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      next_call_brief_refresh_requests: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          requested_by_user_id: string
+          client_request_id: string
+          created_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          requested_by_user_id: string
+          client_request_id: string
+          created_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          requested_by_user_id?: string
+          client_request_id?: string
+          created_at?: string
+        }
+      >
+      next_call_brief_items: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          brief_id: string
+          kind: "opening" | "question" | "watch"
+          position: number
+          text: string
+          intent_cluster_id: string | null
+          related_playbook_field_id: string | null
+          learning_target: string | null
+          why_it_matters: string | null
+          suggested_response: string | null
+          basis: "transcript" | "methodology_gap" | "seller_context" | "inference"
+          needs_confirmation: boolean
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          brief_id: string
+          kind: "opening" | "question" | "watch"
+          position: number
+          text: string
+          intent_cluster_id?: string | null
+          related_playbook_field_id?: string | null
+          learning_target?: string | null
+          why_it_matters?: string | null
+          suggested_response?: string | null
+          basis: "transcript" | "methodology_gap" | "seller_context" | "inference"
+          needs_confirmation?: boolean
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          brief_id?: string
+          kind?: "opening" | "question" | "watch"
+          position?: number
+          text?: string
+          intent_cluster_id?: string | null
+          related_playbook_field_id?: string | null
+          learning_target?: string | null
+          why_it_matters?: string | null
+          suggested_response?: string | null
+          basis?: "transcript" | "methodology_gap" | "seller_context" | "inference"
+          needs_confirmation?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      next_call_brief_item_sources: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          brief_id: string
+          item_id: string
+          position: number
+          source_kind: "transcript_segment" | "call_note" | "opportunity_field_evidence"
+          source_call_id: string | null
+          transcript_segment_id: string | null
+          call_note_id: string | null
+          opportunity_field_evidence_id: string | null
+          created_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          brief_id: string
+          item_id: string
+          position: number
+          source_kind: "transcript_segment" | "call_note" | "opportunity_field_evidence"
+          source_call_id?: string | null
+          transcript_segment_id?: string | null
+          call_note_id?: string | null
+          opportunity_field_evidence_id?: string | null
+          created_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          brief_id?: string
+          item_id?: string
+          position?: number
+          source_kind?: "transcript_segment" | "call_note" | "opportunity_field_evidence"
+          source_call_id?: string | null
+          transcript_segment_id?: string | null
+          call_note_id?: string | null
+          opportunity_field_evidence_id?: string | null
+          created_at?: string
         }
       >
       post_call_outputs: TableDefinition<
@@ -2491,6 +2718,82 @@ export type Database = {
           core_fields: Json
           result_payload: Json
           source_payload: Json
+        }
+        Returns: boolean
+      }
+      claim_next_call_brief_generation: {
+        Args: {
+          target_opportunity_id: string
+          target_user_id: string
+          target_client_request_id: string
+          target_context_fingerprint: string
+        }
+        Returns: Database["public"]["Tables"]["next_call_brief_attempts"]["Row"][]
+      }
+      claim_next_call_brief_refresh_request: {
+        Args: {
+          target_opportunity_id: string
+          target_user_id: string
+          target_client_request_id: string
+        }
+        Returns: boolean
+      }
+      resolve_next_call_source_call: {
+        Args: { target_opportunity_id: string }
+        Returns: Database["public"]["Tables"]["calls"]["Row"][]
+      }
+      claim_next_call_brief_attempt: {
+        Args: {
+          target_attempt_id: string
+          worker_id: string
+          lease_seconds?: number
+        }
+        Returns: Database["public"]["Tables"]["next_call_brief_attempts"]["Row"][]
+      }
+      claim_due_next_call_brief_dispatches: {
+        Args: {
+          worker_id: string
+          batch_limit?: number
+          lease_seconds?: number
+        }
+        Returns: Database["public"]["Tables"]["next_call_brief_attempts"]["Row"][]
+      }
+      complete_next_call_brief_generation: {
+        Args: {
+          target_attempt_id: string
+          target_worker_id: string
+          target_outcome: string
+          target_leave_with: string
+          target_items: Json
+        }
+        Returns: Database["public"]["Tables"]["next_call_briefs"]["Row"][]
+      }
+      fail_next_call_brief_generation: {
+        Args: {
+          target_attempt_id: string
+          target_worker_id: string
+          target_safe_error_code: string
+        }
+        Returns: undefined
+      }
+      release_next_call_brief_generation: {
+        Args: { target_attempt_id: string; target_worker_id: string }
+        Returns: boolean
+      }
+      apply_next_call_brief_step: {
+        Args: {
+          target_brief_id: string
+          target_user_id: string
+          target_next_step: string
+          expected_opportunity_updated_at: string
+        }
+        Returns: Database["public"]["Tables"]["opportunities"]["Row"][]
+      }
+      refresh_next_call_brief_fingerprint: {
+        Args: {
+          target_brief_id: string
+          target_context_fingerprint: string
+          expected_opportunity_updated_at: string
         }
         Returns: boolean
       }

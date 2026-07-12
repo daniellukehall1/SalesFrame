@@ -42,6 +42,7 @@ export function createStarterOpportunity({
     closeDate: "Not set",
     createdAt: "Not set",
     createdAtIso: null,
+    updatedAtIso: null,
     coverage: 0,
     missing: 11,
     weak: 0,

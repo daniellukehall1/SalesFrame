@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto"
+
 import type { Config, Context } from "@netlify/functions"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
@@ -6,6 +8,7 @@ import { getEnv } from "./_shared/env"
 import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
 import { runMeetingBotPostCallGeneration } from "./_shared/meeting-bot-post-call"
 import { findLatestMeetingBotSessionForCall } from "./_shared/meeting-bot-store"
+import { generateNextCallBrief, queueNextCallBriefGeneration } from "./_shared/next-call-brief"
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { assertRateLimit } from "./_shared/rate-limit"
@@ -373,11 +376,13 @@ function assertSpeakerCorrectionResult(value: SpeakerCorrectionResult): SpeakerC
 
 export async function generatePostCallOutputs({
   apiKey,
+  apiKeyUserId,
   callId,
   sourceMeetingBotSessionId = null,
   supabase,
 }: {
   apiKey: string
+  apiKeyUserId: string
   callId: string
   sourceMeetingBotSessionId?: string | null
   supabase: SupabaseClient<Database>
@@ -605,31 +610,38 @@ export async function generatePostCallOutputs({
       supabase,
     })
 
-    const nextCallBriefValues = {
-      opportunity_id: call.opportunity_id,
-      previous_call_id: call.id,
-      objective: result.nextCallBrief.objective,
-      suggested_opening: result.nextCallBrief.suggestedOpening,
-      focus_questions: result.nextCallBrief.focusQuestions,
-      missing_evidence: result.nextCallBrief.missingEvidence,
-      risk_notes: result.nextCallBrief.riskNotes,
-      recommended_next_step: result.nextCallBrief.recommendedNextStep,
-      ...(sourceMeetingBotSessionId
-        ? { source_meeting_bot_session_id: sourceMeetingBotSessionId }
-        : {}),
-    }
-    const briefWrite = sourceMeetingBotSessionId
-      ? supabase
-          .from("next_call_briefs")
-          .upsert(nextCallBriefValues, { onConflict: "source_meeting_bot_session_id" })
-      : supabase.from("next_call_briefs").insert(nextCallBriefValues)
-    const { data: nextCallBrief, error: briefError } = await briefWrite
-      .select("*")
-      .single()
-
-    if (briefError) throw new Error(briefError.message)
-
     await supabase.from("calls").update({ status: "post_call_draft" }).eq("id", call.id)
+
+    let nextCallBrief: Database["public"]["Tables"]["next_call_briefs"]["Row"] | null = null
+    try {
+      const queuedBrief = await queueNextCallBriefGeneration({
+        clientRequestId: randomUUID(),
+        opportunityId: call.opportunity_id,
+        supabase,
+        userId: apiKeyUserId,
+      })
+      if (queuedBrief.attemptId) {
+        nextCallBrief = await generateNextCallBrief({
+          apiKeyOverride: apiKey,
+          attemptId: queuedBrief.attemptId,
+          supabase,
+          workerId: `post-call:${call.id}:${randomUUID()}`,
+        })
+      } else if (queuedBrief.briefId) {
+        const { data: existingBrief, error: existingBriefError } = await supabase
+          .from("next_call_briefs")
+          .select("*")
+          .eq("id", queuedBrief.briefId)
+          .eq("schema_version", 2)
+          .maybeSingle()
+        if (existingBriefError) throw new Error(existingBriefError.message)
+        nextCallBrief = existingBrief
+      }
+    } catch (briefError) {
+      // Browser capture keeps the prior successful brief available. Meeting-bot
+      // processing remains retryable until its v2 brief is durably complete.
+      if (sourceMeetingBotSessionId) throw briefError
+    }
 
     return {
       nextCallBrief,
@@ -689,6 +701,7 @@ export default async (request: Request, _context: Context) => {
     const apiKey = await getDecryptedOpenAiKey(supabase, user.id, authorizedCall.workspace_id)
     const output = await generatePostCallOutputs({
       apiKey,
+      apiKeyUserId: user.id,
       callId: payload.callId,
       supabase,
     })

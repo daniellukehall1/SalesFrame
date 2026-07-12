@@ -4,7 +4,7 @@ export const viewLabels: Record<string, string> = {
   "opportunity-record": "Opportunity",
   "opportunity-contacts": "Opportunity Contacts",
   "opportunity-history": "Opportunity History",
-  "opportunity-intelligence": "Next-call Brief",
+  "opportunity-intelligence": "Next call",
   "account-detail": "Account",
   "post-call": "Post-call Outputs",
   opportunities: "Opportunities",

@@ -384,13 +384,83 @@ export type MethodField = {
 }
 
 export type NextCallBrief = {
+  id?: string
+  schemaVersion?: 1 | 2
+  generatedAtIso?: string
+  outcome?: string
   previousCall: string
   objective: string
   opening: string
+  openingItem?: NextCallBriefItem
+  questions?: NextCallBriefItem[]
+  watchItems?: NextCallBriefItem[]
+  leaveWith?: string
   focusQuestions: string[]
   missingEvidence: string[]
   riskNotes: string[]
   recommendedNextStep: string
+  appliedNextStep?: {
+    appliedAtIso: string
+    value: string
+  }
+}
+
+export type NextCallBriefSourceSummary = {
+  id: string
+  kind: "transcript" | "seller_note" | "methodology_evidence" | "inference"
+  label: string
+  needsConfirmation?: boolean
+  callId?: string
+  transcriptSegmentId?: string
+}
+
+export type NextCallBriefEvidence = NextCallBriefSourceSummary & {
+  available: boolean
+  callDateIso?: string
+  callTitle?: string
+  excerpt?: string
+  speaker?: string
+  timestamp?: string
+}
+
+export type NextCallBriefItem = {
+  id: string
+  kind: "opening" | "question" | "watch"
+  text: string
+  intentClusterId?: string
+  playbookFieldIds?: string[]
+  learningTarget?: string
+  whyItMatters?: string
+  suggestedResponse?: string
+  basis: "transcript" | "methodology_gap" | "seller_context" | "inference"
+  needsConfirmation: boolean
+  sources: NextCallBriefSourceSummary[]
+}
+
+export type NextCallBriefAttempt = {
+  status: "queued" | "processing" | "completed" | "failed"
+  safeErrorCode?: string
+}
+
+export type NextCallBriefView = {
+  id: string
+  schemaVersion: 1 | 2
+  outcome: string
+  opening?: NextCallBriefItem
+  questions: NextCallBriefItem[]
+  watchItems: NextCallBriefItem[]
+  leaveWith: string
+  appliedNextStep?: {
+    appliedAtIso: string
+    value: string
+  }
+}
+
+export type NextCallBriefResponse = {
+  brief: NextCallBriefView | null
+  hasCustomerConversation: boolean
+  hasNewerContext: boolean
+  latestAttempt: NextCallBriefAttempt | null
 }
 
 export type Opportunity = {
@@ -402,6 +472,7 @@ export type Opportunity = {
   closeDate: string
   createdAt: string
   createdAtIso: string | null
+  updatedAtIso: string | null
   coverage: number
   missing: number
   weak: number

@@ -17,6 +17,7 @@ import {
   CircleAlertIcon,
   CircleDotIcon,
   ClipboardCheckIcon,
+  CopyIcon,
   Clock3Icon,
   DatabaseIcon,
   DownloadIcon,
@@ -99,6 +100,7 @@ import {
   Drawer,
   DrawerContent,
   DrawerDescription,
+  DrawerFooter,
   DrawerHeader,
   DrawerTitle,
   DrawerTrigger,
@@ -147,6 +149,14 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { PlaybookIcon } from "@/data/playbook-icons"
 import { playbooks } from "@/data/playbook-reference-data"
 import type { LegalPageId } from "@/data/legal-documents"
@@ -235,6 +245,10 @@ import {
   requestLiveQuestion,
   requestLiveState,
   requestPostCallOutputs,
+  applyNextCallBriefNextStep,
+  getNextCallBrief,
+  getNextCallBriefEvidence,
+  refreshNextCallBrief,
   requestSellerDomainResearch,
   saveOpenAiKey,
   saveWorkspaceSessionPolicy,
@@ -279,6 +293,7 @@ import {
   getCurrentUserProfile,
   getContact,
   getContactEnrichmentProfile,
+  getOpportunity,
   getSellerResearchProfile,
   insertLiveGuidanceFeedback,
   listAccountEnrichmentProfiles,
@@ -424,6 +439,10 @@ import {
   type ManualCoachState,
   type ManualQuestion,
   type NextCallBrief,
+  type NextCallBriefEvidence,
+  type NextCallBriefItem,
+  type NextCallBriefResponse,
+  type NextCallBriefView,
   type Opportunity,
   type OpportunityContact,
   type OpportunityCoverageFilter,
@@ -2598,7 +2617,6 @@ function App() {
       })[0]?.id ||
     ""
   activeWorkspaceIdRef.current = activeWorkspaceId
-  const activePostCallOutput = activePostCallCallId ? postCallOutputsByCallId[activePostCallCallId] ?? null : null
   const activePostCallError = postCallError?.callId === activePostCallCallId ? postCallError.message : ""
   const activePostCallGenerating = postCallGeneratingCallId === activePostCallCallId
   const activePostCallRetryBlocked = Boolean(postCallGeneratingCallId && !activePostCallGenerating)
@@ -7107,6 +7125,7 @@ function App() {
                 ].filter(Boolean),
                 questionReason: updatedOpportunity.question_reason ?? opportunity.questionReason,
                 stage: updatedOpportunity.stage,
+                updatedAtIso: updatedOpportunity.updated_at,
                 weak: updatedOpportunity.weak_count ?? opportunity.weak,
               }
             : opportunity
@@ -7160,6 +7179,37 @@ function App() {
       setOpportunityRecordSaveMessage(message)
     }
   }
+
+  const handleNextCallBriefNextStepApplied = React.useCallback((
+    opportunityId: string,
+    nextStep: string,
+    updatedAtIso: string
+  ) => {
+    setWorkspaceOpportunities((opportunities) =>
+      opportunities.map((opportunity) => {
+        if (opportunity.id !== opportunityId) return opportunity
+
+        return {
+          ...opportunity,
+          notes: [
+            ...opportunity.notes.filter((note) => !note.startsWith("Next step:")),
+            nextStep ? `Next step: ${nextStep}` : "",
+          ].filter(Boolean),
+          updatedAtIso,
+        }
+      })
+    )
+    setOpportunityDrafts((drafts) => {
+      const current = drafts[opportunityId]
+      return current ? { ...drafts, [opportunityId]: { ...current, nextStep } } : drafts
+    })
+    setSavedOpportunityDrafts((drafts) => {
+      const current = drafts[opportunityId]
+      return current ? { ...drafts, [opportunityId]: { ...current, nextStep } } : drafts
+    })
+    setOpportunityRecordSaveStatus("saved")
+    setOpportunityRecordSaveMessage("Opportunity next step updated.")
+  }, [])
 
   const handleAuthModeChange = (mode: AuthMode) => {
     setPasswordRecoveryActive(false)
@@ -8290,7 +8340,6 @@ function App() {
                 postCallGenerating={activePostCallGenerating}
                 postCallRetryBlocked={activePostCallRetryBlocked}
                 postCallError={activePostCallError}
-                postCallOutput={activePostCallOutput}
                 postCallTranscript={activePostCallTranscript}
                 savedOpenAiKeyState={savedOpenAiKeyState}
                 savedOpportunityDraft={activeSavedOpportunityDraft}
@@ -8300,6 +8349,7 @@ function App() {
                 transcript={transcript}
                 workspaceId={activeWorkspaceId}
                 onCoachFeedback={handleLiveCoachFeedback}
+                onCallSelect={handleCallSelect}
                 onMarkQuestionAsked={handleMarkManualQuestionAsked}
                 onRetryMeetingBot={handleRetryMeetingBot}
                 onNavigate={handleNavigate}
@@ -8307,6 +8357,7 @@ function App() {
                 onOpportunityDraftChange={(field, value) =>
                   updateOpportunityDraft(activeOpportunity.id, field, value)
                 }
+                onNextCallBriefNextStepApplied={handleNextCallBriefNextStepApplied}
                 onOpportunitySelect={handleOpportunitySelect}
                 onArchiveOpportunity={handleRequestArchiveOpportunity}
                 onDeleteOpportunity={handleRequestDeleteOpportunity}
@@ -9769,7 +9820,6 @@ function CallPrepDialog({
   onViewChange: (value: string) => void
 }) {
   const prepItems = buildCallPrepBriefItems(opportunity, opportunityDraft)
-  const suggestedOpening = opportunity.nextCallBrief?.opening.trim()
 
   return (
     <Dialog>
@@ -9809,12 +9859,9 @@ function CallPrepDialog({
             </div>
           ))}
           <div className="rounded-lg bg-muted/35 p-3">
-            <p className="text-sm font-medium">
-              {suggestedOpening ? "Suggested opening from next-call brief" : "First live question"}
-            </p>
+            <p className="text-sm font-medium">Live coaching</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {suggestedOpening ||
-                "Start the call when ready. SalesFrame will generate the opener from the account context, opportunity record, call type, selected playbooks, and previous evidence before recording begins."}
+              SalesFrame will create its first recommendation independently, then adapt to what the customer actually says.
             </p>
           </div>
         </div>
@@ -11070,7 +11117,12 @@ function StartRecordingDialog({
   }
 
   const startCallTrigger = (
-    <Button size="sm" variant={triggerVariant} className="h-11 min-h-11 gap-2 px-4 md:h-7 md:min-h-7 md:px-2.5">
+    <Button
+      size="sm"
+      variant={triggerVariant}
+      className="h-11 min-h-11 gap-2 px-4 md:h-7 md:min-h-7 md:px-2.5"
+      data-opportunity-start-call={defaultOpportunityId || undefined}
+    >
       {triggerIcon}
       {triggerLabel}
     </Button>
@@ -11820,7 +11872,7 @@ function StartRecordingDialog({
               hasSavedOpenAiKey ? (
                 <Button
                   variant="destructive"
-                  className="h-11 gap-2"
+                  className="gap-2"
                   disabled={!canStart || startSubmitting}
                   onClick={handleStart}
                 >
@@ -11877,7 +11929,7 @@ function StartRecordingDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>{startCallTrigger}</DialogTrigger>
       <DialogContent
-        className="grid max-h-[calc(100dvh_-_2rem)] min-w-0 overflow-hidden max-sm:max-h-[calc(100dvh_-_0.75rem)] max-sm:max-w-[calc(100%_-_0.75rem)] max-sm:gap-3 max-sm:p-3 [&_[data-slot=button]]:min-h-11 [&_[data-slot=input]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 sm:h-[760px] sm:max-w-3xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        className="grid max-h-[calc(100dvh_-_2rem)] min-w-0 overflow-hidden max-sm:max-h-[calc(100dvh_-_0.75rem)] max-sm:max-w-[calc(100%_-_0.75rem)] max-sm:gap-3 max-sm:p-3 max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-3xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -15402,7 +15454,6 @@ function WorkspaceView({
   postCallGenerating,
   postCallRetryBlocked,
   postCallError,
-  postCallOutput,
   postCallTranscript,
   savedOpenAiKeyState,
   savedOpportunityDraft,
@@ -15414,9 +15465,11 @@ function WorkspaceView({
   onMarkQuestionAsked,
   onRetryMeetingBot,
   onCoachFeedback,
+  onCallSelect,
   onNavigate,
   onOpenSettings,
   onOpportunityDraftChange,
+  onNextCallBriefNextStepApplied,
   onOpportunitySelect,
   onArchiveOpportunity,
   onDeleteOpportunity,
@@ -15469,7 +15522,6 @@ function WorkspaceView({
   postCallGenerating: boolean
   postCallRetryBlocked: boolean
   postCallError: string
-  postCallOutput: PostCallOutputView | null
   postCallTranscript: Opportunity["transcript"]
   savedOpenAiKeyState: SavedOpenAiKeyState | null
   savedOpportunityDraft: OpportunityDraft
@@ -15481,9 +15533,11 @@ function WorkspaceView({
   onMarkQuestionAsked: (question: ManualQuestion) => void
   onRetryMeetingBot: (meetingUrl: string) => Promise<void>
   onCoachFeedback: (action: LiveSellerFeedbackAction, question: ManualQuestion) => void
+  onCallSelect: (callId: string) => void
   onNavigate: (view: string) => void
   onOpenSettings: () => void
   onOpportunityDraftChange: (field: keyof OpportunityDraft, value: string) => void
+  onNextCallBriefNextStepApplied: (opportunityId: string, nextStep: string, updatedAtIso: string) => void
   onOpportunitySelect: (id: string) => void
   onArchiveOpportunity: (id: string) => void
   onDeleteOpportunity: (id: string) => void
@@ -16284,7 +16338,9 @@ function WorkspaceView({
           onArchiveOpportunity={onArchiveOpportunity}
           onDeleteCall={onDeleteCall}
           onDeleteOpportunity={onDeleteOpportunity}
+          onCallSelect={onCallSelect}
           onNavigate={onNavigate}
+          onNextCallBriefNextStepApplied={onNextCallBriefNextStepApplied}
           onOpenSettings={onOpenSettings}
           onOpportunityDraftChange={onOpportunityDraftChange}
           onOpportunitySelect={onOpportunitySelect}
@@ -16300,8 +16356,6 @@ function WorkspaceView({
         <PostCallPanel
           isProcessing={postCallGenerating}
           isRetryBlocked={postCallRetryBlocked}
-          opportunity={opportunity}
-          output={postCallOutput}
           processingError={postCallError}
           replayCall={postCallReplayCall}
           transcript={postCallTranscript}
@@ -16335,7 +16389,9 @@ function OpportunityWorkspace({
   onArchiveOpportunity,
   onDeleteCall,
   onDeleteOpportunity,
+  onCallSelect,
   onNavigate,
+  onNextCallBriefNextStepApplied,
   onOpenSettings,
   onOpportunityDraftChange,
   onOpportunitySelect,
@@ -16364,7 +16420,9 @@ function OpportunityWorkspace({
   onArchiveOpportunity: (id: string) => void
   onDeleteCall: (callId: string) => void
   onDeleteOpportunity: (id: string) => void
+  onCallSelect: (callId: string) => void
   onNavigate: (view: string) => void
+  onNextCallBriefNextStepApplied: (opportunityId: string, nextStep: string, updatedAtIso: string) => void
   onOpenSettings: () => void
   onOpportunityDraftChange: (field: keyof OpportunityDraft, value: string) => void
   onOpportunitySelect: (id: string) => void
@@ -16420,7 +16478,6 @@ function OpportunityWorkspace({
       }}
     >
       <OpportunitySummaryStrip
-        opportunity={opportunity}
         startCallAction={
           account.id && opportunity.id ? (
             <StartRecordingDialog
@@ -16442,7 +16499,7 @@ function OpportunityWorkspace({
       <TabsList className="w-full md:w-fit">
         <TabsTrigger className="min-w-24" value="record">Record</TabsTrigger>
         <TabsTrigger className="min-w-24" value="contacts">Contacts</TabsTrigger>
-        <TabsTrigger className="min-w-24" value="intelligence">Intel</TabsTrigger>
+        <TabsTrigger className="min-w-24" value="intelligence">Next call</TabsTrigger>
         <TabsTrigger className="min-w-24" value="methodology">Methodology</TabsTrigger>
         <TabsTrigger className="min-w-24" value="history">History</TabsTrigger>
       </TabsList>
@@ -16494,9 +16551,13 @@ function OpportunityWorkspace({
       <TabsContent value="intelligence" className="m-0 w-full min-w-0">
         <OpportunityIntelligence
           opportunity={opportunity}
+          opportunityDraft={opportunityDraft}
           playbookFields={playbookFields}
           playbookRows={playbookRows}
           selectedPlaybooks={parsePlaybookSelection(opportunityDraft.frameworks)}
+          onCallSelect={onCallSelect}
+          onNavigate={onNavigate}
+          onNextStepApplied={onNextCallBriefNextStepApplied}
         />
       </TabsContent>
       <TabsContent value="methodology" className="m-0 w-full min-w-0">
@@ -16551,18 +16612,15 @@ function OpportunityWorkspace({
 }
 
 function OpportunitySummaryStrip({
-  opportunity,
   startCallAction,
 }: {
-  opportunity: Opportunity
   startCallAction?: React.ReactNode
 }) {
+  if (!startCallAction) return null
+
   return (
-    <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        {startCallAction}
-      </div>
-      <CoverageBadge value={opportunity.coverage} />
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      {startCallAction}
     </div>
   )
 }
@@ -16985,6 +17043,7 @@ type MethodologyChecklistStatus = Opportunity["meddicc"][number]["status"]
 
 type MethodologyChecklistItem = {
   detail: string
+  id?: string
   label: string
   status: MethodologyChecklistStatus
 }
@@ -17011,6 +17070,7 @@ function getMethodologyChecklistItems({
   const configuredFields = configuredRows.length
     ? configuredRows.map((field) => ({
         detail: field.evidence_standard || field.description || "Use buyer evidence that clearly supports this field.",
+        id: field.id,
         label: field.label,
       }))
     : (fallbackPlaybook?.fields ?? []).map(([label, detail]) => ({ detail, label }))
@@ -17165,6 +17225,9 @@ function MethodologyGrid({
   })
   const weakFieldCount = checklistGroups.reduce((total, group) => total + group.weakCount, 0)
   const missingFieldCount = checklistGroups.reduce((total, group) => total + group.missingCount, 0)
+  const requiredFieldCount = checklistGroups.reduce((total, group) => total + group.requiredFields.length, 0)
+  const coveredFieldCount = checklistGroups.reduce((total, group) => total + group.coveredCount, 0)
+  const methodologyCoverage = requiredFieldCount ? Math.round((coveredFieldCount / requiredFieldCount) * 100) : 0
   const playbooksHaveChanges = !arePlaybookSelectionsEqual(selectedPlaybooks, savedSelectedPlaybooks)
 
   const togglePlaybook = (playbook: CallPlaybook) => {
@@ -17237,8 +17300,8 @@ function MethodologyGrid({
               <p className="mt-1 text-2xl font-semibold">{transcriptLineCount}</p>
             </div>
             <div className="rounded-lg bg-muted/20 p-3">
-              <p className="text-xs font-medium text-muted-foreground">Last AI coverage</p>
-              <p className="mt-1 text-2xl font-semibold">{opportunity.coverage}%</p>
+              <p className="text-xs font-medium text-muted-foreground">Methodology coverage</p>
+              <p className="mt-1 text-2xl font-semibold">{methodologyCoverage}%</p>
             </div>
             <div className="rounded-lg bg-muted/20 p-3">
               <p className="text-xs font-medium text-muted-foreground">Weak fields</p>
@@ -17269,7 +17332,12 @@ function MethodologyGrid({
               </CardHeader>
               <CardContent className="grid gap-2">
                 {requiredFields.map((field) => (
-                  <div key={field.label} className="flex min-w-0 gap-3 rounded-lg bg-muted/25 p-3">
+                  <div
+                    key={field.id ?? field.label}
+                    id={field.id ? `methodology-field-${field.id}` : undefined}
+                    className="scroll-mt-24 flex min-w-0 gap-3 rounded-lg bg-muted/25 p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    tabIndex={field.id ? -1 : undefined}
+                  >
                     <span
                       className={cn(
                         "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full",
@@ -18700,160 +18768,980 @@ function OpportunityProfile({
   )
 }
 
-function OpportunityIntelligence({
+type FirstConversationTheme = {
+  id: string
+  title: string
+}
+
+function getFirstConversationLearningThemes({
   opportunity,
+  opportunityDraft,
   playbookFields,
   playbookRows,
   selectedPlaybooks,
 }: {
   opportunity: Opportunity
+  opportunityDraft: OpportunityDraft
   playbookFields: PlaybookFieldRow[]
   playbookRows: PlaybookRow[]
   selectedPlaybooks: CallPlaybook[]
+}): FirstConversationTheme[] {
+  if (!selectedPlaybooks.length) return []
+
+  const missingLabels = selectedPlaybooks.flatMap((framework) =>
+    getMethodologyChecklistItems({
+      capturedFields: [...opportunity.meddicc, ...opportunity.bant],
+      framework,
+      playbookFields,
+      playbookRows,
+    })
+      .filter((field) => field.status !== "confirmed")
+      .map((field) => normalizeSearchText(field.label))
+  )
+  const context = normalizeSearchText([
+    opportunityDraft.pain,
+    opportunityDraft.decisionProcess,
+    opportunityDraft.nextStep,
+    opportunityDraft.manualNotes,
+    ...opportunity.notes,
+  ].join(" "))
+  const normalizedStage = normalizeSearchText(opportunity.stage)
+  const isEvaluationStage = ["demo", "validation", "business case", "proposal", "negotiation"].some((stage) =>
+    normalizedStage.includes(stage)
+  )
+  const candidates = [
+    {
+      id: "priorities",
+      title: "Current priorities and why they matter now",
+      matches: ["need", "pain", "priority", "problem", "situation", "implication"],
+      fallback: true,
+    },
+    {
+      id: "outcomes",
+      title: "The outcome the customer wants to achieve",
+      matches: ["metric", "outcome", "success", "desired state", "value"],
+      fallback: true,
+    },
+    {
+      id: "impact",
+      title: isEvaluationStage
+        ? "What would make this stage useful to the customer"
+        : "How the current situation affects the customer",
+      matches: ["impact", "pain", "consequence", "cost", "critical event"],
+      fallback: true,
+    },
+    {
+      id: "people",
+      title: "Who else should be involved in evaluating the opportunity",
+      matches: ["champion", "authority", "buyer", "stakeholder", "power", "coach"],
+      fallback: true,
+    },
+    {
+      id: "decision",
+      title: "How the customer expects to make a decision",
+      matches: ["decision", "approval", "procurement", "legal", "security", "budget"],
+      fallback: false,
+    },
+  ]
+
+  const matched = candidates.filter((candidate) => {
+    const hasMatch = candidate.matches.some((term) => missingLabels.some((label) => label.includes(term)))
+    if (!hasMatch) return false
+    if (candidate.fallback) return true
+
+    return candidate.matches.some((term) => context.includes(term))
+  })
+  const lowPressure = [
+    ...matched.filter((candidate) => candidate.fallback),
+    ...candidates.filter((candidate) => candidate.fallback && !matched.includes(candidate)),
+  ]
+  const heavierContext = matched.find((candidate) => !candidate.fallback)
+  const ordered = heavierContext
+    ? [...lowPressure.slice(0, 2), heavierContext, ...lowPressure.slice(2)]
+    : lowPressure
+
+  return ordered.slice(0, 3).map(({ id, title }) => ({ id, title }))
+}
+
+function getLegacyQuestionLearningTarget(question: string) {
+  const normalized = normalizeSearchText(question)
+  if (/approv|authority|economic buyer|decision maker/.test(normalized)) return "decision authority"
+  if (/metric|measure|success|worth/.test(normalized)) return "measurable success"
+  if (/team|region|cohort|scope/.test(normalized)) return "initial scope"
+  if (/timeline|when|date|timing/.test(normalized)) return "timing"
+  if (/budget|fund|commercial/.test(normalized)) return "funding path"
+
+  return "customer priorities"
+}
+
+function mapLegacyNextCallBrief(brief?: NextCallBrief): NextCallBriefView | null {
+  if (!brief) return null
+
+  return {
+    id: brief.id ?? "legacy-next-call-brief",
+    schemaVersion: brief.schemaVersion ?? 1,
+    outcome: brief.outcome || brief.objective,
+    opening: brief.openingItem ?? (brief.opening.trim() ? {
+      id: "legacy-opening",
+      kind: "opening",
+      text: brief.opening,
+      basis: "inference",
+      needsConfirmation: true,
+      sources: [],
+    } : undefined),
+    questions: (brief.questions ?? brief.focusQuestions.map((question, index) => ({
+      id: `legacy-question-${index + 1}`,
+      kind: "question" as const,
+      text: question,
+      learningTarget: getLegacyQuestionLearningTarget(question),
+      basis: "inference" as const,
+      needsConfirmation: true,
+      sources: [],
+    }))).slice(0, 3),
+    watchItems: (brief.watchItems ?? brief.riskNotes.map((risk, index) => ({
+      id: `legacy-watch-${index + 1}`,
+      kind: "watch" as const,
+      text: risk,
+      basis: "inference" as const,
+      needsConfirmation: true,
+      sources: [],
+    }))).slice(0, 2),
+    leaveWith: brief.leaveWith || brief.recommendedNextStep,
+    appliedNextStep: brief.appliedNextStep,
+  }
+}
+
+function OpportunityIntelligence({
+  opportunity,
+  opportunityDraft,
+  playbookFields,
+  playbookRows,
+  selectedPlaybooks,
+  onCallSelect,
+  onNavigate,
+  onNextStepApplied,
+}: {
+  opportunity: Opportunity
+  opportunityDraft: OpportunityDraft
+  playbookFields: PlaybookFieldRow[]
+  playbookRows: PlaybookRow[]
+  selectedPlaybooks: CallPlaybook[]
+  onCallSelect: (callId: string) => void
+  onNavigate: (view: string) => void
+  onNextStepApplied: (opportunityId: string, nextStep: string, updatedAtIso: string) => void
 }) {
-  const methodologySummary = getOpportunityMethodologySummary({
+  const legacyBrief = React.useMemo(() => mapLegacyNextCallBrief(opportunity.nextCallBrief), [opportunity.nextCallBrief])
+  const [briefState, setBriefState] = React.useState<NextCallBriefResponse | null>(null)
+  const [statusMessage, setStatusMessage] = React.useState("")
+  const [statusTone, setStatusTone] = React.useState<"quiet" | "error">("quiet")
+  const [selectedEvidenceItem, setSelectedEvidenceItem] = React.useState<NextCallBriefItem | null>(null)
+  const evidenceTriggerRef = React.useRef<HTMLButtonElement | null>(null)
+  const [showExtendedPreparingMessage, setShowExtendedPreparingMessage] = React.useState(false)
+  const [isLoadingBrief, setIsLoadingBrief] = React.useState(true)
+  const requestIdRef = React.useRef(0)
+  const brief = briefState?.brief ?? legacyBrief
+  const latestAttempt = briefState?.latestAttempt ?? null
+  const isUpdating = latestAttempt?.status === "queued" || latestAttempt?.status === "processing"
+  const hasConversationEvidence = Boolean(
+    briefState?.hasCustomerConversation ||
+    brief ||
+    opportunity.transcript.some((line) =>
+      line.text.trim() &&
+      line.speakerNeedsReview !== true &&
+      (line.speaker === "Customer" || line.speaker === "Customer 2" || line.speaker === "Customer 3")
+    )
+  )
+  const learningThemes = React.useMemo(() => getFirstConversationLearningThemes({
     opportunity,
+    opportunityDraft,
     playbookFields,
     playbookRows,
     selectedPlaybooks,
-  })
-  const fieldGroups: [string, number][] = [
-    ["Confirmed fields", methodologySummary.confirmed],
-    ["Weak evidence", methodologySummary.weak],
-    ["Missing required", methodologySummary.missing],
-  ]
+  }), [opportunity, opportunityDraft, playbookFields, playbookRows, selectedPlaybooks])
 
-  return (
-    <div className="grid gap-4">
-      {opportunity.nextCallBrief ? (
-        <NextCallBriefCard brief={opportunity.nextCallBrief} />
-      ) : null}
-      <Card>
+  const loadBrief = React.useCallback(async (options: { quiet?: boolean } = {}) => {
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+
+    try {
+      const response = await getNextCallBrief(opportunity.id)
+      if (requestId !== requestIdRef.current) return null
+      setBriefState(response)
+      if (response.latestAttempt?.status === "failed") {
+        setStatusTone("error")
+        setStatusMessage(response.brief
+          ? "We couldn’t update this brief. Your previous guidance is still available."
+          : "We couldn’t prepare this brief. Try again.")
+      } else {
+        setStatusMessage((current) => {
+          if (!options.quiet) return ""
+          return response.latestAttempt?.status === "completed" && current.startsWith("Updating this brief")
+            ? ""
+            : current
+        })
+      }
+      return response
+    } catch (caughtError: unknown) {
+      if (requestId !== requestIdRef.current) return null
+      if (!legacyBrief && hasConversationEvidence && !options.quiet) {
+        setStatusTone("error")
+        setStatusMessage(getUserFacingErrorMessage(caughtError, "We couldn’t load this brief. Try again."))
+      }
+      return null
+    }
+  }, [hasConversationEvidence, legacyBrief, opportunity.id])
+
+  React.useEffect(() => {
+    let cancelled = false
+    setBriefState(null)
+    setStatusMessage("")
+    setSelectedEvidenceItem(null)
+    setIsLoadingBrief(true)
+    void loadBrief({ quiet: true }).finally(() => {
+      if (!cancelled) setIsLoadingBrief(false)
+    })
+
+    return () => {
+      cancelled = true
+      requestIdRef.current += 1
+    }
+  }, [loadBrief, opportunity.id])
+
+  React.useEffect(() => {
+    if (latestAttempt?.status !== "queued" && latestAttempt?.status !== "processing") return
+
+    const intervalId = window.setInterval(() => void loadBrief({ quiet: true }), 3_000)
+    return () => window.clearInterval(intervalId)
+  }, [latestAttempt?.status, loadBrief])
+
+  React.useEffect(() => {
+    setShowExtendedPreparingMessage(false)
+    if (brief || (!isUpdating && !isLoadingBrief)) return
+
+    const timeoutId = window.setTimeout(() => setShowExtendedPreparingMessage(true), 8_000)
+    return () => window.clearTimeout(timeoutId)
+  }, [brief, isLoadingBrief, isUpdating])
+
+  const handleRefresh = async () => {
+    if (isUpdating) return
+    setStatusTone("quiet")
+    setStatusMessage("Updating this brief from the latest information…")
+
+    try {
+      const response = await refreshNextCallBrief(opportunity.id)
+      if (response.status === "completed") {
+        const refreshed = await loadBrief()
+        if (!refreshed) {
+          setStatusTone("error")
+          setStatusMessage(brief
+            ? "We couldn’t confirm the update. Your previous guidance is still available."
+            : "We couldn’t confirm the update. Try again.")
+          return
+        }
+        if (refreshed && refreshed.brief?.id === brief?.id && refreshed.hasNewerContext === false) {
+          setStatusMessage("This brief is already up to date.")
+        } else {
+          setStatusMessage("")
+        }
+        return
+      }
+
+      setBriefState((current) => ({
+        brief: current?.brief ?? brief ?? null,
+        hasCustomerConversation: current?.hasCustomerConversation ?? true,
+        hasNewerContext: current?.hasNewerContext ?? false,
+        latestAttempt: { status: response.status },
+      }))
+    } catch (caughtError: unknown) {
+      setStatusTone("error")
+      setStatusMessage(getUserFacingErrorMessage(
+        caughtError,
+        brief
+          ? "We couldn’t update this brief. Your previous guidance is still available."
+          : "We couldn’t prepare this brief. Try again."
+      ))
+    }
+  }
+
+  const handleOpenFullCall = (callId: string, transcriptSegmentId?: string) => {
+    onCallSelect(callId)
+    if (!transcriptSegmentId) return
+
+    const hash = `#transcript-turn-${encodeURIComponent(transcriptSegmentId)}`
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`)
+  }
+
+  const handleOpenEvidence = (item: NextCallBriefItem, trigger: HTMLButtonElement) => {
+    evidenceTriggerRef.current = trigger
+    setSelectedEvidenceItem(item)
+  }
+
+  const handleReviewMethodology = (playbookFieldId?: string) => {
+    onNavigate("methodology")
+    if (!playbookFieldId) return
+
+    const hash = `#methodology-field-${encodeURIComponent(playbookFieldId)}`
+    window.requestAnimationFrame(() => {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`)
+      const target = document.getElementById(`methodology-field-${playbookFieldId}`)
+      if (!target) return
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      target.scrollIntoView({ block: "center", behavior: prefersReducedMotion ? "auto" : "smooth" })
+      target.focus({ preventScroll: true })
+    })
+  }
+
+  const handleEvidenceOpenChange = (open: boolean) => {
+    if (open) return
+    setSelectedEvidenceItem(null)
+    window.requestAnimationFrame(() => evidenceTriggerRef.current?.focus({ preventScroll: true }))
+  }
+
+  if (!hasConversationEvidence && isLoadingBrief) {
+    return (
+      <Card data-testid="next-call-mode-loading" aria-busy="true">
         <CardHeader>
           <div>
-            <CardTitle>Opportunity intelligence</CardTitle>
-            <CardDescription>Read-only AI findings generated from call history</CardDescription>
+            <h1 className="font-heading text-base font-medium leading-snug">Next call</h1>
+            <CardDescription>Checking the conversation evidence for this opportunity.</CardDescription>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="rounded-lg bg-muted/30 p-3">
-            <p className="text-sm font-medium">
-              {hasStarterOpportunityGuidance(opportunity) ? "Live question" : "Next best question"}
-            </p>
-            {hasStarterOpportunityGuidance(opportunity) ? (
-              <div className="mt-2 rounded-lg bg-background/70 p-3 text-sm leading-relaxed text-muted-foreground">
-                Start a call when you are ready. SalesFrame will prepare the first live question from the account, opportunity, and selected playbooks.
-              </div>
-            ) : (
-              <>
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                  {getOpportunityGuidancePreview(opportunity)}
-                </p>
-                <p className="mt-3 text-xs text-muted-foreground">
-                  {opportunity.questionReason}
-                </p>
-              </>
-            )}
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            {fieldGroups.map(([label, value]) => (
-              <div key={label} className="rounded-lg bg-muted/20 p-3">
-                <p className="text-xs font-medium text-muted-foreground">{label}</p>
-                <p className="mt-1 text-2xl font-semibold">{value}</p>
-              </div>
-            ))}
-          </div>
+        <CardContent className="grid gap-3 py-6" role="status" aria-live="polite">
+          <Skeleton className="h-5 w-2/3 rounded-md" />
+          <Skeleton className="h-16 rounded-lg" />
+          <span className="sr-only">Loading Next call preparation</span>
         </CardContent>
       </Card>
-    </div>
+    )
+  }
+
+  if (!hasConversationEvidence) {
+    return (
+      <FirstConversationCard
+        learningThemes={learningThemes}
+        hasSelectedMethodology={selectedPlaybooks.length > 0}
+        onNavigate={onNavigate}
+      />
+    )
+  }
+
+  return (
+    <>
+      <Card data-testid="next-call-brief">
+        <CardHeader>
+          <div>
+            <h1 className="font-heading text-base font-medium leading-snug">Next call</h1>
+            <CardDescription>Prepare the themes that matter. Live coaching will follow the conversation.</CardDescription>
+          </div>
+          <CardAction>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" size="sm" variant="ghost" className="min-h-11 gap-1.5 md:min-h-8">
+                  Actions
+                  <ChevronDownIcon className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled={isUpdating} onSelect={() => void handleRefresh()}>
+                  <SparklesIcon />
+                  Update brief
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="grid gap-6">
+          {briefState?.hasNewerContext && !isUpdating ? (
+            <div className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-muted-foreground">There is newer information available.</span>
+              <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" onClick={() => void handleRefresh()}>
+                Update brief
+              </Button>
+            </div>
+          ) : null}
+          {isUpdating ? (
+            <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
+              Updating this brief from the latest information…
+            </p>
+          ) : statusMessage ? (
+            <p
+              className={cn("text-sm", statusTone === "error" ? "text-destructive" : "text-muted-foreground")}
+              role={statusTone === "error" ? "alert" : "status"}
+              aria-live="polite"
+            >
+              {statusMessage}
+            </p>
+          ) : null}
+
+          {brief ? (
+            <>
+              <NextCallSection title="Aim for">
+                <p className="max-w-4xl break-words text-base leading-relaxed">{brief.outcome}</p>
+              </NextCallSection>
+              <Separator />
+              <div className="grid min-w-0 gap-8 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+                <NextCallSection title="Questions to have ready">
+                  {brief.questions.length ? (
+                    <div className="grid gap-5">
+                      {brief.questions.slice(0, 3).map((question) => (
+                        <NextCallQuestion
+                          key={question.id}
+                          item={question}
+                          onOpenEvidence={handleOpenEvidence}
+                          onReviewMethodology={() => handleReviewMethodology(question.playbookFieldIds?.[0])}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No preparation questions are available yet. Live coaching will still follow the conversation.
+                    </p>
+                  )}
+                </NextCallSection>
+                <div className="min-w-0 border-t pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+                  <NextCallSection title="Leave with">
+                    <p className="break-words text-sm leading-relaxed">{brief.leaveWith}</p>
+                    <NextStepConfirmation
+                      brief={brief}
+                      currentNextStep={opportunityDraft.nextStep}
+                      expectedOpportunityUpdatedAt={opportunity.updatedAtIso}
+                      opportunityId={opportunity.id}
+                      onApplied={onNextStepApplied}
+                    />
+                  </NextCallSection>
+                </div>
+              </div>
+              {brief.watchItems.length ? (
+                <>
+                  <Separator />
+                  <NextCallSection title="Watch for">
+                    <div className="grid gap-5 lg:grid-cols-2 lg:gap-8">
+                      {brief.watchItems.slice(0, 2).map((item) => (
+                        <NextCallWatchItem
+                          key={item.id}
+                          item={item}
+                          onOpenEvidence={handleOpenEvidence}
+                          onReviewContacts={() => onNavigate("opportunity-contacts")}
+                        />
+                      ))}
+                    </div>
+                  </NextCallSection>
+                </>
+              ) : null}
+              {brief.opening ? (
+                <>
+                  <Separator />
+                  <PossibleOpening item={brief.opening} onOpenEvidence={handleOpenEvidence} />
+                </>
+              ) : null}
+            </>
+          ) : (
+            isLoadingBrief || isUpdating ? (
+              <div className="grid gap-3 py-6" role="status" aria-live="polite">
+                <Skeleton className="h-5 w-2/3 rounded-md" />
+                <Skeleton className="h-16 rounded-lg" />
+                <Skeleton className="h-16 rounded-lg" />
+                {showExtendedPreparingMessage ? (
+                  <p className="text-sm text-muted-foreground">Still preparing your brief. You can keep working.</p>
+                ) : <span className="sr-only">Preparing your Next call guidance</span>}
+              </div>
+            ) : (
+              <div className="grid gap-3 py-8 text-center">
+                <p className="font-medium">Next call guidance isn’t ready yet</p>
+                <p className="text-sm text-muted-foreground">
+                  SalesFrame can prepare it from the saved conversation and methodology evidence.
+                </p>
+                <Button type="button" variant="outline" className="mx-auto min-h-11" onClick={() => void handleRefresh()}>
+                  Try again
+                </Button>
+              </div>
+            )
+          )}
+        </CardContent>
+      </Card>
+      <NextCallEvidencePanel
+        briefId={brief?.id ?? ""}
+        item={selectedEvidenceItem}
+        onOpenChange={handleEvidenceOpenChange}
+        onOpenFullCall={handleOpenFullCall}
+      />
+    </>
   )
 }
 
-function NextCallBriefCard({ brief }: { brief: NextCallBrief }) {
+function FirstConversationCard({
+  hasSelectedMethodology,
+  learningThemes,
+  onNavigate,
+}: {
+  hasSelectedMethodology: boolean
+  learningThemes: FirstConversationTheme[]
+  onNavigate: (view: string) => void
+}) {
   return (
-    <Card>
+    <Card data-testid="first-conversation-state">
       <CardHeader>
         <div>
-          <CardDescription>Next-call brief</CardDescription>
-          <CardTitle>What to do on the next customer call</CardTitle>
+          <h1 className="font-heading text-base font-medium leading-snug">First conversation</h1>
+          <CardDescription>
+            There is no customer conversation evidence yet. Prepare the themes that matter and SalesFrame will adapt once the call begins.
+          </CardDescription>
         </div>
-        <CardAction>
-          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-            <FileTextIcon className="size-4" />
-            {brief.previousCall}
-          </span>
-        </CardAction>
       </CardHeader>
-      <CardContent className="grid gap-4">
-        <div className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="grid gap-3">
-            <BriefTextBlock title="Objective" icon={<TargetIcon />}>
-              {brief.objective}
-            </BriefTextBlock>
-            <BriefTextBlock title="Suggested opening" icon={<SquarePenIcon />}>
-              {brief.opening}
-            </BriefTextBlock>
-          </div>
-          <div className="grid gap-3">
-            <BriefList title="Focus questions" items={brief.focusQuestions} icon={<ListChecksIcon />} />
-            <BriefList title="Missing evidence" items={brief.missingEvidence} icon={<CircleAlertIcon />} />
-          </div>
-        </div>
-        <div className="grid gap-3 lg:grid-cols-[1fr_1fr]">
-          <BriefList title="Risks to manage" items={brief.riskNotes} icon={<ShieldCheckIcon />} />
-          <BriefTextBlock title="Recommended next step" icon={<ArrowRightIcon />}>
-            {brief.recommendedNextStep}
-          </BriefTextBlock>
+      <CardContent className="grid gap-6">
+        <NextCallSection title="What to learn first">
+          {hasSelectedMethodology ? (
+            <div className="grid gap-3">
+              {learningThemes.map((theme) => (
+                <div key={theme.id} className="border-l-2 border-muted pl-4 text-sm leading-relaxed">
+                  {theme.title}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Choose a methodology to shape the first conversation.</p>
+          )}
+        </NextCallSection>
+        <div className="flex flex-col gap-2 border-t pt-5 sm:flex-row sm:flex-wrap">
+          <Button type="button" variant="outline" className="min-h-11" onClick={() => onNavigate("methodology")}>
+            Review methodology
+          </Button>
+          <Button type="button" variant="ghost" className="min-h-11" onClick={() => onNavigate("opportunity-record")}>
+            Review opportunity details
+          </Button>
         </div>
       </CardContent>
     </Card>
   )
 }
 
-function BriefTextBlock({
-  children,
-  icon,
-  title,
-}: {
-  children: React.ReactNode
-  icon: React.ReactNode
-  title: string
-}) {
+function NextCallSection({ children, title }: { children: React.ReactNode; title: string }) {
   return (
-    <div className="rounded-lg bg-muted/20 p-3">
-      <div className="flex items-center gap-2">
-        <span className="text-muted-foreground [&_svg]:size-4">{icon}</span>
-        <p className="text-xs font-medium text-muted-foreground">{title}</p>
-      </div>
-      <p className="mt-2 text-sm leading-relaxed">{children}</p>
+    <section className="grid min-w-0 gap-3">
+      <h2 className="text-sm font-medium">{title}</h2>
+      {children}
+    </section>
+  )
+}
+
+function NextCallSourceLinks({
+  item,
+  onOpenEvidence,
+}: {
+  item: NextCallBriefItem
+  onOpenEvidence: (item: NextCallBriefItem, trigger: HTMLButtonElement) => void
+}) {
+  if (!item.sources.length && !item.needsConfirmation) return null
+
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1">
+      {item.sources.slice(0, 3).map((source) => (
+        <button
+          key={source.id}
+          type="button"
+          className="min-h-11 rounded-sm text-left text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:min-h-0"
+          onClick={(event) => onOpenEvidence(item, event.currentTarget)}
+        >
+          {source.label}
+        </button>
+      ))}
+      {item.needsConfirmation ? (
+        <span className="inline-flex min-h-11 items-center text-xs text-muted-foreground md:min-h-0">
+          {item.basis === "inference" ? "AI inference · Needs confirmation" : "Needs confirmation"}
+        </span>
+      ) : null}
     </div>
   )
 }
 
-function BriefList({
-  icon,
-  items,
-  title,
+function NextCallQuestion({
+  item,
+  onOpenEvidence,
+  onReviewMethodology,
 }: {
-  icon: React.ReactNode
-  items: string[]
-  title: string
+  item: NextCallBriefItem
+  onOpenEvidence: (item: NextCallBriefItem, trigger: HTMLButtonElement) => void
+  onReviewMethodology: () => void
 }) {
   return (
-    <div className="rounded-lg bg-muted/20 p-3">
-      <div className="flex items-center gap-2">
-        <span className="text-muted-foreground [&_svg]:size-4">{icon}</span>
-        <p className="text-xs font-medium text-muted-foreground">{title}</p>
+    <article className="grid min-w-0 gap-2 border-l-2 border-muted pl-4">
+      <p className="break-words text-sm leading-relaxed">{item.text}</p>
+      {item.learningTarget ? (
+        <p className="text-xs text-muted-foreground">Explore: {item.learningTarget}</p>
+      ) : null}
+      <NextCallSourceLinks item={item} onOpenEvidence={onOpenEvidence} />
+      {item.basis === "methodology_gap" || item.playbookFieldIds?.length ? (
+        <button
+          type="button"
+          className="min-h-11 w-fit rounded-sm text-left text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:min-h-0"
+          onClick={onReviewMethodology}
+        >
+          Review in Methodology
+        </button>
+      ) : null}
+    </article>
+  )
+}
+
+function NextCallWatchItem({
+  item,
+  onOpenEvidence,
+  onReviewContacts,
+}: {
+  item: NextCallBriefItem
+  onOpenEvidence: (item: NextCallBriefItem, trigger: HTMLButtonElement) => void
+  onReviewContacts: () => void
+}) {
+  const isStakeholderGap = /stakeholder|buying group|buying committee|champion|coach|economic buyer|decision maker|decision owner|decision authority|approver/i.test(
+    [item.learningTarget, item.text, item.whyItMatters].filter(Boolean).join(" ")
+  )
+
+  return (
+    <article className="grid min-w-0 gap-2 border-l-2 border-muted pl-4">
+      <p className="break-words text-sm font-medium leading-relaxed">{item.text}</p>
+      {item.whyItMatters ? (
+        <p className="break-words text-sm leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground">Why it matters: </span>
+          {item.whyItMatters}
+        </p>
+      ) : null}
+      {item.suggestedResponse ? (
+        <p className="break-words text-sm leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground">Possible response: </span>
+          {item.suggestedResponse}
+        </p>
+      ) : null}
+      <NextCallSourceLinks item={item} onOpenEvidence={onOpenEvidence} />
+      {isStakeholderGap ? (
+        <Button type="button" size="sm" variant="ghost" className="min-h-11 w-fit px-0 md:min-h-8" onClick={onReviewContacts}>
+          Review Contacts
+        </Button>
+      ) : null}
+    </article>
+  )
+}
+
+function PossibleOpening({
+  item,
+  onOpenEvidence,
+}: {
+  item: NextCallBriefItem
+  onOpenEvidence: (item: NextCallBriefItem, trigger: HTMLButtonElement) => void
+}) {
+  const [copied, setCopied] = React.useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(item.text)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2_000)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <Accordion type="single" collapsible>
+      <AccordionItem value="possible-opening">
+        <AccordionTrigger className="min-h-11 py-2">Possible opening</AccordionTrigger>
+        <AccordionContent className="grid gap-3">
+          <p className="max-w-4xl whitespace-pre-wrap break-words text-sm leading-relaxed">{item.text}</p>
+          <NextCallSourceLinks item={item} onOpenEvidence={onOpenEvidence} />
+          <Button type="button" size="sm" variant="outline" className="min-h-11 w-fit gap-2 md:min-h-8" onClick={() => void handleCopy()}>
+            {copied ? <CheckIcon /> : <CopyIcon />}
+            {copied ? "Copied" : "Copy opening"}
+          </Button>
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
+  )
+}
+
+function NextStepConfirmation({
+  brief,
+  currentNextStep,
+  expectedOpportunityUpdatedAt,
+  opportunityId,
+  onApplied,
+}: {
+  brief: NextCallBriefView
+  currentNextStep: string
+  expectedOpportunityUpdatedAt: string | null
+  opportunityId: string
+  onApplied: (opportunityId: string, nextStep: string, updatedAtIso: string) => void
+}) {
+  const isMobile = useIsMobile()
+  const [open, setOpen] = React.useState(false)
+  const [draft, setDraft] = React.useState(brief.leaveWith)
+  const [currentSnapshot, setCurrentSnapshot] = React.useState({
+    nextStep: currentNextStep,
+    updatedAtIso: expectedOpportunityUpdatedAt,
+  })
+  const [isSaving, setIsSaving] = React.useState(false)
+  const [message, setMessage] = React.useState("")
+  const [savedMessage, setSavedMessage] = React.useState("")
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  const wasOpenRef = React.useRef(false)
+
+  React.useEffect(() => {
+    if (wasOpenRef.current && !open) {
+      window.requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }))
+    }
+    wasOpenRef.current = open
+  }, [open])
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (isSaving) return
+    if (nextOpen) {
+      setDraft(brief.leaveWith)
+      setCurrentSnapshot({
+        nextStep: currentNextStep,
+        updatedAtIso: expectedOpportunityUpdatedAt,
+      })
+      setMessage("")
+    }
+    setOpen(nextOpen)
+  }
+
+  const handleApply = async () => {
+    const nextStep = draft.trim()
+    if (!nextStep) {
+      setMessage("Add the next step you want to save.")
+      return
+    }
+
+    setIsSaving(true)
+    setMessage("")
+    try {
+      const response = await applyNextCallBriefNextStep(brief.id, {
+        expectedOpportunityUpdatedAt: currentSnapshot.updatedAtIso,
+        nextStep,
+      })
+      const updatedAtIso = response.opportunity.updated_at
+      onApplied(opportunityId, response.opportunity.next_step ?? nextStep, updatedAtIso)
+      setSavedMessage("Opportunity next step updated.")
+      setOpen(false)
+    } catch (caughtError: unknown) {
+      if (caughtError instanceof SalesFrameFunctionError && caughtError.status === 409) {
+        try {
+          const currentOpportunity = await getOpportunity(opportunityId)
+          setCurrentSnapshot({
+            nextStep: currentOpportunity.next_step ?? "",
+            updatedAtIso: currentOpportunity.updated_at,
+          })
+          setMessage("The opportunity changed while this was open. The current value has been reloaded; review it, then confirm again.")
+        } catch {
+          setMessage("The opportunity changed while this was open. Close this dialog, reopen it to load the current value, then confirm again.")
+        }
+      } else {
+        setMessage(getUserFacingErrorMessage(caughtError, "The opportunity next step needs another save attempt."))
+      }
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const editor = (
+    <div className="grid min-w-0 gap-4">
+      <div className="grid gap-1.5">
+        <p className="text-xs font-medium text-muted-foreground">Current next step</p>
+        <p className="whitespace-pre-wrap break-words text-sm">{currentSnapshot.nextStep.trim() || "Not set"}</p>
       </div>
-      <div className="mt-2 grid gap-2">
-        {items.map((item) => (
-          <div key={item} className="flex items-start gap-2 text-sm">
-            <CheckIcon className="mt-0.5 size-3.5 text-emerald-600" />
-            <span>{item}</span>
-          </div>
-        ))}
+      <div className="grid gap-2">
+        <Label htmlFor="next-call-next-step">Next step to save</Label>
+        <Textarea
+          id="next-call-next-step"
+          className="min-h-28 resize-y"
+          value={draft}
+          onChange={(event) => setDraft(event.currentTarget.value)}
+        />
       </div>
+      {message ? <p className="text-sm text-destructive" role="alert">{message}</p> : null}
     </div>
+  )
+
+  return (
+    <>
+      <Button ref={triggerRef} type="button" size="sm" variant="outline" className="mt-1 min-h-11 w-fit" onClick={() => handleOpenChange(true)}>
+        Update opportunity next step
+      </Button>
+      {savedMessage ? (
+        <p className="text-xs text-muted-foreground" role="status" aria-live="polite">{savedMessage}</p>
+      ) : null}
+      {isMobile ? (
+        <Drawer open={open} onOpenChange={handleOpenChange} showSwipeHandle>
+          <DrawerContent className="max-h-[90dvh] overflow-hidden text-left">
+            <DrawerHeader className="text-left group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
+              <DrawerTitle>Update opportunity next step</DrawerTitle>
+              <DrawerDescription>Review and edit the recommendation before it is saved.</DrawerDescription>
+            </DrawerHeader>
+            <div className="overflow-y-auto px-4 pb-4">{editor}</div>
+            <DrawerFooter className="border-t bg-muted/50 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <Button type="button" className="min-h-11" disabled={isSaving} onClick={() => void handleApply()}>
+                {isSaving ? "Saving…" : "Update next step"}
+              </Button>
+              <Button type="button" variant="outline" className="min-h-11" disabled={isSaving} onClick={() => handleOpenChange(false)}>
+                Cancel
+              </Button>
+            </DrawerFooter>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <Dialog open={open} onOpenChange={handleOpenChange}>
+          <DialogContent className="sm:max-w-lg" dismissible>
+            <DialogHeader>
+              <DialogTitle>Update opportunity next step</DialogTitle>
+              <DialogDescription>Review and edit the recommendation before it is saved.</DialogDescription>
+            </DialogHeader>
+            {editor}
+            <DialogActions
+              cancelDisabled={isSaving}
+              onCancel={() => handleOpenChange(false)}
+              primaryAction={
+                <Button type="button" disabled={isSaving} onClick={() => void handleApply()}>
+                  {isSaving ? "Saving…" : "Update next step"}
+                </Button>
+              }
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  )
+}
+
+function NextCallEvidencePanel({
+  briefId,
+  item,
+  onOpenChange,
+  onOpenFullCall,
+}: {
+  briefId: string
+  item: NextCallBriefItem | null
+  onOpenChange: (open: boolean) => void
+  onOpenFullCall: (callId: string, transcriptSegmentId?: string) => void
+}) {
+  const isMobile = useIsMobile()
+  const [evidence, setEvidence] = React.useState<NextCallBriefEvidence[]>([])
+  const [isLoading, setIsLoading] = React.useState(false)
+  const [message, setMessage] = React.useState("")
+  const open = Boolean(item)
+
+  const formatEvidenceDate = (value?: string) => {
+    if (!value) return ""
+    const date = new Date(value)
+    if (!Number.isFinite(date.getTime())) return ""
+    const includeYear = date.getFullYear() !== new Date().getFullYear()
+
+    return new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "short",
+      ...(includeYear ? { year: "numeric" as const } : {}),
+    }).format(date)
+  }
+
+  React.useEffect(() => {
+    if (!item || !briefId) return
+    const controller = new AbortController()
+    setIsLoading(true)
+    setMessage("")
+    setEvidence([])
+
+    void getNextCallBriefEvidence(briefId, item.id, { signal: controller.signal })
+      .then((response) => setEvidence(response.evidence))
+      .catch((caughtError: unknown) => {
+        if (controller.signal.aborted) return
+        if (caughtError instanceof SalesFrameFunctionError && caughtError.status === 404) {
+          setEvidence(item.sources.map((source) => ({ ...source, available: false })))
+          return
+        }
+        setMessage(getUserFacingErrorMessage(caughtError, "Source details are not available right now."))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [briefId, item])
+
+  const body = (
+    <div className="grid min-w-0 gap-4">
+      {isLoading ? (
+        <div className="grid gap-2" role="status" aria-live="polite">
+          <Skeleton className="h-20 rounded-lg" />
+          <span className="sr-only">Loading source details</span>
+        </div>
+      ) : null}
+      {evidence.map((source) => (
+        <article key={source.id} className="grid min-w-0 gap-3 border-b pb-4 last:border-b-0">
+          <div className="grid gap-1">
+            <p className="text-sm font-medium">{source.label}</p>
+            {source.callTitle || source.callDateIso || source.timestamp || source.speaker ? (
+              <p className="text-xs text-muted-foreground">
+                {[source.callTitle, formatEvidenceDate(source.callDateIso), source.timestamp, source.speaker]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            ) : null}
+          </div>
+          {source.available && source.excerpt ? (
+            <blockquote className="whitespace-pre-wrap break-words border-l-2 border-muted pl-3 text-sm leading-relaxed text-muted-foreground">
+              {source.excerpt}
+            </blockquote>
+          ) : (
+            <p className="text-sm text-muted-foreground">Source no longer available</p>
+          )}
+          {source.callId ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="min-h-11 w-fit gap-2"
+              onClick={() => onOpenFullCall(source.callId!, source.transcriptSegmentId)}
+            >
+              <ExternalLinkIcon />
+              Open full call
+            </Button>
+          ) : null}
+        </article>
+      ))}
+      {!isLoading && !message && !evidence.length ? (
+        <p className="text-sm text-muted-foreground">Source no longer available</p>
+      ) : null}
+      {message ? <p className="text-sm text-muted-foreground" role="status">{message}</p> : null}
+    </div>
+  )
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange} showSwipeHandle>
+        <DrawerContent className="max-h-[88dvh] overflow-hidden text-left">
+          <DrawerHeader className="text-left group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
+            <DrawerTitle>Supporting evidence</DrawerTitle>
+            <DrawerDescription>Source context for this preparation guidance.</DrawerDescription>
+          </DrawerHeader>
+          <div className="overflow-y-auto px-4 pb-4">{body}</div>
+          <DrawerFooter className="border-t bg-muted/50 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => onOpenChange(false)}>Close</Button>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
+    )
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full sm:max-w-md">
+        <SheetHeader>
+          <SheetTitle>Supporting evidence</SheetTitle>
+          <SheetDescription>Source context for this preparation guidance.</SheetDescription>
+        </SheetHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">{body}</div>
+        <SheetFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   )
 }
 
@@ -19036,8 +19924,6 @@ function OpportunityRecordingHistory({
 function PostCallPanel({
   isProcessing,
   isRetryBlocked,
-  opportunity,
-  output,
   processingError,
   replayCall,
   transcript,
@@ -19048,8 +19934,6 @@ function PostCallPanel({
 }: {
   isProcessing: boolean
   isRetryBlocked: boolean
-  opportunity: Opportunity
-  output: PostCallOutputView | null
   processingError: string
   replayCall: CallSummary | null
   transcript: Opportunity["transcript"]
@@ -19059,11 +19943,7 @@ function PostCallPanel({
   onViewNextCallBrief: () => void
 }) {
   const [transcriptQuery, setTranscriptQuery] = React.useState("")
-  const nextCallItems =
-    output?.nextCallPlan
-      .split(/\n+/)
-      .map((item) => item.replace(/^[-*]\s*/, "").trim())
-      .filter(Boolean) ?? []
+  const [highlightedTranscriptSegmentId, setHighlightedTranscriptSegmentId] = React.useState("")
   const hasTranscriptLines = transcript.some((line) => line.text.trim())
   const completedCall = replayCall ?? transcriptCall
   const didReachCallLimit = completedCall?.endedReason === "time_limit_reached"
@@ -19080,6 +19960,31 @@ function PostCallPanel({
   React.useEffect(() => {
     setTranscriptQuery("")
   }, [completedCall?.id])
+
+  React.useEffect(() => {
+    if (!completedCall?.id || !window.location.hash.startsWith("#transcript-turn-")) return
+
+    const encodedSegmentId = window.location.hash.slice("#transcript-turn-".length)
+    let segmentId = ""
+    try {
+      segmentId = decodeURIComponent(encodedSegmentId)
+    } catch {
+      return
+    }
+    if (!segmentId) return
+
+    const timeoutId = window.setTimeout(() => {
+      const target = document.getElementById(`transcript-turn-${segmentId}`)
+      if (!target) return
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "center" })
+      target.focus({ preventScroll: true })
+      setHighlightedTranscriptSegmentId(segmentId)
+      window.setTimeout(() => setHighlightedTranscriptSegmentId(""), 4_000)
+    }, 120)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [completedCall?.id, visibleTranscriptLines.length])
 
   return (
     <div className="grid gap-4">
@@ -19149,7 +20054,12 @@ function PostCallPanel({
               {visibleTranscriptLines.map((line, index) => (
                 <article
                   key={line.clientId ?? line.id ?? `${line.time}-${index}`}
-                  className="grid min-w-0 gap-2 rounded-lg bg-muted/30 p-3"
+                  id={line.id ? `transcript-turn-${line.id}` : undefined}
+                  className={cn(
+                    "grid min-w-0 gap-2 rounded-lg bg-muted/30 p-3 outline-none transition-colors",
+                    line.id === highlightedTranscriptSegmentId && "bg-primary/10 ring-2 ring-ring"
+                  )}
+                  tabIndex={line.id ? -1 : undefined}
                 >
                   <div className="flex min-w-0 items-center justify-between gap-3">
                     <p className="truncate text-sm font-medium">{getTranscriptSpeakerDisplayName(line)}</p>
@@ -19207,26 +20117,16 @@ function PostCallPanel({
           </CardContent>
         </Card>
       ) : null}
-      <Card>
-        <CardHeader>
-          <CardTitle>Next-call plan</CardTitle>
-          <CardDescription>Strict methodology checklist</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          {(nextCallItems.length ? nextCallItems : ["Next-call plan will appear after the call is processed."]).map((item) => (
-            <div key={item} className="flex items-start gap-3 rounded-lg bg-muted/30 p-3">
-              <CircleDotIcon className="mt-0.5 size-4 text-muted-foreground" />
-              <p className="text-sm">{item}</p>
-            </div>
-          ))}
-          {opportunity.nextCallBrief ? (
-            <Button className="gap-2" onClick={onViewNextCallBrief}>
-              <FileTextIcon />
-              View next-call brief
-            </Button>
-          ) : null}
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-medium">Prepare for the next conversation</p>
+          <p className="text-sm text-muted-foreground">Review themes and risks without turning them into a fixed live-call script.</p>
+        </div>
+        <Button className="min-h-11 shrink-0 gap-2 sm:min-h-8" variant="outline" onClick={onViewNextCallBrief}>
+          <FileTextIcon />
+          Open Next call
+        </Button>
+      </div>
     </div>
   )
 }
