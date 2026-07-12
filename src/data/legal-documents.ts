@@ -9,7 +9,7 @@ export type LegalSection = {
 export const legalBusinessName = "ALLYCHAT PTY LTD"
 export const legalBusinessAbn = "ABN 39 696 543 727"
 export const legalContactEmail = "hello@salesframe.ai"
-export const legalEffectiveDate = "29 June 2026"
+export const legalEffectiveDate = "12 July 2026"
 
 export const termsSections: LegalSection[] = [
   {
@@ -40,6 +40,8 @@ export const termsSections: LegalSection[] = [
     paragraphs: [
       "You are solely responsible for ensuring every call, meeting, recording, transcript, note, customer research request, and AI analysis you initiate is lawful in every location that applies to you, your organisation, your customer, and all meeting participants.",
       "Before using recording, transcription, diarisation, customer research, or live guidance features, you must provide all notices and obtain all consents required under applicable privacy, surveillance, workplace, telecommunications, confidentiality, employment, contract, and data protection laws.",
+      "If you use Meeting bot, SalesFrame joins as a visible participant using the SalesFrame name and branding and begins recording once admitted. The bot's name, branding, and admission are disclosure signals only. They are not a guarantee that every participant has received legally sufficient notice or given every consent required in their jurisdiction.",
+      "By sending a Meeting bot to a meeting, you confirm that you are authorised to invite it, allow SalesFrame and its providers to process the meeting, and record and transcribe the participants. You remain responsible for any additional spoken, written, organisational, or platform notice and consent steps that apply.",
       "You must not use SalesFrame to secretly record, monitor, profile, analyse, or process any person where doing so would be unlawful, misleading, unfair, or outside the permissions you have obtained.",
     ],
   },
@@ -71,7 +73,8 @@ export const termsSections: LegalSection[] = [
   {
     title: "8. Third-party services",
     paragraphs: [
-      "SalesFrame uses third-party infrastructure and services, which may include Supabase, Netlify, OpenAI, browser APIs, authentication providers, email providers, monitoring tools, and other hosting, storage, analytics, support, and security services.",
+      "SalesFrame uses third-party infrastructure and services, which may include Supabase, Netlify, OpenAI, Deepgram, Recall.ai, browser and meeting-platform services, authentication providers, email providers, monitoring tools, and other hosting, storage, transcription, meeting-capture, analytics, support, and security services.",
+      "When Meeting bot is used, Recall.ai may join the selected meeting and process the meeting URL, participant and lifecycle metadata, audio, and transcript data. Deepgram processes meeting audio for live transcription through Recall.ai. The supported meeting platform also applies its own terms and privacy practices.",
       "We are not responsible for third-party outages, model behaviour, API changes, browser limitations, provider terms, loss of access, pricing changes, security incidents, or failures outside our reasonable control.",
     ],
   },
@@ -162,6 +165,7 @@ export const privacySections: LegalSection[] = [
       "Workspace records, such as workspace names, company details, seller profile, company domain, product context, currency, settings, and OpenAI key connection status.",
       "Customer and deal information entered by users, such as account names, websites, industry, profile notes, contact names, professional roles, business contact details, relationship notes, stakeholders, opportunity names, amount, stage, close date, methodology fields, risks, and next steps.",
       "Call content and metadata, such as audio recordings, transcripts, speaker labels, timestamps, call type, selected playbooks, audio preflight results, notes, methodology evidence, and post-call outputs.",
+      "Meeting-bot information, such as the meeting URL, detected meeting platform, bot lifecycle, participant display names and platform identifiers, host and attendance status, join and leave times, speech activity, automated or seller-corrected contact attribution, and recording-transfer status.",
       "AI inputs and outputs, such as customer research requests, prompts, model responses, follow-up drafts, next-call briefs, live guidance events, and evidence mappings.",
       "Technical and usage information, such as browser type, device information, IP address, logs, diagnostics, errors, security events, performance data, and feature usage.",
     ],
@@ -178,6 +182,7 @@ export const privacySections: LegalSection[] = [
     bullets: [
       "Directly from users when they create accounts, enter workspace data, connect an API key, upload or edit records, start calls, or contact support.",
       "Through browser and application features when users capture audio, generate transcripts, use live guidance, or create post-call outputs.",
+      "Through a visible SalesFrame meeting bot when a user sends it to a supported meeting and the bot receives meeting audio, transcript, participant, and lifecycle events.",
       "From connected third-party services and subprocessors where needed to provide the service.",
       "From public professional sources selected for account or contact enrichment, such as company websites, LinkedIn and other professional profile pages, investor pages, regulator or registry pages, reputable business media, and other trusted public sources.",
     ],
@@ -190,6 +195,7 @@ export const privacySections: LegalSection[] = [
       "To save and display account, contact, opportunity, call, transcript, recording, methodology, research, and post-call data, including relationships between contacts, opportunities, calls, and seller-confirmed speakers.",
       "To process AI-powered features using the OpenAI API key connected by the user or workspace.",
       "To generate live question guidance, summaries, evidence mappings, follow-up drafts, next-call briefs, and research outputs.",
+      "To join an authorised meeting, produce live transcription, attribute speakers, restore an active cockpit, transfer a private audio recording, and safely finalise and remove the meeting bot.",
       "To detect misuse, investigate incidents, protect rights and safety, comply with law, and enforce terms.",
       "To communicate service, security, billing, product, and support information.",
     ],
@@ -211,16 +217,26 @@ export const privacySections: LegalSection[] = [
     ],
   },
   {
+    title: "6B. Meeting bots and live transcription",
+    paragraphs: [
+      "When an authorised user selects Meeting bot and provides a supported meeting URL, SalesFrame sends the URL and an opaque service identifier to Recall.ai so a visibly named SalesFrame bot can join. SalesFrame does not send the account record, opportunity record, contact enrichment, seller notes, playbooks, or private coaching context to Recall.ai.",
+      "Recall.ai may process the meeting URL, platform, participant display and platform information, meeting lifecycle, audio, speech activity, and transcript events. Deepgram processes meeting audio through Recall.ai to generate English live transcription. SalesFrame uses final transcript turns and participant events to support speaker attribution, call records, and live question guidance.",
+      "Automated participant matching is limited to existing workspace records and may be corrected by a seller. SalesFrame does not create a new customer contact solely because a participant joined or was named in a transcript, and an automated match is not represented as seller-confirmed evidence.",
+      "Meeting bot is not a language-translation service. Transcription and speaker attribution can be incomplete, delayed, or incorrect, and users must review them before relying on them.",
+    ],
+  },
+  {
     title: "7. Disclosure to service providers",
     paragraphs: [
       "We may disclose information to service providers that help us operate SalesFrame, including hosting, database, storage, authentication, serverless functions, AI processing, analytics, logging, monitoring, customer support, email, security, and payment providers.",
-      "Current or intended infrastructure may include Supabase, Netlify, OpenAI, browser platform services, and related operational providers. Providers may change over time.",
+      "Current or intended infrastructure may include Supabase for database, authentication, and private storage; Netlify for hosting and serverless processing; OpenAI for user-requested AI features; Deepgram for speech-to-text; Recall.ai for Meeting bot participation and meeting capture; browser and meeting-platform services; and related operational providers. Providers may change over time.",
     ],
   },
   {
     title: "8. Overseas disclosures",
     paragraphs: [
       "Some providers may store or process information outside Australia, including in the United States, Europe, or other jurisdictions where our providers or their infrastructure operate.",
+      "The Meeting bot integration is configured for Recall.ai's United States us-west-2 region, and its Deepgram transcription is configured for United States processing. This does not mean every downstream network or meeting-platform operation is confined to one physical location.",
       "By using SalesFrame, you acknowledge that information may be transferred to and processed in those locations, subject to our provider arrangements and applicable law.",
     ],
   },
@@ -228,6 +244,8 @@ export const privacySections: LegalSection[] = [
     title: "9. Recording retention and deletion",
     paragraphs: [
       "SalesFrame is designed with a 90-day recording retention approach unless a different retention period is configured, required, or technically necessary. Transcripts, notes, evidence, and account or opportunity records may remain after recordings are deleted unless you delete them or a retention rule applies.",
+      "For Meeting bot, SalesFrame requests a maximum 24-hour retention period for recording media held by Recall.ai and is designed to transfer the mixed audio to private SalesFrame storage, verify the transfer, and request earlier provider-media deletion. Transfer or deletion may require background retries.",
+      "The 24-hour setting does not mean every provider-held identifier is deleted within 24 hours. Recall.ai currently states that deleting bot media does not immediately delete custom metadata or the meeting URL and that the meeting URL is cleared 14 days after bot termination. SalesFrame does not represent Meeting bot as suitable where a shorter deletion period for all such URL metadata is legally or contractually required unless a separately approved provider control is in place.",
       "Deletion may not immediately remove data from backups, logs, caches, audit records, security systems, legal holds, accounting records, or third-party provider systems where retention is required or technically necessary.",
     ],
   },

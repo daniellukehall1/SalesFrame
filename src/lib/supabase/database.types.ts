@@ -574,6 +574,7 @@ export type Database = {
           title: string
           call_type: string
           status: Database["public"]["Enums"]["call_status"]
+          capture_method: string
           started_at: string | null
           ended_at: string | null
           ended_reason: string
@@ -602,6 +603,7 @@ export type Database = {
           title: string
           call_type?: string
           status?: Database["public"]["Enums"]["call_status"]
+          capture_method?: string
           started_at?: string | null
           ended_at?: string | null
           ended_reason?: string
@@ -630,6 +632,7 @@ export type Database = {
           title?: string
           call_type?: string
           status?: Database["public"]["Enums"]["call_status"]
+          capture_method?: string
           started_at?: string | null
           ended_at?: string | null
           ended_reason?: string
@@ -648,6 +651,498 @@ export type Database = {
           retention_expires_at?: string
           created_by_user_id?: string | null
           created_at?: string
+          updated_at?: string
+        }
+      >
+      meeting_bot_sessions: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          call_id: string
+          requested_by_user_id: string | null
+          region: string
+          platform: string
+          recall_bot_id: string | null
+          recall_recording_id: string | null
+          recall_transcript_id: string | null
+          provider_absence_confirmed_at: string | null
+          correlation_token: string
+          client_request_id: string
+          client_instance_id: string
+          client_visibility: string
+          client_visibility_updated_at: string
+          status: string
+          provider_status: string | null
+          provider_subcode: string | null
+          safe_error_code: string | null
+          started_at: string
+          joined_at: string | null
+          recording_started_at: string | null
+          transcript_completed_at: string | null
+          final_transcript_watermark_ms: number | null
+          transcript_artifact_sha256: string | null
+          last_heartbeat_at: string
+          disconnect_requested_at: string | null
+          disconnect_grace_expires_at: string | null
+          ended_at: string | null
+          retention_expires_at: string
+          media_transfer_status: string
+          media_storage_path: string | null
+          media_size_bytes: number | null
+          media_checksum_sha256: string | null
+          provider_media_deleted_at: string | null
+          post_call_requested_at: string | null
+          post_call_completed_at: string | null
+          post_call_error_code: string | null
+          post_call_attempts: number
+          post_call_locked_at: string | null
+          post_call_locked_by: string | null
+          processing_locked_at: string | null
+          processing_locked_by: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          call_id: string
+          requested_by_user_id?: string | null
+          region?: string
+          platform: string
+          recall_bot_id?: string | null
+          recall_recording_id?: string | null
+          recall_transcript_id?: string | null
+          provider_absence_confirmed_at?: string | null
+          correlation_token?: string
+          client_request_id: string
+          client_instance_id: string
+          client_visibility?: string
+          client_visibility_updated_at?: string
+          status?: string
+          provider_status?: string | null
+          provider_subcode?: string | null
+          safe_error_code?: string | null
+          started_at?: string
+          joined_at?: string | null
+          recording_started_at?: string | null
+          transcript_completed_at?: string | null
+          final_transcript_watermark_ms?: number | null
+          transcript_artifact_sha256?: string | null
+          last_heartbeat_at?: string
+          disconnect_requested_at?: string | null
+          disconnect_grace_expires_at?: string | null
+          ended_at?: string | null
+          retention_expires_at?: string
+          media_transfer_status?: string
+          media_storage_path?: string | null
+          media_size_bytes?: number | null
+          media_checksum_sha256?: string | null
+          provider_media_deleted_at?: string | null
+          post_call_requested_at?: string | null
+          post_call_completed_at?: string | null
+          post_call_error_code?: string | null
+          post_call_attempts?: number
+          post_call_locked_at?: string | null
+          post_call_locked_by?: string | null
+          processing_locked_at?: string | null
+          processing_locked_by?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          call_id?: string
+          requested_by_user_id?: string | null
+          region?: string
+          platform?: string
+          recall_bot_id?: string | null
+          recall_recording_id?: string | null
+          recall_transcript_id?: string | null
+          provider_absence_confirmed_at?: string | null
+          correlation_token?: string
+          client_request_id?: string
+          client_instance_id?: string
+          client_visibility?: string
+          client_visibility_updated_at?: string
+          status?: string
+          provider_status?: string | null
+          provider_subcode?: string | null
+          safe_error_code?: string | null
+          started_at?: string
+          joined_at?: string | null
+          recording_started_at?: string | null
+          transcript_completed_at?: string | null
+          final_transcript_watermark_ms?: number | null
+          transcript_artifact_sha256?: string | null
+          last_heartbeat_at?: string
+          disconnect_requested_at?: string | null
+          disconnect_grace_expires_at?: string | null
+          ended_at?: string | null
+          retention_expires_at?: string
+          media_transfer_status?: string
+          media_storage_path?: string | null
+          media_size_bytes?: number | null
+          media_checksum_sha256?: string | null
+          provider_media_deleted_at?: string | null
+          post_call_requested_at?: string | null
+          post_call_completed_at?: string | null
+          post_call_error_code?: string | null
+          post_call_attempts?: number
+          post_call_locked_at?: string | null
+          post_call_locked_by?: string | null
+          processing_locked_at?: string | null
+          processing_locked_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      meeting_bot_usage_ledger: TableDefinition<
+        {
+          id: string
+          session_id: string
+          workspace_id: string
+          requested_by_user_id: string | null
+          reserved_minutes: number
+          consumed_minutes: number
+          finalized_at: string | null
+          created_at: string
+        },
+        {
+          id?: string
+          session_id: string
+          workspace_id: string
+          requested_by_user_id?: string | null
+          reserved_minutes: number
+          consumed_minutes?: number
+          finalized_at?: string | null
+          created_at?: string
+        },
+        {
+          id?: string
+          session_id?: string
+          workspace_id?: string
+          requested_by_user_id?: string | null
+          reserved_minutes?: number
+          consumed_minutes?: number
+          finalized_at?: string | null
+          created_at?: string
+        }
+      >
+      meeting_bot_provisioning_private: TableDefinition<
+        {
+          session_id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          call_id: string
+          encrypted_meeting_url: string
+          encryption_iv: string
+          encryption_auth_tag: string
+          url_fingerprint: string
+          status: string
+          attempt_count: number
+          max_attempts: number
+          next_attempt_at: string | null
+          locked_at: string | null
+          locked_by: string | null
+          expires_at: string
+          last_http_status: number | null
+          last_safe_error_code: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          session_id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          call_id: string
+          encrypted_meeting_url: string
+          encryption_iv: string
+          encryption_auth_tag: string
+          url_fingerprint: string
+          status?: string
+          attempt_count?: number
+          max_attempts?: number
+          next_attempt_at?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          expires_at?: string
+          last_http_status?: number | null
+          last_safe_error_code?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          session_id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          call_id?: string
+          encrypted_meeting_url?: string
+          encryption_iv?: string
+          encryption_auth_tag?: string
+          url_fingerprint?: string
+          status?: string
+          attempt_count?: number
+          max_attempts?: number
+          next_attempt_at?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          expires_at?: string
+          last_http_status?: number | null
+          last_safe_error_code?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      meeting_bot_participants: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          call_id: string
+          session_id: string
+          provider_participant_id: string
+          display_name: string | null
+          platform: string
+          is_host: boolean
+          joined_at: string | null
+          left_at: string | null
+          speech_started_at: string | null
+          speech_ended_at: string | null
+          last_spoke_at: string | null
+          is_speaking: boolean
+          call_speaker_id: string | null
+          matched_contact_id: string | null
+          party: string
+          match_provenance: string
+          match_confidence: number | null
+          matched_at: string | null
+          corrected_by_user_id: string | null
+          correction_locked: boolean
+          correction_prompted_at: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          call_id: string
+          session_id: string
+          provider_participant_id: string
+          display_name?: string | null
+          platform: string
+          is_host?: boolean
+          joined_at?: string | null
+          left_at?: string | null
+          speech_started_at?: string | null
+          speech_ended_at?: string | null
+          last_spoke_at?: string | null
+          is_speaking?: boolean
+          call_speaker_id?: string | null
+          matched_contact_id?: string | null
+          party?: string
+          match_provenance?: string
+          match_confidence?: number | null
+          matched_at?: string | null
+          corrected_by_user_id?: string | null
+          correction_locked?: boolean
+          correction_prompted_at?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          call_id?: string
+          session_id?: string
+          provider_participant_id?: string
+          display_name?: string | null
+          platform?: string
+          is_host?: boolean
+          joined_at?: string | null
+          left_at?: string | null
+          speech_started_at?: string | null
+          speech_ended_at?: string | null
+          last_spoke_at?: string | null
+          is_speaking?: boolean
+          call_speaker_id?: string | null
+          matched_contact_id?: string | null
+          party?: string
+          match_provenance?: string
+          match_confidence?: number | null
+          matched_at?: string | null
+          corrected_by_user_id?: string | null
+          correction_locked?: boolean
+          correction_prompted_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      meeting_bot_turn_buffers: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          call_id: string
+          session_id: string
+          participant_id: string
+          status: string
+          utterances: Json
+          buffered_text: string
+          provider_event_ids: Json
+          start_ms: number | null
+          end_ms: number | null
+          last_utterance_at: string | null
+          speech_ended_at: string | null
+          commit_after: string | null
+          committed_at: string | null
+          committed_transcript_segment_id: string | null
+          processing_locked_at: string | null
+          processing_locked_by: string | null
+          version: number
+          expires_at: string
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          account_id: string
+          opportunity_id: string
+          call_id: string
+          session_id: string
+          participant_id: string
+          status?: string
+          utterances?: Json
+          buffered_text?: string
+          provider_event_ids?: Json
+          start_ms?: number | null
+          end_ms?: number | null
+          last_utterance_at?: string | null
+          speech_ended_at?: string | null
+          commit_after?: string | null
+          committed_at?: string | null
+          committed_transcript_segment_id?: string | null
+          processing_locked_at?: string | null
+          processing_locked_by?: string | null
+          version?: number
+          expires_at?: string
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          account_id?: string
+          opportunity_id?: string
+          call_id?: string
+          session_id?: string
+          participant_id?: string
+          status?: string
+          utterances?: Json
+          buffered_text?: string
+          provider_event_ids?: Json
+          start_ms?: number | null
+          end_ms?: number | null
+          last_utterance_at?: string | null
+          speech_ended_at?: string | null
+          commit_after?: string | null
+          committed_at?: string | null
+          committed_transcript_segment_id?: string | null
+          processing_locked_at?: string | null
+          processing_locked_by?: string | null
+          version?: number
+          expires_at?: string
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      meeting_bot_webhook_events: TableDefinition<
+        {
+          id: string
+          session_id: string | null
+          region: string
+          webhook_id: string
+          event_type: string
+          recall_bot_id: string | null
+          event_timestamp: string | null
+          payload_ciphertext: string | null
+          payload_iv: string | null
+          payload_auth_tag: string | null
+          payload_hash: string
+          status: string
+          attempts: number
+          max_attempts: number
+          next_attempt_at: string | null
+          locked_at: string | null
+          locked_by: string | null
+          processed_at: string | null
+          expires_at: string
+          last_safe_error_code: string | null
+          received_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          session_id?: string | null
+          region: string
+          webhook_id: string
+          event_type: string
+          recall_bot_id?: string | null
+          event_timestamp?: string | null
+          payload_ciphertext?: string | null
+          payload_iv?: string | null
+          payload_auth_tag?: string | null
+          payload_hash: string
+          status?: string
+          attempts?: number
+          max_attempts?: number
+          next_attempt_at?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          processed_at?: string | null
+          expires_at?: string
+          last_safe_error_code?: string | null
+          received_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          session_id?: string | null
+          region?: string
+          webhook_id?: string
+          event_type?: string
+          recall_bot_id?: string | null
+          event_timestamp?: string | null
+          payload_ciphertext?: string | null
+          payload_iv?: string | null
+          payload_auth_tag?: string | null
+          payload_hash?: string
+          status?: string
+          attempts?: number
+          max_attempts?: number
+          next_attempt_at?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          processed_at?: string | null
+          expires_at?: string
+          last_safe_error_code?: string | null
+          received_at?: string
           updated_at?: string
         }
       >
@@ -824,6 +1319,7 @@ export type Database = {
           speaker_source: string | null
           openai_item_id: string | null
           openai_segment_id: string | null
+          capture_provider: string | null
           audio_source_kind: string | null
           client_turn_id: string | null
           transcription_provider: string | null
@@ -855,6 +1351,7 @@ export type Database = {
           speaker_source?: string | null
           openai_item_id?: string | null
           openai_segment_id?: string | null
+          capture_provider?: string | null
           audio_source_kind?: string | null
           client_turn_id?: string | null
           transcription_provider?: string | null
@@ -886,6 +1383,7 @@ export type Database = {
           speaker_source?: string | null
           openai_item_id?: string | null
           openai_segment_id?: string | null
+          capture_provider?: string | null
           audio_source_kind?: string | null
           client_turn_id?: string | null
           transcription_provider?: string | null
@@ -1205,6 +1703,7 @@ export type Database = {
           id: string
           opportunity_id: string
           previous_call_id: string | null
+          source_meeting_bot_session_id: string | null
           objective: string | null
           suggested_opening: string | null
           focus_questions: Json
@@ -1218,6 +1717,7 @@ export type Database = {
           id?: string
           opportunity_id: string
           previous_call_id?: string | null
+          source_meeting_bot_session_id?: string | null
           objective?: string | null
           suggested_opening?: string | null
           focus_questions?: Json
@@ -1231,6 +1731,7 @@ export type Database = {
           id?: string
           opportunity_id?: string
           previous_call_id?: string | null
+          source_meeting_bot_session_id?: string | null
           objective?: string | null
           suggested_opening?: string | null
           focus_questions?: Json
@@ -1245,6 +1746,8 @@ export type Database = {
         {
           id: string
           call_id: string
+          source_meeting_bot_session_id: string | null
+          generation_result: Json | null
           follow_up_email: string | null
           next_call_plan: string | null
           account_updates: Json
@@ -1256,6 +1759,8 @@ export type Database = {
         {
           id?: string
           call_id: string
+          source_meeting_bot_session_id?: string | null
+          generation_result?: Json | null
           follow_up_email?: string | null
           next_call_plan?: string | null
           account_updates?: Json
@@ -1267,6 +1772,8 @@ export type Database = {
         {
           id?: string
           call_id?: string
+          source_meeting_bot_session_id?: string | null
+          generation_result?: Json | null
           follow_up_email?: string | null
           next_call_plan?: string | null
           account_updates?: Json
@@ -1805,6 +2312,108 @@ export type Database = {
       can_access_contact: {
         Args: { target_contact_id: string }
         Returns: boolean
+      }
+      create_meeting_bot_session: {
+        Args: {
+          target_call_id: string
+          target_user_id: string
+          target_client_request_id: string
+          target_client_instance_id: string
+          target_platform: string
+          target_region: string
+          target_url_ciphertext: string
+          target_url_iv: string
+          target_url_auth_tag: string
+          target_url_fingerprint: string
+          target_user_limit?: number
+          target_workspace_limit?: number
+          target_global_limit?: number
+          target_rate_window_minutes?: number
+          target_user_rolling_creation_limit?: number
+          target_workspace_rolling_creation_limit?: number
+          target_user_daily_bot_limit?: number
+          target_workspace_daily_bot_limit?: number
+          target_user_daily_minute_limit?: number
+          target_workspace_daily_minute_limit?: number
+          target_reserved_bot_minutes?: number
+        }
+        Returns: Database["public"]["Tables"]["meeting_bot_sessions"]["Row"][]
+      }
+      reconnect_meeting_bot_session: {
+        Args: {
+          target_session_id: string
+          target_user_id: string
+          target_client_instance_id: string
+        }
+        Returns: Database["public"]["Tables"]["meeting_bot_sessions"]["Row"][]
+      }
+      transition_meeting_bot_call_to_browser_capture: {
+        Args: {
+          target_call_id: string
+          target_session_id: string
+          target_capture_method: string
+        }
+        Returns: Database["public"]["Tables"]["calls"]["Row"][]
+      }
+      claim_due_meeting_bot_provisioning: {
+        Args: {
+          worker_id: string
+          batch_limit?: number
+          lease_seconds?: number
+        }
+        Returns: Database["public"]["Tables"]["meeting_bot_provisioning_private"]["Row"][]
+      }
+      claim_due_meeting_bot_turn_buffers: {
+        Args: {
+          worker_id: string
+          batch_limit?: number
+          lease_seconds?: number
+        }
+        Returns: Database["public"]["Tables"]["meeting_bot_turn_buffers"]["Row"][]
+      }
+      claim_due_meeting_bot_recovery: {
+        Args: {
+          worker_id: string
+          batch_limit?: number
+          lease_seconds?: number
+        }
+        Returns: Database["public"]["Tables"]["meeting_bot_sessions"]["Row"][]
+      }
+      claim_meeting_bot_post_call: {
+        Args: {
+          target_session_id: string
+          worker_id: string
+          lease_seconds?: number
+          force_retry?: boolean
+        }
+        Returns: Database["public"]["Tables"]["meeting_bot_sessions"]["Row"][]
+      }
+      claim_meeting_bot_webhook_event: {
+        Args: {
+          target_region: string
+          target_webhook_id: string
+          worker_id: string
+          lease_seconds?: number
+        }
+        Returns: Database["public"]["Tables"]["meeting_bot_webhook_events"]["Row"][]
+      }
+      correct_meeting_bot_participant_attribution: {
+        Args: {
+          target_session_id: string
+          target_participant_id: string
+          target_user_id: string
+          target_contact_id: string | null
+          target_party: string
+        }
+        Returns: Database["public"]["Tables"]["meeting_bot_participants"]["Row"][]
+      }
+      expire_meeting_bot_private_data: {
+        Args: { batch_limit?: number }
+        Returns: {
+          provisioning_deleted: number
+          webhook_scrubbed: number
+          turn_buffers_scrubbed: number
+        }[]
       }
       claim_deepgram_token_grant: {
         Args: {

@@ -21,6 +21,10 @@ export const callAudioCaptureModes = ["microphone", "in_person_microphone", "mee
 
 export type CallAudioCaptureMode = (typeof callAudioCaptureModes)[number]
 
+export const callCaptureMethods = ["browser_audio", "meeting_bot"] as const
+
+export type CallCaptureMethod = (typeof callCaptureMethods)[number]
+
 export const recordingLifecycleStatuses = ["none", "recording", "uploading", "processing", "ready", "failed"] as const
 
 export type RecordingLifecycleStatus = (typeof recordingLifecycleStatuses)[number]
@@ -34,6 +38,11 @@ export const callEndedReasons = [
   "time_limit_reached",
   "start_cancelled",
   "start_failed",
+  "meeting_ended",
+  "bot_removed",
+  "bot_join_failed",
+  "client_disconnected",
+  "provider_failed",
 ] as const
 
 export type CallEndedReason = (typeof callEndedReasons)[number]
@@ -410,9 +419,13 @@ export type Opportunity = {
   notes: string[]
   transcript: {
     audioSourceKind?: string
+    captureProvider?: string
     clientId?: string
     contactConfirmedAt?: string
+    contactCorrectionLocked?: boolean
     contactId?: string
+    contactMatchConfidence?: number
+    contactMatchProvenance?: string
     diarizationSpeaker?: string
     endOfTurnConfidence?: number
     id?: string
@@ -431,6 +444,7 @@ export type Opportunity = {
     speakerSource?: string
     time: string
     text: string
+    transcriptionProvider?: string
     wordConfidence?: number
   }[]
 }
@@ -461,7 +475,7 @@ export type OpportunityDraft = {
   manualNotes: string
 }
 
-export type StartRecordingPayload = {
+type StartRecordingBasePayload = {
   abortSignal?: AbortSignal
   accountMode: "existing" | "new"
   accountId: string
@@ -469,16 +483,6 @@ export type StartRecordingPayload = {
   accountWebsite: string
   accountIndustry: string
   accountCurrency: CurrencyCode
-  audioCaptureMode: CallAudioCaptureMode
-  audioInputDeviceId?: string
-  audioInputDeviceLabel?: string
-  audioOutputDeviceId?: string
-  audioOutputDeviceLabel?: string
-  preparedMeetingAudio?: {
-    level?: number
-    stream: MediaStream
-    surface?: string
-  }
   opportunityMode: "existing" | "new"
   opportunityId: string
   opportunityName: string
@@ -491,6 +495,27 @@ export type StartRecordingPayload = {
   openAiApiKey: string
   onPreparationStep?: (update: StartCallPreparationUpdate) => void
 }
+
+export type BrowserAudioStartRecordingPayload = StartRecordingBasePayload & {
+  captureMethod: "browser_audio"
+  audioCaptureMode: CallAudioCaptureMode
+  audioInputDeviceId?: string
+  audioInputDeviceLabel?: string
+  audioOutputDeviceId?: string
+  audioOutputDeviceLabel?: string
+  preparedMeetingAudio?: {
+    level?: number
+    stream: MediaStream
+    surface?: string
+  }
+}
+
+export type MeetingBotStartRecordingPayload = StartRecordingBasePayload & {
+  captureMethod: "meeting_bot"
+  meetingUrl: string
+}
+
+export type StartRecordingPayload = BrowserAudioStartRecordingPayload | MeetingBotStartRecordingPayload
 
 export type StartCallPreparationStepId = "ai_access" | "transcription" | "records" | "context" | "coach" | "audio"
 

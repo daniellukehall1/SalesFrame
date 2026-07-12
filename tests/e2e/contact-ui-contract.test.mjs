@@ -232,7 +232,7 @@ test("start call persists selected contacts before asking the first question", a
   const app = await read("src/App.tsx")
   const startFlow = app.slice(app.indexOf("const handleStartRecording"), app.indexOf("const handleCreateAccount"))
   const replaceCallContactsIndex = startFlow.indexOf("await replaceCallContacts(")
-  const firstQuestionIndex = startFlow.indexOf("await requestLiveQuestion(")
+  const firstQuestionIndex = startFlow.indexOf("const initialGuidancePromise = requestLiveQuestion(")
 
   assert.ok(replaceCallContactsIndex > -1)
   assert.ok(firstQuestionIndex > replaceCallContactsIndex)

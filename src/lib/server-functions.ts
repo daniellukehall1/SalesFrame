@@ -7,6 +7,18 @@ import type {
 } from "@/lib/csv-import"
 import type { AccountEnrichmentProfileRow, AccountEnrichmentRunRow, AccountRow } from "@/lib/supabase/salesframe-data"
 import { getUserFacingErrorMessage } from "@/lib/user-facing-errors"
+import type {
+  MeetingBotClientApi,
+  MeetingBotBrowserFallbackRequest,
+  MeetingBotBrowserFallbackResponse,
+  MeetingBotCreateRequest,
+  MeetingBotDisconnectRequest,
+  MeetingBotLeaveRequest,
+  MeetingBotParticipantAttributionRequest,
+  MeetingBotParticipantSnapshot,
+  MeetingBotPresenceRequest,
+  MeetingBotSessionSnapshot,
+} from "@/lib/meeting-bot"
 
 export type OpenAiKeyStatus = {
   connected: boolean
@@ -153,12 +165,14 @@ export type WorkspaceSessionStatusResponse = {
 
 type FunctionRequestOptions = {
   body?: unknown
+  keepalive?: boolean
   method?: "DELETE" | "GET" | "POST"
   signal?: AbortSignal
   timeoutMs?: number
 }
 
 const workspaceSessionRequestTimeoutMs = 15_000
+let cachedFunctionAccessToken = ""
 
 export class SalesFrameFunctionError extends Error {
   code?: string
@@ -282,14 +296,19 @@ export function appendErrorReference(message: string, error: unknown) {
 }
 
 async function callFunction<T>(path: string, options: FunctionRequestOptions = {}): Promise<T> {
-  const supabase = createClient()
-  const {
-    data: { session },
-    error,
-  } = await supabase.auth.getSession()
+  let accessToken = options.keepalive ? cachedFunctionAccessToken : ""
+  if (!accessToken) {
+    const supabase = createClient()
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession()
 
-  if (error) throw new Error(error.message)
-  if (!session?.access_token) throw new Error("Sign in before using this feature.")
+    if (error) throw new Error(error.message)
+    if (!session?.access_token) throw new Error("Sign in before using this feature.")
+    accessToken = session.access_token
+    cachedFunctionAccessToken = accessToken
+  }
 
   const controller = new AbortController()
   const clientRequestId = createClientRequestId()
@@ -318,11 +337,12 @@ async function callFunction<T>(path: string, options: FunctionRequestOptions = {
     response = await fetch(path, {
       method: options.method ?? "GET",
       headers: {
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
         "X-SalesFrame-Client-Request-Id": clientRequestId,
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
+      keepalive: options.keepalive,
       signal: controller.signal,
     })
     payload = await readFunctionPayload<T>(response)
@@ -441,6 +461,108 @@ export function requestPostCallOutputs(callId: string) {
     method: "POST",
     body: { callId },
   })
+}
+
+export function createMeetingBot(
+  body: MeetingBotCreateRequest,
+  options: { signal?: AbortSignal } = {}
+) {
+  return callFunction<MeetingBotSessionSnapshot>("/api/meeting-bots", {
+    method: "POST",
+    body,
+    signal: options.signal,
+    timeoutMs: 20_000,
+  })
+}
+
+export function getMeetingBotSession(sessionId: string, options: { signal?: AbortSignal } = {}) {
+  return callFunction<MeetingBotSessionSnapshot>(`/api/meeting-bots/${encodeURIComponent(sessionId)}`, {
+    signal: options.signal,
+    timeoutMs: 12_000,
+  })
+}
+
+export function getMeetingBotSessionForCall(callId: string, options: { signal?: AbortSignal } = {}) {
+  return callFunction<MeetingBotSessionSnapshot>(`/api/meeting-bots?callId=${encodeURIComponent(callId)}`, {
+    signal: options.signal,
+    timeoutMs: 12_000,
+  })
+}
+
+export function heartbeatMeetingBot(
+  sessionId: string,
+  body: MeetingBotPresenceRequest,
+  options: { signal?: AbortSignal } = {}
+) {
+  return callFunction<MeetingBotSessionSnapshot>(`/api/meeting-bots/${encodeURIComponent(sessionId)}/heartbeat`, {
+    method: "POST",
+    body,
+    signal: options.signal,
+    timeoutMs: 10_000,
+  })
+}
+
+export function disconnectMeetingBot(sessionId: string, body: MeetingBotDisconnectRequest) {
+  return callFunction<MeetingBotSessionSnapshot>(`/api/meeting-bots/${encodeURIComponent(sessionId)}/disconnect`, {
+    method: "POST",
+    body,
+    keepalive: true,
+  })
+}
+
+export function transitionMeetingBotToBrowserCapture(
+  sessionId: string,
+  body: MeetingBotBrowserFallbackRequest,
+  options: { signal?: AbortSignal } = {}
+) {
+  return callFunction<MeetingBotBrowserFallbackResponse>(
+    `/api/meeting-bots/${encodeURIComponent(sessionId)}/fallback`,
+    {
+      method: "POST",
+      body,
+      signal: options.signal,
+      timeoutMs: 12_000,
+    }
+  )
+}
+
+export function leaveMeetingBot(
+  sessionId: string,
+  body: MeetingBotLeaveRequest,
+  options: { signal?: AbortSignal } = {}
+) {
+  return callFunction<MeetingBotSessionSnapshot>(`/api/meeting-bots/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+    body,
+    signal: options.signal,
+    timeoutMs: 20_000,
+  })
+}
+
+export function correctMeetingBotParticipantAttribution(
+  sessionId: string,
+  participantId: string,
+  body: MeetingBotParticipantAttributionRequest,
+  options: { signal?: AbortSignal } = {}
+) {
+  return callFunction<MeetingBotParticipantSnapshot>(
+    `/api/meeting-bots/${encodeURIComponent(sessionId)}/participants/${encodeURIComponent(participantId)}/attribution`,
+    {
+      method: "POST",
+      body,
+      signal: options.signal,
+      timeoutMs: 12_000,
+    }
+  )
+}
+
+export const meetingBotClientApi: MeetingBotClientApi = {
+  create: createMeetingBot,
+  disconnect: disconnectMeetingBot,
+  fallback: transitionMeetingBotToBrowserCapture,
+  get: getMeetingBotSession,
+  heartbeat: heartbeatMeetingBot,
+  leave: leaveMeetingBot,
 }
 
 export function requestLiveGuidance(

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">SalesFrame AI Notetaker</title>
+  <desc id="desc">The white SalesFrame AudioLines mark above salesframe.ai on a black background.</desc>
+  <rect width="1280" height="720" fill="#080808"/>
+  <g transform="translate(490 150) scale(12.5)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 10v3"/>
+    <path d="M6 6v11"/>
+    <path d="M10 3v18"/>
+    <path d="M14 8v7"/>
+    <path d="M18 5v13"/>
+    <path d="M22 10v3"/>
+  </g>
+  <text x="640" y="555" fill="#ffffff" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="600" letter-spacing="-1" text-anchor="middle">salesframe.ai</text>
+</svg>

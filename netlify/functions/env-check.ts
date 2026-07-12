@@ -2,6 +2,7 @@ import type { Config, Context } from "@netlify/functions"
 
 import {
   getEnv,
+  meetingBotServerEnvNames,
   optionalEnvNames,
   optionalFrontendEnvNames,
   optionalServerEnvNames,
@@ -45,6 +46,17 @@ export default async (request: Request, context: Context) => {
     const missing = required
       .filter((item) => !item.configured)
       .map((item) => item.name)
+    const meetingBotEnabled = /^(?:1|true|yes|on)$/i.test(getEnv("RECALL_MEETING_BOT_ENABLED"))
+    const meetingBotMissing = meetingBotServerEnvNames.filter((name) => {
+      const value = getEnv(name)
+      if (!value) return true
+      if (name === "MEETING_BOT_CRYPTO_SECRET") return value.length < 32
+      if (name === "RECALL_WORKSPACE_VERIFICATION_SECRET") {
+        const secrets = value.split(/[\s,]+/).filter(Boolean)
+        return secrets.length === 0 || secrets.some((secret) => !secret.startsWith("whsec_"))
+      }
+      return false
+    })
 
     return dataResponse({
       ready: missing.length === 0,
@@ -55,6 +67,13 @@ export default async (request: Request, context: Context) => {
         frontend: requiredFrontendEnvNames,
         optionalFrontend: optionalFrontendEnvNames,
         server: requiredServerEnvNames,
+      },
+      features: {
+        meetingBot: {
+          enabled: meetingBotEnabled,
+          ready: !meetingBotEnabled || meetingBotMissing.length === 0,
+          missing: meetingBotEnabled ? meetingBotMissing : [],
+        },
       },
     })
   } catch (error) {

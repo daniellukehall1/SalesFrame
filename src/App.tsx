@@ -162,6 +162,7 @@ import {
   type CallCapturePermissionState,
   type CallCaptureStatus,
 } from "@/hooks/use-call-capture"
+import { useMeetingBotCapture } from "@/hooks/use-meeting-bot-capture"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   getMeetingAudioDisplayOptions,
@@ -196,6 +197,12 @@ import {
 } from "@/lib/live-question-policy"
 import { normalizePublicMarketingPath } from "@/lib/public-marketing-routes"
 import {
+  getMeetingBotPlatformLabel,
+  mapMeetingBotToCallCaptureStatus,
+  validateMeetingBotUrl,
+  type MeetingBotParticipantSnapshot,
+} from "@/lib/meeting-bot"
+import {
   getAuthenticatedPathForState,
   getAuthenticatedRoutePath,
   getRouteResource,
@@ -212,8 +219,10 @@ import {
   appendErrorReference,
   checkDeepgramTranscriptionHealth,
   checkOpenAiWorkspaceHealth,
+  correctMeetingBotParticipantAttribution,
   deleteOpenAiKey,
   getBulkImportStatus,
+  getMeetingBotSessionForCall,
   getOpenAiKeyStatus,
   getWorkspaceSessionPolicy,
   getWorkspaceSessionStatus,
@@ -229,6 +238,7 @@ import {
   requestSellerDomainResearch,
   saveOpenAiKey,
   saveWorkspaceSessionPolicy,
+  meetingBotClientApi,
   SalesFrameFunctionError,
   type BulkImportStatusResponse,
   type OpenAiKeyStatus,
@@ -287,6 +297,7 @@ import {
   listOpportunityPlaybookAssignments,
   listPlaybookFields,
   listPostCallOutputs,
+  listRecentTranscriptSegments,
   listTranscriptSegments,
   listWorkspaceAccounts,
   listWorkspaceContacts,
@@ -495,6 +506,12 @@ type SpeakerIdentityChangePayload = {
 type SpeakerIdentityChangeResult = {
   message: string
   persistence: "saved" | "local"
+}
+
+type MeetingBotParticipantAttributionChange = {
+  contactId: string | null
+  participantId: string
+  party: MeetingBotParticipantSnapshot["party"]
 }
 
 type ContactWorkspaceContextValue = {
@@ -2068,6 +2085,7 @@ function mapTranscriptSegmentsByCallId({
 
       transcript.push({
         audioSourceKind: segment.audio_source_kind ?? undefined,
+        captureProvider: segment.capture_provider ?? undefined,
         contactConfirmedAt: speaker?.contact_confirmed_at ?? undefined,
         contactId: speaker?.contact_id ?? undefined,
         id: segment.id,
@@ -2087,6 +2105,7 @@ function mapTranscriptSegmentsByCallId({
         speakerSource: segment.speaker_source ?? segment.speaker_attribution ?? undefined,
         time: formatPersistedTranscriptTime(segment.start_ms),
         text: segment.text,
+        transcriptionProvider: segment.transcription_provider ?? undefined,
         wordConfidence: segment.word_confidence ?? undefined,
       })
 
@@ -2094,6 +2113,71 @@ function mapTranscriptSegmentsByCallId({
     })
 
   return transcriptByCallId
+}
+
+function applyMeetingBotParticipantAttribution({
+  contacts,
+  participants,
+  transcript,
+}: {
+  contacts: Contact[]
+  participants: MeetingBotParticipantSnapshot[]
+  transcript: Opportunity["transcript"]
+}) {
+  const contactById = new Map(contacts.map((contact) => [contact.id, contact]))
+  const participantBySpeakerId = new Map(
+    participants.flatMap((participant) =>
+      participant.callSpeakerId ? [[participant.callSpeakerId, participant] as const] : []
+    )
+  )
+  const customerLabels = new Map<string, TranscriptSpeaker>()
+  const customerLabelOptions: TranscriptSpeaker[] = ["Customer", "Customer 2", "Customer 3"]
+
+  participants
+    .filter((participant) => participant.party === "customer")
+    .forEach((participant, index) => {
+      customerLabels.set(participant.participantId, customerLabelOptions[index] ?? "Unknown")
+    })
+
+  return transcript.map((line) => {
+    const participant = line.speakerId ? participantBySpeakerId.get(line.speakerId) : undefined
+    if (!participant) return line
+
+    const matchedContact = participant.matchedContactId
+      ? contactById.get(participant.matchedContactId)
+      : undefined
+    const speakerLabel: TranscriptSpeaker =
+      participant.party === "seller"
+        ? "Seller"
+        : participant.party === "customer"
+          ? customerLabels.get(participant.participantId) ?? "Unknown"
+          : "Unknown"
+    const displayName =
+      matchedContact?.preferredName ||
+      matchedContact?.fullName ||
+      participant.displayName ||
+      speakerLabel
+    const hasReliableContactMatch = Boolean(
+      participant.matchedContactId &&
+      participant.matchProvenance !== "none" &&
+      (participant.matchConfidence ?? 0) >= 0.88
+    )
+
+    return {
+      ...line,
+      contactCorrectionLocked: participant.correctionLocked,
+      contactId: participant.matchedContactId ?? line.contactId,
+      contactMatchConfidence: participant.matchConfidence ?? undefined,
+      contactMatchProvenance: participant.matchProvenance,
+      speaker: speakerLabel,
+      speakerAttributionReason: participant.matchProvenance || line.speakerAttributionReason,
+      speakerConfidence: participant.matchConfidence ?? line.speakerConfidence,
+      speakerDisplayName: hasReliableContactMatch ? displayName : participant.displayName || displayName,
+      speakerLabel,
+      speakerNeedsReview: participant.party === "unknown",
+      speakerSource: participant.matchProvenance || line.speakerSource,
+    }
+  })
 }
 
 function mapOpenAiKeyStatusToSavedState(status: OpenAiKeyStatus): SavedOpenAiKeyState | null {
@@ -2243,6 +2327,7 @@ function createOptionalSupabaseClient(): SupabaseClient<Database> | null {
 const authConnectionUnavailableMessage =
   "SalesFrame cannot reach sign-in right now. Try again in a moment."
 const callCaptureStartupTimeoutMs = 30000
+const meetingBotLiveTranscriptWindowSize = 500
 
 function getLiveCallRemainingSeconds(elapsedSeconds: number, durationLimitSeconds = MAX_LIVE_CALL_SECONDS) {
   return Math.max(0, durationLimitSeconds - Math.max(0, elapsedSeconds))
@@ -2320,6 +2405,11 @@ function App() {
   const [editOpportunityId, setEditOpportunityId] = React.useState<string | null>(null)
   const [pendingArchiveRecord, setPendingArchiveRecord] = React.useState<PendingArchiveRecord | null>(null)
   const [pendingDeleteRecord, setPendingDeleteRecord] = React.useState<PendingDeleteRecord | null>(null)
+  const [pendingMeetingBotNavigation, setPendingMeetingBotNavigation] = React.useState<{
+    action: () => void
+    destinationLabel: string
+  } | null>(null)
+  const [endingMeetingBotForNavigation, setEndingMeetingBotForNavigation] = React.useState(false)
   const [callType, setCallType] = React.useState("Discovery")
   const [isRecording, setIsRecording] = React.useState(false)
   const [elapsed, setElapsed] = React.useState(0)
@@ -2400,16 +2490,33 @@ function App() {
   const [postCallGeneratingCallId, setPostCallGeneratingCallId] = React.useState("")
   const [postCallError, setPostCallError] = React.useState<{ callId: string; message: string } | null>(null)
   const callCapture = useCallCapture()
+  const meetingBotCapture = useMeetingBotCapture({
+    api: meetingBotClientApi,
+    onRecoverableError: (error) => {
+      void reportClientError({
+        error,
+        eventName: "meeting_bot_status_refresh_failed",
+      })
+    },
+  })
+  const meetingBotCallCaptureStatus = mapMeetingBotToCallCaptureStatus(meetingBotCapture.status)
+  const activeMeetingBotSession =
+    meetingBotCapture.session?.callId === activeCallId ? meetingBotCapture.session : null
+  const effectiveCaptureStatus = activeMeetingBotSession ? meetingBotCallCaptureStatus : callCapture.status
+  const effectiveCaptureCallId =
+    activeMeetingBotSession && ["provisioning", "joining", "waiting_room", "recording", "leaving"].includes(meetingBotCapture.status)
+      ? activeMeetingBotSession.callId
+      : callCapture.activeCallId
   const [isStoppingCall, setIsStoppingCall] = React.useState(false)
   const isCallLive =
-    Boolean(callCapture.activeCallId) ||
+    Boolean(effectiveCaptureCallId) ||
     isRecording ||
-    ["requesting-permission", "connecting", "recording", "paused", "stopping"].includes(callCapture.status)
+    ["requesting-permission", "connecting", "recording", "paused", "stopping"].includes(effectiveCaptureStatus)
   const canStopActiveCall =
-    Boolean(activeCallId || callCapture.activeCallId) &&
+    Boolean(activeCallId || effectiveCaptureCallId) &&
     (isStoppingCall ||
       isRecording ||
-      ["requesting-permission", "connecting", "recording", "paused", "stopping"].includes(callCapture.status))
+      ["requesting-permission", "connecting", "recording", "paused", "stopping"].includes(effectiveCaptureStatus))
   const startingRecordingRef = React.useRef(false)
   const postCallRetryInFlightRef = React.useRef("")
   const workspaceRefreshRequestIdRef = React.useRef(0)
@@ -2437,6 +2544,9 @@ function App() {
   const workspaceSessionActivitySentAtRef = React.useRef(0)
   const workspaceSessionStatusRef = React.useRef<WorkspaceSessionStatusResponse | null>(null)
   const handleWorkspaceSessionExpiredRef = React.useRef<((message?: string) => void) | null>(null)
+  const meetingBotRestoreCallIdRef = React.useRef("")
+  const meetingBotFinalizedSessionIdRef = React.useRef("")
+  const meetingBotRetryUrlRef = React.useRef("")
   const contactEnrichmentPollTimersRef = React.useRef(new Map<string, number>())
   const contactEnrichmentPollGenerationRef = React.useRef(0)
 
@@ -2714,7 +2824,23 @@ function App() {
   React.useEffect(() => {
     const handlePopState = () => {
       if (isCallLiveRef.current) {
-        restoreActiveCallRoute("Stop the active call before using browser history.", "push")
+        const session = meetingBotCapture.session
+        const isActiveMeetingBot =
+          session?.callId === activeCallIdRef.current &&
+          ["provisioning", "joining", "waiting_room", "recording"].includes(session.status)
+
+        restoreActiveCallRoute(
+          isActiveMeetingBot
+            ? "SalesFrame kept the live call open while you choose what to do."
+            : "Stop the active call before using browser history.",
+          "push"
+        )
+        if (isActiveMeetingBot) {
+          setPendingMeetingBotNavigation({
+            action: () => window.history.back(),
+            destinationLabel: "the previous page",
+          })
+        }
         return
       }
 
@@ -2739,7 +2865,7 @@ function App() {
     window.addEventListener("popstate", handlePopState)
 
     return () => window.removeEventListener("popstate", handlePopState)
-  }, [restoreActiveCallRoute])
+  }, [meetingBotCapture.session, restoreActiveCallRoute])
 
   React.useEffect(() => {
     if (!supabase) {
@@ -3017,7 +3143,7 @@ function App() {
     if (!authSession || !activeWorkspaceId) return null
 
     const now = Date.now()
-    const activeCallForHeartbeat = isCallLiveRef.current ? activeCallIdRef.current || callCapture.activeCallId || null : null
+    const activeCallForHeartbeat = isCallLiveRef.current ? activeCallIdRef.current || effectiveCaptureCallId || null : null
 
     if (
       !options.force &&
@@ -3046,7 +3172,7 @@ function App() {
 
       throw caughtError
     }
-  }, [activeWorkspaceId, authSession, callCapture.activeCallId, handleWorkspaceSessionStatus])
+  }, [activeWorkspaceId, authSession, effectiveCaptureCallId, handleWorkspaceSessionStatus])
 
   React.useEffect(() => {
     if (!authSession || !activeWorkspaceId) {
@@ -3533,6 +3659,268 @@ function App() {
     return () => window.clearInterval(interval)
   }, [activeCallStartedAt, isCallLive])
 
+  const meetingBotParticipantRevision = (meetingBotCapture.session?.participants ?? [])
+    .map((participant) => [
+      participant.participantId,
+      participant.callSpeakerId,
+      participant.displayName,
+      participant.party,
+      participant.matchedContactId,
+      participant.matchConfidence,
+      participant.matchProvenance,
+      participant.correctionLocked ? "1" : "0",
+    ].join(":"))
+    .sort()
+    .join("|")
+  const meetingBotContactIdentityRevision = workspaceContacts
+    .map((contact) => [contact.id, contact.fullName, contact.preferredName, contact.archivedAtIso].join(":"))
+    .sort()
+    .join("|")
+
+  React.useEffect(() => {
+    const botSession = meetingBotCapture.session
+    if (!botSession?.callId) return
+
+    let cancelled = false
+    let refreshInFlight = false
+    let refreshQueued = false
+    let callSpeakerRows: CallSpeakerRow[] = []
+    const pendingSegmentChanges: Array<{
+      eventType: "DELETE" | "INSERT" | "UPDATE"
+      newRow: Record<string, unknown>
+      oldRow: Record<string, unknown>
+    }> = []
+    let persistedTranscriptRows: Opportunity["transcript"] =
+      activeCallIdRef.current === botSession.callId ? transcriptRef.current : []
+    const publishMeetingBotTranscript = (nextTranscript: Opportunity["transcript"]) => {
+      persistedTranscriptRows = nextTranscript
+      setTranscriptsByCallId((items) => ({ ...items, [botSession.callId]: nextTranscript }))
+      if (activeCallIdRef.current !== botSession.callId) return
+
+      const nextSpeakerIdentities = buildSpeakerIdentityMapFromTranscript(nextTranscript)
+      const attributedTranscript = applySpeakerIdentitiesToTranscript(nextTranscript, nextSpeakerIdentities)
+      speakerIdentitiesRef.current = nextSpeakerIdentities
+      transcriptRef.current = attributedTranscript
+      setSpeakerIdentities(nextSpeakerIdentities)
+      setTranscript(attributedTranscript)
+    }
+    const hydrateMeetingBotTranscript = async () => {
+      if (cancelled) return
+      if (refreshInFlight) {
+        refreshQueued = true
+        return
+      }
+
+      refreshInFlight = true
+      try {
+        const [callContacts, callSpeakers, transcriptSegments] = await Promise.all([
+          listCallContacts([botSession.callId]),
+          listCallSpeakers([botSession.callId]),
+          listRecentTranscriptSegments(botSession.callId, meetingBotLiveTranscriptWindowSize),
+        ])
+        if (cancelled) return
+
+        callSpeakerRows = callSpeakers
+        const persistedTranscript = mapTranscriptSegmentsByCallId({ callSpeakers, transcriptSegments })[botSession.callId] ?? []
+        const nextTranscript = applyMeetingBotParticipantAttribution({
+          contacts: workspaceContacts,
+          participants: botSession.participants ?? [],
+          transcript: persistedTranscript,
+        })
+        setWorkspaceCallContacts((relationships) => [
+          ...relationships.filter((relationship) => relationship.callId !== botSession.callId),
+          ...mapCallContactRowsToUi(callContacts),
+        ])
+        publishMeetingBotTranscript(nextTranscript)
+      } catch (error: unknown) {
+        if (!cancelled) {
+          void reportClientError({
+            error,
+            eventName: "meeting_bot_transcript_refresh_failed",
+            metadata: { callId: botSession.callId },
+          })
+        }
+      } finally {
+        refreshInFlight = false
+        const queuedSegmentChanges = pendingSegmentChanges.splice(0)
+        queuedSegmentChanges.forEach((change) => applyTranscriptSegmentChange(
+          change.eventType,
+          change.newRow,
+          change.oldRow
+        ))
+        if (refreshQueued && !cancelled) {
+          refreshQueued = false
+          void hydrateMeetingBotTranscript()
+        }
+      }
+    }
+
+    const applyTranscriptSegmentChange = (
+      eventType: "DELETE" | "INSERT" | "UPDATE",
+      newRow: Record<string, unknown>,
+      oldRow: Record<string, unknown>
+    ) => {
+      if (refreshInFlight) {
+        pendingSegmentChanges.push({ eventType, newRow, oldRow })
+        return
+      }
+      const rawRow = (eventType === "DELETE" ? oldRow : newRow) as unknown as TranscriptSegmentRow
+      if (!rawRow?.id || rawRow.call_id !== botSession.callId) return
+
+      const currentTranscript = persistedTranscriptRows
+      const nextTranscript = eventType === "DELETE"
+        ? currentTranscript.filter((line) => line.id !== rawRow.id)
+        : (() => {
+            const mappedLine = mapTranscriptSegmentsByCallId({
+              callSpeakers: callSpeakerRows,
+              transcriptSegments: [rawRow],
+            })[botSession.callId]?.[0]
+            if (!mappedLine) return currentTranscript
+            const attributedLine = applyMeetingBotParticipantAttribution({
+              contacts: workspaceContacts,
+              participants: botSession.participants ?? [],
+              transcript: [mappedLine],
+            })[0]
+            return attributedLine
+              ? upsertTranscriptLine(currentTranscript, attributedLine).slice(-meetingBotLiveTranscriptWindowSize)
+              : currentTranscript
+          })()
+      publishMeetingBotTranscript(nextTranscript)
+    }
+
+    const realtimeClient = createClient()
+    const channel = realtimeClient
+      .channel(`meeting-bot-call-${botSession.callId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "transcript_segments", filter: `call_id=eq.${botSession.callId}` },
+        (payload) => applyTranscriptSegmentChange(
+          payload.eventType,
+          payload.new as Record<string, unknown>,
+          payload.old as Record<string, unknown>
+        )
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "call_speakers", filter: `call_id=eq.${botSession.callId}` },
+        () => void hydrateMeetingBotTranscript()
+      )
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") void hydrateMeetingBotTranscript()
+      })
+
+    return () => {
+      cancelled = true
+      void realtimeClient.removeChannel(channel)
+    }
+  }, [meetingBotCapture.session?.callId, meetingBotParticipantRevision, meetingBotContactIdentityRevision])
+
+  React.useEffect(() => {
+    const botSession = meetingBotCapture.session
+    if (!botSession?.callId) return
+
+    if (["provisioning", "joining", "waiting_room", "recording"].includes(botSession.status)) {
+      if (activeCallIdRef.current === botSession.callId) setIsRecording(true)
+      if (botSession.status === "recording") meetingBotRetryUrlRef.current = ""
+      return
+    }
+
+    if (!["processing", "completed", "failed"].includes(botSession.status)) return
+    if (meetingBotFinalizedSessionIdRef.current === botSession.sessionId) return
+    if (activeCallIdRef.current !== botSession.callId) return
+
+    meetingBotFinalizedSessionIdRef.current = botSession.sessionId
+    setWorkspaceCalls((items) =>
+      items.map((call) =>
+        call.id === botSession.callId
+          ? {
+              ...call,
+              duration: formatTime(elapsed),
+              durationSeconds: elapsed,
+              recordingStatus: botSession.status === "completed" ? "ready" : botSession.status === "failed" ? "failed" : "processing",
+              status: botSession.status === "failed" ? "Needs attention" : "Processing",
+            }
+          : call
+      )
+    )
+    if (botSession.status === "failed") {
+      setIsRecording(false)
+      return
+    }
+    setPostCallFocusCallId(botSession.callId)
+    setIsRecording(false)
+    setActiveCallId("")
+    activeCallIdRef.current = ""
+    setActiveCallStartedAt("")
+    setAuthenticatedRouteError("")
+    setAuthenticatedRouteResolving(false)
+    setActiveView("post-call")
+    writeAuthenticatedHistory(
+      getAuthenticatedRoutePath({ callId: botSession.callId, kind: "call", view: "post-call" })
+    )
+    requestNavigationScrollReset()
+  }, [
+    elapsed,
+    meetingBotCapture.error?.message,
+    meetingBotCapture.session,
+    requestNavigationScrollReset,
+    writeAuthenticatedHistory,
+  ])
+
+  React.useEffect(() => {
+    const botSession = meetingBotCapture.session
+    if (!botSession?.callId || !["processing", "completed"].includes(botSession.status)) return
+    if (postCallOutputsByCallId[botSession.callId]) return
+    if (botSession.postCallStatus === "failed") {
+      setPostCallGeneratingCallId((callId) => callId === botSession.callId ? "" : callId)
+      setPostCallError({
+        callId: botSession.callId,
+        message: "The post-call brief needs another pass. The recording and transcript remain safely attached to the call.",
+      })
+      return
+    }
+
+    let cancelled = false
+    let refreshInFlight = false
+    const refreshPostCallOutput = async () => {
+      if (cancelled || refreshInFlight) return
+      refreshInFlight = true
+      try {
+        const outputs = await listPostCallOutputs([botSession.callId])
+        if (cancelled || outputs.length === 0) return
+        setPostCallOutputsByCallId((items) => ({
+          ...items,
+          ...mapPostCallOutputsByCallId(outputs),
+        }))
+        setPostCallGeneratingCallId((callId) => callId === botSession.callId ? "" : callId)
+        setPostCallError((current) => current?.callId === botSession.callId ? null : current)
+      } catch {
+        // The server recovery worker owns retries. Keep the post-call screen calm while it finishes.
+      } finally {
+        refreshInFlight = false
+      }
+    }
+
+    setPostCallGeneratingCallId(botSession.callId)
+    void refreshPostCallOutput()
+    const intervalId = window.setInterval(() => void refreshPostCallOutput(), 5_000)
+    const realtimeClient = createClient()
+    const channel = realtimeClient
+      .channel(`meeting-bot-post-call-${botSession.callId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "post_call_outputs", filter: `call_id=eq.${botSession.callId}` },
+        () => void refreshPostCallOutput()
+      )
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+      void realtimeClient.removeChannel(channel)
+    }
+  }, [meetingBotCapture.session, postCallOutputsByCallId])
+
   React.useEffect(() => {
     setManualCoachState({
       activeQuestion: null,
@@ -3543,14 +3931,7 @@ function App() {
     })
   }, [activeOpportunityId])
 
-  const handleNavigate = React.useCallback((view: string) => {
-    blurFocusedNavigationElement()
-
-    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
-      setPersistentAppAlert("Save or revert the contact note changes before leaving this opportunity.")
-      return
-    }
-
+  const completeNavigation = React.useCallback((view: string) => {
     const nextPath = getAuthenticatedPathForState({
       accountId: activeAccountIdRef.current,
       accountTab: accountDetailTab,
@@ -3573,30 +3954,63 @@ function App() {
     requestNavigationScrollReset()
   }, [accountDetailTab, activeView, blurFocusedNavigationElement, postCallFocusCallId, requestNavigationScrollReset, writeAuthenticatedHistory])
 
+  const queueMeetingBotNavigation = React.useCallback((destinationLabel: string, action: () => void) => {
+    const session = meetingBotCapture.session
+    const isActiveMeetingBot =
+      session?.callId === activeCallIdRef.current &&
+      ["provisioning", "joining", "waiting_room", "recording"].includes(session.status)
+
+    if (!isActiveMeetingBot) return false
+
+    setPendingMeetingBotNavigation({ action, destinationLabel })
+    return true
+  }, [meetingBotCapture.session])
+
+  const handleNavigate = React.useCallback((view: string) => {
+    blurFocusedNavigationElement()
+
+    if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
+      setPersistentAppAlert("Save or revert the contact note changes before leaving this opportunity.")
+      return
+    }
+
+    const navigate = () => completeNavigation(view)
+    if (view !== "workspace" && queueMeetingBotNavigation("that page", navigate)) return
+
+    navigate()
+  }, [blurFocusedNavigationElement, completeNavigation, queueMeetingBotNavigation])
+
   const handleAccountSelect = (accountId: string) => {
     if (document.querySelector('[data-unsaved-contact-notes="true"]')) {
       setPersistentAppAlert("Save or revert the contact note changes before opening another account.")
       return
     }
 
-    requestNavigationScrollReset()
-    setActiveAccountId(accountId)
-    activeAccountIdRef.current = accountId
-    setAccountDetailTab("record")
-    setFocusedContactId("")
-    setPostCallFocusCallId("")
-    const firstOpportunity = workspaceOpportunities.find((opportunity) => opportunity.accountId === accountId)
-    if (firstOpportunity) {
-      setActiveOpportunityId(firstOpportunity.id)
-      activeOpportunityIdRef.current = firstOpportunity.id
-    } else {
-      setActiveOpportunityId("")
-      activeOpportunityIdRef.current = ""
+    const openAccount = () => {
+      requestNavigationScrollReset()
+      setActiveAccountId(accountId)
+      activeAccountIdRef.current = accountId
+      setAccountDetailTab("record")
+      setFocusedContactId("")
+      setPostCallFocusCallId("")
+      const firstOpportunity = workspaceOpportunities.find((opportunity) => opportunity.accountId === accountId)
+      if (firstOpportunity) {
+        setActiveOpportunityId(firstOpportunity.id)
+        activeOpportunityIdRef.current = firstOpportunity.id
+      } else {
+        setActiveOpportunityId("")
+        activeOpportunityIdRef.current = ""
+      }
+      setAuthenticatedRouteError("")
+      setAuthenticatedRouteResolving(false)
+      setActiveView("account-detail")
+      writeAuthenticatedHistory(getAuthenticatedRoutePath({ accountId, kind: "account", tab: "record", view: "account-detail" }))
     }
-    setAuthenticatedRouteError("")
-    setAuthenticatedRouteResolving(false)
-    setActiveView("account-detail")
-    writeAuthenticatedHistory(getAuthenticatedRoutePath({ accountId, kind: "account", tab: "record", view: "account-detail" }))
+
+    const accountName = workspaceAccounts.find((account) => account.id === accountId)?.name ?? "that account"
+    if (queueMeetingBotNavigation(accountName, openAccount)) return
+
+    openAccount()
   }
 
   const handleOpportunitySelect = (opportunityId: string) => {
@@ -3607,13 +4021,19 @@ function App() {
 
     const selectedOpportunity = workspaceOpportunities.find((opportunity) => opportunity.id === opportunityId)
     if (selectedOpportunity) {
+      const openOpportunity = () => {
       requestNavigationScrollReset()
       setActiveAccountId(selectedOpportunity.accountId)
       activeAccountIdRef.current = selectedOpportunity.accountId
       setActiveOpportunityId(opportunityId)
       activeOpportunityIdRef.current = opportunityId
       setPostCallFocusCallId("")
-      handleNavigate("opportunity-record")
+        completeNavigation("opportunity-record")
+      }
+
+      if (queueMeetingBotNavigation(selectedOpportunity.name, openOpportunity)) return
+
+      openOpportunity()
     }
   }
 
@@ -3720,7 +4140,7 @@ function App() {
     activeAccountIdRef.current = selectedOpportunity.accountId
     setActiveOpportunityId(selectedOpportunity.id)
     activeOpportunityIdRef.current = selectedOpportunity.id
-    const isActiveSelectedCall = callId === activeCallId || callId === callCapture.activeCallId
+    const isActiveSelectedCall = callId === activeCallId || callId === effectiveCaptureCallId
 
     setPostCallFocusCallId(isActiveSelectedCall ? "" : callId)
     setAuthenticatedRouteError("")
@@ -3958,7 +4378,58 @@ function App() {
 
     const isCurrentLiveCall =
       isCallLiveRef.current &&
-      (activeCallIdRef.current === selectedCall.id || callCapture.activeCallId === selectedCall.id)
+      (activeCallIdRef.current === selectedCall.id || effectiveCaptureCallId === selectedCall.id)
+
+    if (route.view === "workspace" && selectedCall.status === "Active" && !isCurrentLiveCall) {
+      if (meetingBotRestoreCallIdRef.current === selectedCall.id) return
+
+      meetingBotRestoreCallIdRef.current = selectedCall.id
+      setAuthenticatedRouteResolving(true)
+      setAuthenticatedRouteError("")
+      void getMeetingBotSessionForCall(selectedCall.id)
+        .then((snapshot) => meetingBotCapture.restore(snapshot.sessionId))
+        .then((snapshot) => {
+          meetingBotRestoreCallIdRef.current = ""
+          const shouldRestoreCockpit = ["provisioning", "joining", "waiting_room", "recording", "failed"].includes(snapshot.status)
+          if (!shouldRestoreCockpit) {
+            setAuthenticatedRouteResolving(false)
+            writeAuthenticatedHistory(
+              getAuthenticatedRoutePath({ callId: selectedCall.id, kind: "call", view: "post-call" }),
+              "replace"
+            )
+            return
+          }
+
+          activeAccountIdRef.current = selectedAccount.id
+          activeOpportunityIdRef.current = selectedOpportunity.id
+          activeCallIdRef.current = selectedCall.id
+          setActiveAccountId(selectedAccount.id)
+          setActiveOpportunityId(selectedOpportunity.id)
+          setActiveCallId(selectedCall.id)
+          setActiveCallStartedAt(selectedCall.startedAt ?? new Date().toISOString())
+          setPostCallFocusCallId("")
+          setIsRecording(true)
+          const restoredTranscript = transcriptsByCallId[selectedCall.id] ?? []
+          const restoredSpeakers = buildSpeakerIdentityMapFromTranscript(restoredTranscript)
+          speakerIdentitiesRef.current = restoredSpeakers
+          transcriptRef.current = restoredTranscript
+          setSpeakerIdentities(restoredSpeakers)
+          setTranscript(restoredTranscript)
+          setActiveView("workspace")
+          setAuthenticatedRouteResolving(false)
+          setAuthenticatedRouteError("")
+          requestNavigationScrollReset()
+        })
+        .catch(() => {
+          meetingBotRestoreCallIdRef.current = ""
+          setAuthenticatedRouteResolving(false)
+          writeAuthenticatedHistory(
+            getAuthenticatedRoutePath({ callId: selectedCall.id, kind: "call", view: "post-call" }),
+            "replace"
+          )
+        })
+      return
+    }
 
     activeAccountIdRef.current = selectedAccount.id
     activeOpportunityIdRef.current = selectedOpportunity.id
@@ -3980,7 +4451,8 @@ function App() {
     activeWorkspaceId,
     authenticatedRouteRevision,
     authSession,
-    callCapture.activeCallId,
+    effectiveCaptureCallId,
+    meetingBotCapture.restore,
     passwordRecoveryActive,
     requestNavigationScrollReset,
     restoreActiveCallRoute,
@@ -3989,6 +4461,7 @@ function App() {
     workspaceDataState,
     workspaceNavItems,
     workspaceOpportunities,
+    transcriptsByCallId,
     writeAuthenticatedHistory,
   ])
 
@@ -4052,7 +4525,7 @@ function App() {
   }
 
   const isActiveCallRecordingOpportunity = (opportunityId: string) => {
-    if (!activeCallIdRef.current || callCapture.status === "idle") return false
+    if (!activeCallIdRef.current || effectiveCaptureStatus === "idle") return false
 
     return workspaceCalls.some(
       (call) => call.id === activeCallIdRef.current && call.opportunityId === opportunityId
@@ -4060,7 +4533,7 @@ function App() {
   }
 
   const isActiveCallRecordingAccount = (accountId: string) => {
-    if (!activeCallIdRef.current || callCapture.status === "idle") return false
+    if (!activeCallIdRef.current || effectiveCaptureStatus === "idle") return false
 
     const opportunityIds = new Set(
       workspaceOpportunities
@@ -4283,6 +4756,38 @@ function App() {
     }
 
     try {
+      const meetingSession = meetingBotCapture.session
+      const meetingSessionCall = meetingSession
+        ? workspaceCalls.find((call) => call.id === meetingSession.callId)
+        : undefined
+      const meetingSessionOpportunity = meetingSessionCall
+        ? workspaceOpportunities.find((opportunity) => opportunity.id === meetingSessionCall.opportunityId)
+        : undefined
+      const removesMeetingSessionScope = Boolean(
+        meetingSession && (
+          (pendingDeleteRecord.type === "call" && pendingDeleteRecord.id === meetingSession.callId) ||
+          (pendingDeleteRecord.type === "opportunity" && pendingDeleteRecord.id === meetingSessionCall?.opportunityId) ||
+          (pendingDeleteRecord.type === "account" && pendingDeleteRecord.id === meetingSessionOpportunity?.accountId)
+        )
+      )
+      if (meetingSession && removesMeetingSessionScope) {
+        const settledSession =
+          meetingSession.scopeCleanupSafe ||
+          (meetingSession.status === "completed" && !meetingSession.reconciliationStatus)
+            ? meetingSession
+            : await meetingBotCapture.stop({ endedReason: "seller_stopped" })
+        const providerCleanupConfirmed = Boolean(
+          settledSession?.scopeCleanupSafe ||
+          (settledSession?.status === "completed" && !settledSession.reconciliationStatus)
+        )
+        if (!providerCleanupConfirmed) {
+          return {
+            message: "SalesFrame is leaving the meeting and securing the recording. Delete this record after the call is ready.",
+            ok: false,
+          }
+        }
+      }
+
       const deletingActiveOpportunity =
         pendingDeleteRecord.type === "opportunity" &&
         workspaceCalls.some(
@@ -4292,13 +4797,21 @@ function App() {
       if (pendingDeleteRecord.type === "account") {
         await deleteSupabaseAccount(pendingDeleteRecord.id)
       } else if (pendingDeleteRecord.type === "call") {
-        if (pendingDeleteRecord.id === activeCallIdRef.current && callCapture.status !== "idle") {
-          await callCapture.stopCall()
+        if (pendingDeleteRecord.id === activeCallIdRef.current && effectiveCaptureStatus !== "idle") {
+          if (meetingBotCapture.session?.callId === pendingDeleteRecord.id) {
+            await meetingBotCapture.stop({ endedReason: "seller_stopped" })
+          } else {
+            await callCapture.stopCall()
+          }
         }
         await deleteSupabaseCall(pendingDeleteRecord.id)
       } else {
-        if (deletingActiveOpportunity && callCapture.status !== "idle") {
-          await callCapture.stopCall()
+        if (deletingActiveOpportunity && effectiveCaptureStatus !== "idle") {
+          if (meetingBotCapture.session?.callId === activeCallIdRef.current) {
+            await meetingBotCapture.stop({ endedReason: "seller_stopped" })
+          } else {
+            await callCapture.stopCall()
+          }
         }
         await deleteSupabaseOpportunity(pendingDeleteRecord.id)
       }
@@ -4348,7 +4861,7 @@ function App() {
 
     if (isStoppingCall) return
 
-    const stoppingCallId = activeCallId || callCapture.activeCallId || activeCallIdRef.current
+    const stoppingCallId = activeCallId || effectiveCaptureCallId || activeCallIdRef.current
 
     if (!stoppingCallId) {
       setIsRecording(false)
@@ -4356,6 +4869,15 @@ function App() {
       return
     }
 
+    const isMeetingBotCall = meetingBotCapture.session?.callId === stoppingCallId
+    const meetingBotEndedReason =
+      options.endedReason === "time_limit_reached" ||
+      options.endedReason === "meeting_ended" ||
+      options.endedReason === "bot_removed" ||
+      options.endedReason === "client_disconnected" ||
+      options.endedReason === "provider_failed"
+        ? options.endedReason
+        : "seller_stopped"
     let stoppedCallId = stoppingCallId
     const showPostCallForStoppedCall = (callId: string) => {
       setPostCallFocusCallId(callId)
@@ -4375,33 +4897,52 @@ function App() {
     try {
       setIsStoppingCall(true)
       setPostCallError(null)
-      const stoppedCall = await callCapture.stopCall({
-        endedReason: options.endedReason ?? "seller_stopped",
-      })
-      stoppedCallId = stoppedCall?.callId ?? stoppingCallId
-      setPostCallFocusCallId(stoppedCallId)
-      if (stoppedCall) {
+      if (isMeetingBotCall) {
+        await meetingBotCapture.stop({ endedReason: meetingBotEndedReason })
         setWorkspaceCalls((items) =>
           items.map((call) =>
-            call.id === stoppedCallId
+            call.id === stoppingCallId
               ? {
                   ...call,
-                  duration: formatTime(stoppedCall.durationSeconds),
+                  duration: formatTime(elapsed),
                   durationLimitSeconds: call.durationLimitSeconds || MAX_LIVE_CALL_SECONDS,
-                  durationSeconds: stoppedCall.durationSeconds,
-                  endedReason: stoppedCall.endedReason,
-                  recordingError: stoppedCall.recordingError ?? call.recordingError,
-                  recordingMimeType: stoppedCall.recordingMimeType ?? call.recordingMimeType,
-                  recordingReadyAt: stoppedCall.recordingReadyAt ?? call.recordingReadyAt,
-                  recordingSizeBytes: stoppedCall.recordingSizeBytes ?? call.recordingSizeBytes,
-                  recordingStatus: stoppedCall.recordingStatus,
-                  recordingStoragePath: stoppedCall.recordingStoragePath ?? call.recordingStoragePath,
-                  recordingUrl: stoppedCall.recordingUrl ?? call.recordingUrl,
+                  durationSeconds: elapsed,
+                  endedReason: meetingBotEndedReason,
+                  recordingStatus: "processing",
                   status: "Processing",
                 }
               : call
           )
         )
+      } else {
+        const stoppedCall = await callCapture.stopCall({
+          endedReason: options.endedReason ?? "seller_stopped",
+        })
+        stoppedCallId = stoppedCall?.callId ?? stoppingCallId
+        setPostCallFocusCallId(stoppedCallId)
+        if (stoppedCall) {
+          setWorkspaceCalls((items) =>
+            items.map((call) =>
+              call.id === stoppedCallId
+                ? {
+                    ...call,
+                    duration: formatTime(stoppedCall.durationSeconds),
+                    durationLimitSeconds: call.durationLimitSeconds || MAX_LIVE_CALL_SECONDS,
+                    durationSeconds: stoppedCall.durationSeconds,
+                    endedReason: stoppedCall.endedReason,
+                    recordingError: stoppedCall.recordingError ?? call.recordingError,
+                    recordingMimeType: stoppedCall.recordingMimeType ?? call.recordingMimeType,
+                    recordingReadyAt: stoppedCall.recordingReadyAt ?? call.recordingReadyAt,
+                    recordingSizeBytes: stoppedCall.recordingSizeBytes ?? call.recordingSizeBytes,
+                    recordingStatus: stoppedCall.recordingStatus,
+                    recordingStoragePath: stoppedCall.recordingStoragePath ?? call.recordingStoragePath,
+                    recordingUrl: stoppedCall.recordingUrl ?? call.recordingUrl,
+                    status: "Processing",
+                  }
+                : call
+            )
+          )
+        }
       }
       showPostCallForStoppedCall(stoppedCallId)
     } catch (caughtError: unknown) {
@@ -4412,6 +4953,8 @@ function App() {
     } finally {
       setIsStoppingCall(false)
     }
+
+    if (isMeetingBotCall) return
 
     try {
       setPostCallGeneratingCallId(stoppedCallId)
@@ -4429,6 +4972,159 @@ function App() {
     } finally {
       setPostCallGeneratingCallId((currentCallId) => currentCallId === stoppedCallId ? "" : currentCallId)
     }
+  }
+
+  const handleConfirmMeetingBotNavigation = async () => {
+    const pendingNavigation = pendingMeetingBotNavigation
+    const session = meetingBotCapture.session
+    if (!pendingNavigation || !session || endingMeetingBotForNavigation) return
+
+    setEndingMeetingBotForNavigation(true)
+    try {
+      await meetingBotCapture.stop({ endedReason: "client_disconnected" })
+      setWorkspaceCalls((items) =>
+        items.map((call) =>
+          call.id === session.callId
+            ? {
+                ...call,
+                duration: formatTime(elapsed),
+                durationSeconds: elapsed,
+                endedReason: "client_disconnected",
+                recordingStatus: "processing",
+                status: "Processing",
+              }
+            : call
+        )
+      )
+      setIsRecording(false)
+      isCallLiveRef.current = false
+      setActiveCallId("")
+      activeCallIdRef.current = ""
+      setActiveCallStartedAt("")
+      setPendingMeetingBotNavigation(null)
+      pendingNavigation.action()
+    } catch (caughtError: unknown) {
+      setPersistentAppAlert(
+        getUserFacingErrorMessage(caughtError, "SalesFrame still needs to leave the meeting safely. Try again.")
+      )
+    } finally {
+      setEndingMeetingBotForNavigation(false)
+    }
+  }
+
+  const handleRetryMeetingBot = async (meetingUrl: string) => {
+    const callId = activeCallIdRef.current
+    if (!callId) throw new Error("Open the call before retrying the meeting bot.")
+
+    const validation = validateMeetingBotUrl(meetingUrl)
+    if (!validation.valid) throw new Error(validation.message)
+
+    if (meetingBotCapture.session?.callId === callId) {
+      const stoppedSession = await meetingBotCapture.stop({ endedReason: "bot_removed" })
+      if (
+        stoppedSession &&
+        !stoppedSession.scopeCleanupSafe &&
+        (stoppedSession.status !== "completed" || Boolean(stoppedSession.reconciliationStatus))
+      ) {
+        throw new Error("SalesFrame is still leaving the previous meeting. Try again in a moment.")
+      }
+    }
+    meetingBotCapture.clear()
+    meetingBotRetryUrlRef.current = validation.normalizedUrl
+    setPostCallError(null)
+    setIsRecording(true)
+    await updateSupabaseCall(callId, {
+      ended_at: null,
+      ended_reason: "seller_stopped",
+      recording_error: null,
+      recording_status: "none",
+      status: "active",
+    })
+    try {
+      await meetingBotCapture.start({ callId, meetingUrl: validation.normalizedUrl })
+      setWorkspaceCalls((items) =>
+        items.map((call) =>
+          call.id === callId
+            ? {
+                ...call,
+                endedReason: "seller_stopped",
+                recordingError: null,
+                recordingStatus: "none",
+                status: "Active",
+              }
+            : call
+        )
+      )
+    } catch (caughtError) {
+      setIsRecording(false)
+      throw caughtError
+    }
+  }
+
+  const handleMeetingBotBrowserFallback = async (audioCaptureMode: CallAudioCaptureMode) => {
+    const callId = activeCallIdRef.current
+    if (!callId) throw new Error("Open the call before switching capture method.")
+
+    const startedAt = new Date().toISOString()
+    const browserCaptureMethod = audioCaptureMode === "meeting_audio"
+      ? "browser_two_channel"
+      : "browser_one_channel"
+    if (meetingBotCapture.session?.callId === callId) {
+      const stoppedSession = await meetingBotCapture.stop({ endedReason: "bot_removed" })
+      if (
+        stoppedSession &&
+        !stoppedSession.scopeCleanupSafe &&
+        (stoppedSession.status !== "completed" || Boolean(stoppedSession.reconciliationStatus))
+      ) {
+        throw new Error("SalesFrame is still leaving the meeting. Try browser capture again in a moment.")
+      }
+      await meetingBotCapture.switchToBrowserCapture(browserCaptureMethod)
+    } else {
+      throw new Error("The meeting bot session is no longer available for a safe browser fallback.")
+    }
+    meetingBotCapture.clear()
+    meetingBotRetryUrlRef.current = ""
+    setPostCallError(null)
+    await callCapture.startCall({
+      audioCaptureMode,
+      audioInputDeviceId: readPreferredAudioInputDeviceId(activeWorkspaceIdRef.current),
+      callId,
+      startedAt,
+      workspaceId: activeWorkspaceIdRef.current,
+      onTranscript: (line) =>
+        setTranscript((items) => {
+          const nextItems = upsertTranscriptLine(
+            items,
+            applySpeakerIdentitiesToLine(line, speakerIdentitiesRef.current)
+          )
+          transcriptRef.current = nextItems
+          return nextItems
+        }),
+      onTranscriptUpdate: (line) =>
+        setTranscript((items) => {
+          const nextItems = upsertTranscriptLine(
+            items,
+            applySpeakerIdentitiesToLine(line, speakerIdentitiesRef.current)
+          )
+          transcriptRef.current = nextItems
+          return nextItems
+        }),
+    })
+    setActiveCallStartedAt(startedAt)
+    setIsRecording(true)
+    setWorkspaceCalls((items) =>
+      items.map((call) =>
+        call.id === callId
+          ? {
+              ...call,
+              endedReason: "seller_stopped",
+              recordingError: null,
+              recordingStatus: "recording",
+              status: "Active",
+            }
+          : call
+      )
+    )
   }
 
   const handleRetryPostCallOutputs = async (callId: string) => {
@@ -4680,6 +5376,30 @@ function App() {
         persistence: "local",
       }
     }
+  }
+
+  const handleMeetingBotParticipantAttribution = async ({
+    contactId,
+    participantId,
+    party,
+  }: MeetingBotParticipantAttributionChange) => {
+    const session = meetingBotCapture.session
+    if (!session || session.callId !== activeCallId) {
+      throw new Error("The meeting participant is no longer attached to this call.")
+    }
+
+    await correctMeetingBotParticipantAttribution(session.sessionId, participantId, {
+      contactId,
+      party,
+    })
+    const [, callContactRows] = await Promise.all([
+      meetingBotCapture.refresh(),
+      listCallContacts([activeCallId]),
+    ])
+    setWorkspaceCallContacts((relationships) => [
+      ...relationships.filter((relationship) => relationship.callId !== activeCallId),
+      ...mapCallContactRowsToUi(callContactRows),
+    ])
   }
 
   const scheduleContactEnrichmentPoll = (
@@ -5017,6 +5737,7 @@ function App() {
 
       throw new Error(getStartCancelledResult().message)
     }
+    const isMeetingBot = payload.captureMethod === "meeting_bot"
     const selectedPlaybooks = normalizePlaybooks(payload.playbooks)
     const providedOpenAiKey = payload.openAiApiKey.trim()
     const previousActiveAccountId = activeAccountIdRef.current
@@ -5042,6 +5763,7 @@ function App() {
     let previousOpportunityContactRows: OpportunityContactRow[] | null = null
     let primaryContactId = ""
     let captureStarted = false
+    let meetingBotSessionMayExist = false
     const restoreOpportunityContactsAfterFailedStart = async () => {
       if (!opportunityId || !previousOpportunityContactRows) return
       let lastError: unknown = null
@@ -5111,8 +5833,13 @@ function App() {
       await checkOpenAiWorkspaceHealth(activeWorkspaceId)
       throwIfStartCancelled()
 
-      updatePreparationStep("transcription", "Checking live transcript is ready.")
-      await checkDeepgramTranscriptionHealth()
+      updatePreparationStep(
+        "transcription",
+        isMeetingBot ? "Preparing secure meeting transcription." : "Checking live transcript is ready."
+      )
+      if (!isMeetingBot) {
+        await checkDeepgramTranscriptionHealth()
+      }
       throwIfStartCancelled()
 
       updatePreparationStep("records", "Attaching the call to the account, opportunity, and selected playbooks.")
@@ -5205,6 +5932,13 @@ function App() {
         opportunity_id: opportunityId,
         title: `${payload.callType} call`,
         call_type: payload.callType,
+        // Browser-created calls begin with a browser provenance value. The
+        // service-owned meeting-bot transaction promotes this to
+        // `recall_meeting_bot` only after it has created the matching session.
+        capture_method:
+          !isMeetingBot && payload.audioCaptureMode === "meeting_audio"
+            ? "browser_two_channel"
+            : "browser_one_channel",
         duration_limit_seconds: MAX_LIVE_CALL_SECONDS,
         ended_reason: "seller_stopped",
         status: "active",
@@ -5250,7 +5984,39 @@ function App() {
         "coach",
         "SalesFrame is writing the first live-coach question from your account, opportunity, and playbooks."
       )
-      const initialGuidanceResponse = await requestLiveQuestion({
+      const meetingBotStartPromise = isMeetingBot
+        ? (async () => {
+            updatePreparationStep("audio", "Sending SalesFrame to the meeting.")
+            meetingBotRetryUrlRef.current = payload.meetingUrl
+            try {
+              await meetingBotCapture.start({
+                callId: call.id,
+                meetingUrl: payload.meetingUrl,
+                signal: payload.abortSignal,
+              })
+              meetingBotSessionMayExist = true
+              captureStarted = true
+            } catch (startError: unknown) {
+              try {
+                const snapshot = await getMeetingBotSessionForCall(call.id)
+                meetingBotSessionMayExist = !snapshot.scopeCleanupSafe
+                await meetingBotCapture.restore(snapshot.sessionId)
+                if (!snapshot.scopeCleanupSafe) captureStarted = true
+              } catch (reconciliationError: unknown) {
+                const startFailureWasAuthoritative =
+                  startError instanceof SalesFrameFunctionError &&
+                  startError.status !== 408 &&
+                  startError.code !== "client_request_timeout"
+                const sessionWasNotFound =
+                  reconciliationError instanceof SalesFrameFunctionError && reconciliationError.status === 404
+                meetingBotSessionMayExist = !(startFailureWasAuthoritative && sessionWasNotFound)
+                if (meetingBotSessionMayExist) captureStarted = true
+              }
+              throw startError
+            }
+          })()
+        : null
+      const initialGuidancePromise = requestLiveQuestion({
         accountProfile: initialAccountProfile,
         accountId,
         callId: call.id,
@@ -5273,100 +6039,137 @@ function App() {
         signal: payload.abortSignal,
         timeoutMs: 14000,
       })
-      throwIfStartCancelled()
-      const initialGuidance = mapAiLiveGuidanceResponse(initialGuidanceResponse)
-      if (!initialGuidance) {
-        throw new Error("SalesFrame needs another moment to prepare the first question. Try again in a moment.")
-      }
-      await updateSupabaseCall(call.id, {
-        guidance_readiness: {
-          checkedAt: new Date().toISOString(),
-          confidence:
-            initialGuidance.displayRecommendation?.confidence ??
-            initialGuidance.conversationState?.confidence ??
-            null,
-          ok: true,
-          playbookLabel:
-            initialGuidance.displayRecommendation?.playbookLabel ??
-            initialGuidance.playbookLabel ??
-            null,
-          target:
-            initialGuidance.displayRecommendation?.target ??
-            initialGuidance.target ??
-            null,
-          uiMode:
-            initialGuidance.uiMode ??
-            initialGuidance.displayRecommendation?.uiMode ??
-            null,
+      const initialGuidanceResultPromise = initialGuidancePromise.then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ error, ok: false as const })
+      )
+      const persistInitialGuidance = async (response: Awaited<typeof initialGuidancePromise>) => {
+        const guidance = mapAiLiveGuidanceResponse(response)
+        if (!guidance) {
+          throw new Error("SalesFrame needs another moment to prepare the first question.")
+        }
+        await updateSupabaseCall(call.id, {
+          guidance_readiness: {
+            checkedAt: new Date().toISOString(),
+            confidence:
+              guidance.displayRecommendation?.confidence ??
+              guidance.conversationState?.confidence ??
+              null,
+            ok: true,
+            playbookLabel:
+              guidance.displayRecommendation?.playbookLabel ??
+              guidance.playbookLabel ??
+              null,
+            target:
+              guidance.displayRecommendation?.target ??
+              guidance.target ??
+              null,
+            uiMode:
+              guidance.uiMode ??
+              guidance.displayRecommendation?.uiMode ??
+              null,
           },
-      })
-      throwIfStartCancelled()
-
-      updatePreparationStep("audio", "Ready for the selected channel setup.")
-      const captureAbortController = new AbortController()
-      const handleParentStartAbort = () => captureAbortController.abort()
-      let captureStartupTimeoutId: number | null = null
-      let captureStartupTimedOut = false
-
-      payload.abortSignal?.addEventListener("abort", handleParentStartAbort, { once: true })
-
-      const captureStartPromise = callCapture.startCall({
-        abortSignal: captureAbortController.signal,
-        audioCaptureMode: payload.audioCaptureMode,
-        audioInputDeviceId: payload.audioInputDeviceId,
-        audioInputDeviceLabel: payload.audioInputDeviceLabel,
-        audioOutputDeviceId: payload.audioOutputDeviceId,
-        audioOutputDeviceLabel: payload.audioOutputDeviceLabel,
-        callId: call.id,
-        preparedMeetingAudio: payload.preparedMeetingAudio,
-        startedAt,
-        workspaceId: activeWorkspaceId,
-        onTranscript: (line) =>
-          setTranscript((items) => {
-            const nextItems = upsertTranscriptLine(
-              items,
-              applySpeakerIdentitiesToLine(line, speakerIdentitiesRef.current)
-            )
-            transcriptRef.current = nextItems
-
-            return nextItems
-          }),
-        onTranscriptUpdate: (line) =>
-          setTranscript((items) => {
-            const aliasedLine = applySpeakerIdentitiesToLine(line, speakerIdentitiesRef.current)
-            const nextItems = upsertTranscriptLine(items, aliasedLine)
-            transcriptRef.current = nextItems
-
-            return nextItems
-          }),
-      })
-
-      try {
-        await Promise.race([
-          captureStartPromise,
-          new Promise<never>((_resolve, reject) => {
-            captureStartupTimeoutId = window.setTimeout(() => {
-              captureStartupTimedOut = true
-              captureAbortController.abort()
-              reject(new Error("SalesFrame needs another attempt to finish microphone setup. Check browser microphone permissions, then try again."))
-            }, callCaptureStartupTimeoutMs)
-          }),
-        ])
-      } catch (caughtError: unknown) {
-        if (captureStartupTimedOut) {
-          void captureStartPromise.catch(() => undefined)
-          await callCapture.cancelCallStart(call.id).catch(() => undefined)
-        }
-
-        throw caughtError
-      } finally {
-        if (captureStartupTimeoutId !== null) {
-          window.clearTimeout(captureStartupTimeoutId)
-        }
-        payload.abortSignal?.removeEventListener("abort", handleParentStartAbort)
+        })
+        return guidance
+      }
+      let initialGuidance: LiveGuidance | null = null
+      if (meetingBotStartPromise) {
+        await meetingBotStartPromise
+        void initialGuidanceResultPromise
+          .then((result) => {
+            if (!result.ok) throw result.error
+            return persistInitialGuidance(result.value)
+          })
+          .then((guidance) => {
+            setLiveGuidanceByCallId((items) => ({ ...items, [call.id]: guidance }))
+          })
+          .catch((error: unknown) => {
+            void reportClientError({
+              error,
+              eventName: "meeting_bot_initial_guidance_failed",
+              metadata: { callId: call.id },
+            })
+          })
+      } else {
+        const initialGuidanceResult = await initialGuidanceResultPromise
+        if (!initialGuidanceResult.ok) throw initialGuidanceResult.error
+        initialGuidance = await persistInitialGuidance(initialGuidanceResult.value)
       }
       throwIfStartCancelled()
-      captureStarted = true
+
+      updatePreparationStep(
+        "audio",
+        isMeetingBot ? "Sending SalesFrame to the meeting." : "Ready for the selected channel setup."
+      )
+      if (isMeetingBot) {
+        throwIfStartCancelled()
+        captureStarted = true
+      } else {
+        const captureAbortController = new AbortController()
+        const handleParentStartAbort = () => captureAbortController.abort()
+        let captureStartupTimeoutId: number | null = null
+        let captureStartupTimedOut = false
+
+        payload.abortSignal?.addEventListener("abort", handleParentStartAbort, { once: true })
+
+        const captureStartPromise = callCapture.startCall({
+          abortSignal: captureAbortController.signal,
+          audioCaptureMode: payload.audioCaptureMode,
+          audioInputDeviceId: payload.audioInputDeviceId,
+          audioInputDeviceLabel: payload.audioInputDeviceLabel,
+          audioOutputDeviceId: payload.audioOutputDeviceId,
+          audioOutputDeviceLabel: payload.audioOutputDeviceLabel,
+          callId: call.id,
+          preparedMeetingAudio: payload.preparedMeetingAudio,
+          startedAt,
+          workspaceId: activeWorkspaceId,
+          onTranscript: (line) =>
+            setTranscript((items) => {
+              const nextItems = upsertTranscriptLine(
+                items,
+                applySpeakerIdentitiesToLine(line, speakerIdentitiesRef.current)
+              )
+              transcriptRef.current = nextItems
+
+              return nextItems
+            }),
+          onTranscriptUpdate: (line) =>
+            setTranscript((items) => {
+              const aliasedLine = applySpeakerIdentitiesToLine(line, speakerIdentitiesRef.current)
+              const nextItems = upsertTranscriptLine(items, aliasedLine)
+              transcriptRef.current = nextItems
+
+              return nextItems
+            }),
+        })
+
+        try {
+          await Promise.race([
+            captureStartPromise,
+            new Promise<never>((_resolve, reject) => {
+              captureStartupTimeoutId = window.setTimeout(() => {
+                captureStartupTimedOut = true
+                captureAbortController.abort()
+                reject(new Error("SalesFrame needs another attempt to finish microphone setup. Check browser microphone permissions, then try again."))
+              }, callCaptureStartupTimeoutMs)
+            }),
+          ])
+        } catch (caughtError: unknown) {
+          if (captureStartupTimedOut) {
+            void captureStartPromise.catch(() => undefined)
+            await callCapture.cancelCallStart(call.id).catch(() => undefined)
+          }
+
+          throw caughtError
+        } finally {
+          if (captureStartupTimeoutId !== null) {
+            window.clearTimeout(captureStartupTimeoutId)
+          }
+          payload.abortSignal?.removeEventListener("abort", handleParentStartAbort)
+        }
+        throwIfStartCancelled()
+        captureStarted = true
+      }
 
       if (payload.customerResearch.enabled) {
         setAccountResearchById((items) => ({
@@ -5459,7 +6262,10 @@ function App() {
       if (createdOpportunityRow) {
         const opportunityRow = createdOpportunityRow
         const createdOpportunityUi = mapOpportunityRowToUi({
-          calls: [call],
+          calls: [{
+            ...call,
+            capture_method: isMeetingBot ? "recall_meeting_bot" : call.capture_method,
+          }],
           opportunity: opportunityRow,
           selectedPlaybooks,
         })
@@ -5520,12 +6326,18 @@ function App() {
       setAuthenticatedRouteResolving(false)
       writeAuthenticatedHistory(getAuthenticatedRoutePath({ callId: call.id, kind: "call", view: "workspace" }))
       requestNavigationScrollReset()
-      setLiveGuidanceByCallId((items) => ({
-        ...items,
-        [call.id]: initialGuidance,
-      }))
+      if (initialGuidance) {
+        setLiveGuidanceByCallId((items) => ({
+          ...items,
+          [call.id]: initialGuidance,
+        }))
+      }
       setWorkspaceCalls((items) => {
-        const callSummary = mapCallRowsToSummaries([{ ...call, status: "active" }])[0]
+        const callSummary = mapCallRowsToSummaries([{
+          ...call,
+          capture_method: isMeetingBot ? "recall_meeting_bot" : call.capture_method,
+          status: "active",
+        }])[0]
         return [callSummary, ...items.filter((item) => item.id !== callSummary.id)]
       })
       setIsRecording(true)
@@ -5535,30 +6347,39 @@ function App() {
       }
     } catch (caughtError: unknown) {
       if (payload.abortSignal?.aborted) {
-        await callCapture.cancelCallStart(createdCallId).catch(() => undefined)
-
-        if (createdAccountRow) {
-          await deleteSupabaseAccount(createdAccountRow.id).catch(() => undefined)
-        } else if (createdOpportunityRow) {
-          await deleteSupabaseOpportunity(createdOpportunityRow.id).catch(() => undefined)
+        if (isMeetingBot && meetingBotSessionMayExist) {
+          await meetingBotCapture.stop({ endedReason: "bot_removed" }).catch(() => undefined)
+        } else if (!isMeetingBot || !meetingBotSessionMayExist) {
+          await callCapture.cancelCallStart(createdCallId).catch(() => undefined)
         }
-        if (!createdAccountRow && createdQuickContactRow) {
-          await archiveSupabaseContact(createdQuickContactRow.id, "Call start cancelled").catch(() => undefined)
+
+        const canRollbackCreatedRecords = !isMeetingBot || !meetingBotSessionMayExist
+        if (canRollbackCreatedRecords) {
+          if (createdAccountRow) {
+            await deleteSupabaseAccount(createdAccountRow.id).catch(() => undefined)
+          } else if (createdOpportunityRow) {
+            await deleteSupabaseOpportunity(createdOpportunityRow.id).catch(() => undefined)
+          }
+          if (!createdAccountRow && createdQuickContactRow) {
+            await archiveSupabaseContact(createdQuickContactRow.id, "Call start cancelled").catch(() => undefined)
+          }
         }
         let contactRollbackFailed = false
-        try {
-          await restoreOpportunityContactsAfterFailedStart()
-        } catch (rollbackError: unknown) {
-          contactRollbackFailed = true
-          setPersistentAppAlert("Some opportunity contact changes may remain after cancelling call setup. Review that opportunity before the next call.")
-          void reportClientError({
-            error: rollbackError,
-            eventName: "start_call_contact_rollback_failed",
-            metadata: { callId: createdCallId, opportunityId },
-          })
+        if (canRollbackCreatedRecords) {
+          try {
+            await restoreOpportunityContactsAfterFailedStart()
+          } catch (rollbackError: unknown) {
+            contactRollbackFailed = true
+            setPersistentAppAlert("Some opportunity contact changes may remain after cancelling call setup. Review that opportunity before the next call.")
+            void reportClientError({
+              error: rollbackError,
+              eventName: "start_call_contact_rollback_failed",
+              metadata: { callId: createdCallId, opportunityId },
+            })
+          }
         }
 
-        if (createdCallId) {
+        if (createdCallId && canRollbackCreatedRecords) {
           try {
             await updateSupabaseCall(createdCallId, {
               ended_at: new Date().toISOString(),
@@ -5635,9 +6456,11 @@ function App() {
         setActiveCallStartedAt("")
 
         return getStartCancelledResult(
-          contactRollbackFailed
-            ? "Call start was cancelled, but some opportunity contact changes may remain. Review that opportunity before the next call."
-            : undefined
+          isMeetingBot && meetingBotSessionMayExist
+            ? "Call start was cancelled. SalesFrame is leaving the meeting and will finish the call safely."
+            : contactRollbackFailed
+              ? "Call start was cancelled, but some opportunity contact changes may remain. Review that opportunity before the next call."
+              : undefined
         )
       }
 
@@ -5647,7 +6470,8 @@ function App() {
         error: caughtError,
         eventName: "start_call_failed",
         metadata: {
-          audioCaptureMode: payload.audioCaptureMode,
+          captureMethod: payload.captureMethod,
+          audioCaptureMode: payload.captureMethod === "browser_audio" ? payload.audioCaptureMode : undefined,
           callId: createdCallId,
           callType: payload.callType,
           createdAccount: Boolean(createdAccountRow),
@@ -5656,7 +6480,7 @@ function App() {
         },
       })
 
-      if (createdCallId) {
+      if (createdCallId && (!isMeetingBot || !meetingBotSessionMayExist)) {
         try {
           await updateSupabaseCall(createdCallId, {
             ended_at: new Date().toISOString(),
@@ -5668,7 +6492,7 @@ function App() {
         }
       }
 
-      if (!captureStarted) {
+      if (!captureStarted && (!isMeetingBot || !meetingBotSessionMayExist)) {
         if (createdAccountRow) {
           await deleteSupabaseAccount(createdAccountRow.id).catch(() => undefined)
         } else if (createdOpportunityRow) {
@@ -6721,7 +7545,7 @@ function App() {
   const handleWorkspaceSessionExpired = React.useCallback(async (message = workspaceSessionExpiredMessage) => {
     setWorkspaceSessionWarningOpen(false)
 
-    if (isCallLiveRef.current && (activeCallIdRef.current || callCapture.activeCallId)) {
+    if (isCallLiveRef.current && (activeCallIdRef.current || effectiveCaptureCallId)) {
       try {
         await handleRecordingChange(false)
       } catch {
@@ -6733,7 +7557,7 @@ function App() {
       message,
       tone: "info",
     })
-  }, [callCapture.activeCallId])
+  }, [effectiveCaptureCallId])
 
   React.useEffect(() => {
     handleWorkspaceSessionExpiredRef.current = (message?: string) => {
@@ -6804,39 +7628,44 @@ function App() {
       return
     }
 
+    const changeWorkspace = () => {
+      ensureAuthenticatedAppRoute()
+
+      setIsRecording(false)
+      setElapsed(0)
+      setOnboardingOpen(false)
+      setWorkspaceSetupDraft(null)
+      setOnboardingInitialStep(1)
+      setOnboardingCsvImportActive(false)
+      setOnboardingCompletedImports([])
+      setPendingCsvImportMode(null)
+      setCsvImportOpen(false)
+      loadedWorkspaceIdRef.current = null
+      blurFocusedNavigationElement()
+      setActiveView("home")
+      setAuthenticatedRouteError("")
+      setAuthenticatedRouteResolving(false)
+      activeWorkspaceIdRef.current = workspace.id
+      setActiveWorkspaceId(workspace.id)
+      writeAuthenticatedHistory("/app")
+      requestNavigationScrollReset()
+      void recordWorkspaceSessionActivity({
+        activityType: "workspace_switch",
+        workspaceId: workspace.id,
+      })
+        .then(handleWorkspaceSessionStatus)
+        .catch(() => undefined)
+      setWorkspaceDataState("loading")
+      setLoadingWorkspace(workspace)
+    }
+
     if (isCallLive) {
+      if (queueMeetingBotNavigation(workspace.name, changeWorkspace)) return
       setPersistentAppAlert("Stop the active call before changing workspaces.")
       return
     }
 
-    ensureAuthenticatedAppRoute()
-
-    setIsRecording(false)
-    setElapsed(0)
-    setOnboardingOpen(false)
-    setWorkspaceSetupDraft(null)
-    setOnboardingInitialStep(1)
-    setOnboardingCsvImportActive(false)
-    setOnboardingCompletedImports([])
-    setPendingCsvImportMode(null)
-    setCsvImportOpen(false)
-    loadedWorkspaceIdRef.current = null
-    blurFocusedNavigationElement()
-    setActiveView("home")
-    setAuthenticatedRouteError("")
-    setAuthenticatedRouteResolving(false)
-    activeWorkspaceIdRef.current = workspace.id
-    setActiveWorkspaceId(workspace.id)
-    writeAuthenticatedHistory("/app")
-    requestNavigationScrollReset()
-    void recordWorkspaceSessionActivity({
-      activityType: "workspace_switch",
-      workspaceId: workspace.id,
-    })
-      .then(handleWorkspaceSessionStatus)
-      .catch(() => undefined)
-    setWorkspaceDataState("loading")
-    setLoadingWorkspace(workspace)
+    changeWorkspace()
   }
 
   const handleOpenCreateWorkspaceSetup = () => {
@@ -7355,7 +8184,7 @@ function App() {
                 durationLimitSeconds={MAX_LIVE_CALL_SECONDS}
                 elapsed={elapsed}
                 isRecording={canStopActiveCall}
-                isStopping={isStoppingCall || callCapture.status === "stopping"}
+                isStopping={isStoppingCall || effectiveCaptureStatus === "stopping"}
                 opportunity={activeOpportunity}
                 opportunityDraft={activeOpportunityDraft}
                 startCallAction={
@@ -7432,14 +8261,26 @@ function App() {
                 calls={workspaceCalls}
                 callType={callType}
                 callPlaybooks={callPlaybooks}
-                captureError={callCapture.error}
-                audioPreflight={callCapture.audioPreflight}
-                capturePermissionState={callCapture.permissionState}
-                captureStatus={callCapture.status}
+                captureError={activeMeetingBotSession ? meetingBotCapture.error?.message ?? null : callCapture.error}
+                audioPreflight={activeMeetingBotSession ? null : callCapture.audioPreflight}
+                capturePermissionState={activeMeetingBotSession ? "granted" : callCapture.permissionState}
+                captureStatus={effectiveCaptureStatus}
+                captureStatusDetail={
+                  activeMeetingBotSession ? meetingBotCapture.statusPresentation.detail : undefined
+                }
+                captureStatusTitle={
+                  activeMeetingBotSession ? meetingBotCapture.statusPresentation.title : undefined
+                }
                 customerResearch={customerResearch}
                 elapsed={elapsed}
                 isRecording={canStopActiveCall}
-                isStoppingCall={isStoppingCall || callCapture.status === "stopping"}
+                isMeetingBotCapture={Boolean(activeMeetingBotSession)}
+                isStoppingCall={isStoppingCall || effectiveCaptureStatus === "stopping"}
+                meetingBotRecoveryUrl={
+                  activeMeetingBotSession?.status === "failed" ? meetingBotRetryUrlRef.current : undefined
+                }
+                meetingBotParticipants={activeMeetingBotSession?.participants ?? []}
+                meetingBotSessionId={activeMeetingBotSession?.sessionId}
                 initialLiveGuidance={activeCallId ? liveGuidanceByCallId[activeCallId] ?? null : null}
                 manualCoach={manualCoachState}
                 notes={notes}
@@ -7464,6 +8305,7 @@ function App() {
                 workspaceId={activeWorkspaceId}
                 onCoachFeedback={handleLiveCoachFeedback}
                 onMarkQuestionAsked={handleMarkManualQuestionAsked}
+                onRetryMeetingBot={handleRetryMeetingBot}
                 onNavigate={handleNavigate}
                 onOpenSettings={() => handleNavigate("ai")}
                 onOpportunityDraftChange={(field, value) =>
@@ -7477,7 +8319,9 @@ function App() {
                 onScrollToTop={requestNavigationScrollReset}
                 onStartRecording={handleStartRecording}
                 onStopRecording={() => handleRecordingChange(false)}
+                onUseMeetingBotBrowserFallback={handleMeetingBotBrowserFallback}
                 onSpeakerIdentityChange={handleSpeakerIdentityChange}
+                onMeetingBotParticipantAttribution={handleMeetingBotParticipantAttribution}
                 onTranscriptSpeakerChange={handleTranscriptSpeakerChange}
                 onDeleteCall={handleRequestDeleteCall}
                 onUseManualQuestion={handleUseManualQuestion}
@@ -7666,6 +8510,35 @@ function App() {
             }
           }}
         />
+        <Dialog
+          open={Boolean(pendingMeetingBotNavigation)}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen && !endingMeetingBotForNavigation) setPendingMeetingBotNavigation(null)
+          }}
+        >
+          <DialogContent className="max-sm:max-w-[calc(100%-0.75rem)] sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Leave the live call?</DialogTitle>
+              <DialogDescription>
+                SalesFrame will leave the meeting and finish saving this call before opening {pendingMeetingBotNavigation?.destinationLabel ?? "that page"}.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogActions
+              cancelDisabled={endingMeetingBotForNavigation}
+              cancelLabel="Stay on call"
+              onCancel={() => setPendingMeetingBotNavigation(null)}
+              primaryAction={
+                <Button
+                  variant="destructive"
+                  disabled={endingMeetingBotForNavigation}
+                  onClick={() => void handleConfirmMeetingBotNavigation()}
+                >
+                  {endingMeetingBotForNavigation ? "Leaving meeting" : "Leave and continue"}
+                </Button>
+              }
+            />
+          </DialogContent>
+        </Dialog>
         <DeleteRecordDialog
           record={pendingDeleteRecord}
           onCancel={() => setPendingDeleteRecord(null)}
@@ -9294,6 +10167,10 @@ function StartRecordingDialog({
   const [audioCaptureMode, setAudioCaptureMode] = React.useState<CallAudioCaptureMode>(() =>
     getPreferredAudioCaptureMode(readCaptureSettings(workspaceId))
   )
+  const [audioSourceChoice, setAudioSourceChoice] = React.useState<AudioSourceChoice>(() =>
+    getAudioSourceChoice(getPreferredAudioCaptureMode(readCaptureSettings(workspaceId)))
+  )
+  const [meetingUrl, setMeetingUrl] = React.useState("")
   const [selectedPlaybooks, setSelectedPlaybooks] = React.useState<CallPlaybook[]>(() =>
     parsePlaybookSelection(opportunityDrafts[opportunityId]?.frameworks)
   )
@@ -9353,7 +10230,12 @@ function StartRecordingDialog({
     accountMode === "new" || opportunityMode === "new"
       ? opportunityName.trim().length > 0
       : Boolean(opportunityId)
-  const canContinueCall = Boolean(callType) && selectedPlaybooks.length > 0
+  const meetingUrlValidation = validateMeetingBotUrl(meetingUrl)
+  const selectedAudioSourceChoice = audioSourceChoice
+  const canContinueCall =
+    Boolean(callType) &&
+    selectedPlaybooks.length > 0 &&
+    (selectedAudioSourceChoice !== "meeting_bot" || meetingUrlValidation.valid)
   const canUseResearch =
     !customerResearchEnabled ||
     (sellerCompany.trim().length > 0 && sellerDomain.trim().length > 0 && productContext.trim().length > 0)
@@ -9361,7 +10243,6 @@ function StartRecordingDialog({
   const canUseOpenAi = hasSavedOpenAiKey
   const canStart = canContinueAccount && canContinueOpportunity && canContinueCall && canUseResearch && canUseOpenAi
   const canContinue = step === 1 ? canContinueAccount : step === 2 ? canContinueOpportunity : canContinueCall
-  const selectedAudioSourceChoice = getAudioSourceChoice(audioCaptureMode)
   const microphonePreviewReading = useMediaStreamLevel(microphonePreviewStream)
   const meetingAudioPreviewReading = useMediaStreamLevel(meetingAudioPreviewStream)
   const selectedAudioInputLabel = getAudioDeviceDisplayName(
@@ -9414,9 +10295,12 @@ function StartRecordingDialog({
     },
     {
       id: "transcription",
-      label: "Checking live transcript",
-      description: "SalesFrame is making sure Deepgram is ready before audio capture begins.",
-      icon: Mic2Icon,
+      label: selectedAudioSourceChoice === "meeting_bot" ? "Preparing the meeting bot" : "Checking live transcript",
+      description:
+        selectedAudioSourceChoice === "meeting_bot"
+          ? "SalesFrame is preparing secure meeting transcription without using this device microphone."
+          : "SalesFrame is making sure Deepgram is ready before audio capture begins.",
+      icon: selectedAudioSourceChoice === "meeting_bot" ? BotIcon : Mic2Icon,
       progress: 30,
     },
     {
@@ -9444,12 +10328,14 @@ function StartRecordingDialog({
     },
     {
       id: "audio",
-      label: "Getting ready to listen",
+      label: selectedAudioSourceChoice === "meeting_bot" ? "Sending SalesFrame to the meeting" : "Getting ready to listen",
       description:
-        audioCaptureMode === "meeting_audio"
+        selectedAudioSourceChoice === "meeting_bot"
+          ? "SalesFrame will join as a visible participant and begin recording once admitted."
+          : audioCaptureMode === "meeting_audio"
           ? "Next up: two-channel capture with your mic plus buyer-side app, tab, or system audio."
           : "Next up: one-channel capture through this device microphone.",
-      icon: Mic2Icon,
+      icon: selectedAudioSourceChoice === "meeting_bot" ? BotIcon : Mic2Icon,
       progress: 94,
     },
   ]
@@ -9586,11 +10472,10 @@ function StartRecordingDialog({
 
     setCapturePreferences(nextPreferences)
     setSelectedAudioInputDeviceId(readPreferredAudioInputDeviceId(workspaceId))
-    setAudioCaptureMode((currentMode) =>
-      isAudioCaptureModeEnabled(nextPreferences, currentMode)
-        ? currentMode
-        : getPreferredAudioCaptureMode(nextPreferences)
-    )
+    const nextAudioCaptureMode = getPreferredAudioCaptureMode(nextPreferences)
+    setAudioCaptureMode(nextAudioCaptureMode)
+    setAudioSourceChoice(getAudioSourceChoice(nextAudioCaptureMode))
+    setMeetingUrl("")
     clearMicrophonePreview()
     clearMeetingAudioPreview()
   }, [clearMeetingAudioPreview, clearMicrophonePreview, workspaceId])
@@ -9610,7 +10495,7 @@ function StartRecordingDialog({
   }, [clearMeetingAudioPreview, clearMicrophonePreview])
 
   React.useEffect(() => {
-    if (!open || step !== 3) return
+    if (!open || step !== 3 || selectedAudioSourceChoice === "meeting_bot") return
 
     void refreshAudioDevices()
 
@@ -9624,7 +10509,7 @@ function StartRecordingDialog({
     mediaDevices.addEventListener("devicechange", handleDeviceChange)
 
     return () => mediaDevices.removeEventListener("devicechange", handleDeviceChange)
-  }, [open, refreshAudioDevices, step])
+  }, [open, refreshAudioDevices, selectedAudioSourceChoice, step])
 
   React.useEffect(() => {
     if (!open) return
@@ -9643,7 +10528,7 @@ function StartRecordingDialog({
   }, [isMobile, open, startSubmitting, step])
 
   React.useEffect(() => {
-    if (!open || step !== 3 || startSubmitting) {
+    if (!open || step !== 3 || startSubmitting || selectedAudioSourceChoice === "meeting_bot") {
       clearMicrophonePreview()
       return
     }
@@ -9738,6 +10623,7 @@ function StartRecordingDialog({
     open,
     refreshAudioDevices,
     selectedAudioInputDeviceId,
+    selectedAudioSourceChoice,
     startSubmitting,
     step,
   ])
@@ -9821,7 +10707,10 @@ function StartRecordingDialog({
       setOpportunityMode(nextOpportunityId ? "existing" : "new")
       const nextCapturePreferences = readCaptureSettings(workspaceId)
       setCapturePreferences(nextCapturePreferences)
-      setAudioCaptureMode(getPreferredAudioCaptureMode(nextCapturePreferences))
+      const nextAudioCaptureMode = getPreferredAudioCaptureMode(nextCapturePreferences)
+      setAudioCaptureMode(nextAudioCaptureMode)
+      setAudioSourceChoice(getAudioSourceChoice(nextAudioCaptureMode))
+      setMeetingUrl("")
       setStartError("")
       setStartSubmitting(false)
       resetStartProgress()
@@ -10056,6 +10945,7 @@ function StartRecordingDialog({
   const handleStart = async () => {
     if (!canStart || startSubmitting) return
 
+    const isMeetingBotChoice = selectedAudioSourceChoice === "meeting_bot"
     const startAbortController = new AbortController()
     const preparedMeetingAudioStream =
       selectedAudioSourceChoice === "two_channels" ? meetingAudioPreviewStreamRef.current : null
@@ -10078,6 +10968,19 @@ function StartRecordingDialog({
     setStartSubmitting(true)
     runStartProgress()
 
+    const capturePayload = isMeetingBotChoice
+      ? {
+          captureMethod: "meeting_bot" as const,
+          meetingUrl: meetingUrlValidation.valid ? meetingUrlValidation.normalizedUrl : meetingUrl.trim(),
+        }
+      : {
+          captureMethod: "browser_audio" as const,
+          audioCaptureMode,
+          audioInputDeviceId: selectedAudioInputDeviceId,
+          audioInputDeviceLabel: selectedAudioInputLabel,
+          preparedMeetingAudio,
+        }
+
     try {
       const result = await onStartRecording({
         accountMode,
@@ -10086,10 +10989,7 @@ function StartRecordingDialog({
         accountWebsite,
         accountIndustry,
         accountCurrency,
-        audioCaptureMode,
-        audioInputDeviceId: selectedAudioInputDeviceId,
-        audioInputDeviceLabel: selectedAudioInputLabel,
-        preparedMeetingAudio,
+        ...capturePayload,
         opportunityMode,
         opportunityId,
         opportunityName,
@@ -10122,7 +11022,8 @@ function StartRecordingDialog({
           eventName: "start_call_modal_failed",
           metadata: {
             accountMode,
-            audioCaptureMode,
+            captureMethod: capturePayload.captureMethod,
+            audioCaptureMode: capturePayload.captureMethod === "browser_audio" ? capturePayload.audioCaptureMode : undefined,
             opportunityMode,
             step,
           },
@@ -10148,10 +11049,11 @@ function StartRecordingDialog({
       void reportClientError({
         error: caughtError,
         eventName: "start_call_modal_exception",
-        metadata: {
-          accountMode,
-          audioCaptureMode,
-          opportunityMode,
+          metadata: {
+            accountMode,
+            captureMethod: capturePayload.captureMethod,
+            audioCaptureMode: capturePayload.captureMethod === "browser_audio" ? capturePayload.audioCaptureMode : undefined,
+            opportunityMode,
           step,
         },
       })
@@ -10457,7 +11359,14 @@ function StartRecordingDialog({
                         onValueChange={(value) => {
                           const nextChoice = value as AudioSourceChoice
 
-                          if (nextChoice === "meeting_bot") return
+                          setAudioSourceChoice(nextChoice)
+                          if (nextChoice === "meeting_bot") {
+                            clearMicrophonePreview()
+                            clearMeetingAudioPreview()
+                            setMicrophonePreviewError("")
+                            setMeetingAudioPreviewError("")
+                            return
+                          }
                           setAudioCaptureMode(getAudioCaptureModeForChoice(nextChoice, capturePreferences))
                           setMeetingAudioPreviewError("")
                         }}
@@ -10474,13 +11383,13 @@ function StartRecordingDialog({
                           <SelectItem value="two_channels" disabled={!capturePreferences.browserTab}>
                             Two channels
                           </SelectItem>
-                          <SelectItem value="meeting_bot" disabled>
-                            Meeting bot
-                          </SelectItem>
+                          <SelectItem value="meeting_bot">Meeting bot</SelectItem>
                         </SelectContent>
                       </Select>
                       <p id="recording-audio-source-help" className="text-xs leading-snug text-muted-foreground">
-                        Two-channel audio becomes available when browser-tab capture is enabled in Settings. Meeting bot is not available yet.
+                        {selectedAudioSourceChoice === "meeting_bot"
+                          ? "Paste a direct Zoom, Google Meet, Microsoft Teams, or Webex link. No microphone access is needed."
+                          : "Two-channel audio becomes available when browser-tab capture is enabled in Settings."}
                       </p>
                     </div>
                     <div className="grid min-w-0 gap-2">
@@ -10493,6 +11402,61 @@ function StartRecordingDialog({
                     </div>
                   </div>
 
+                  {selectedAudioSourceChoice === "meeting_bot" ? (
+                    <div className="grid min-w-0 gap-3 overflow-hidden rounded-lg border bg-background p-3">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
+                          <AudioLinesIcon className="size-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium">Meeting bot</p>
+                          <p className="mt-1 text-xs leading-snug text-muted-foreground">
+                            SalesFrame joins as a visible participant and begins recording once admitted.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid min-w-0 gap-2">
+                        <Label htmlFor="recording-meeting-url">
+                          Meeting URL <span aria-hidden="true">*</span>
+                        </Label>
+                        <Input
+                          id="recording-meeting-url"
+                          type="url"
+                          inputMode="url"
+                          autoComplete="off"
+                          spellCheck={false}
+                          required
+                          aria-required="true"
+                          aria-describedby="recording-meeting-url-help"
+                          aria-invalid={Boolean(meetingUrl.trim()) && !meetingUrlValidation.valid}
+                          className="h-11 min-w-0"
+                          value={meetingUrl}
+                          placeholder="https://meet.google.com/..."
+                          onChange={(event) => setMeetingUrl(event.currentTarget.value)}
+                        />
+                        <p
+                          id="recording-meeting-url-help"
+                          aria-live="polite"
+                          className={cn(
+                            "text-xs leading-snug",
+                            meetingUrl.trim() && !meetingUrlValidation.valid
+                              ? "text-destructive"
+                              : "text-muted-foreground"
+                          )}
+                          role={meetingUrl.trim() && !meetingUrlValidation.valid ? "alert" : undefined}
+                        >
+                          {meetingUrlValidation.valid
+                            ? `${getMeetingBotPlatformLabel(meetingUrlValidation.platform)} link ready. The host may need to admit SalesFrame.`
+                            : meetingUrl.trim()
+                              ? meetingUrlValidation.message
+                              : "Use the direct meeting link from the invitation. Redirect and calendar links are not accepted."}
+                        </p>
+                      </div>
+                      <p className="text-xs leading-snug text-muted-foreground">
+                        By using Meeting bot, you confirm that you are authorised to record this meeting.
+                      </p>
+                    </div>
+                  ) : null}
                   <div className="grid min-w-0 gap-3 rounded-lg border bg-background p-3">
                     <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
@@ -10589,6 +11553,7 @@ function StartRecordingDialog({
                     ) : null}
                   </div>
 
+                  {selectedAudioSourceChoice !== "meeting_bot" ? (
                   <div className="grid min-w-0 gap-3 rounded-lg border bg-background p-3">
                     <div className="grid min-w-0 gap-1">
                       <div className="min-w-0">
@@ -10730,6 +11695,7 @@ function StartRecordingDialog({
                       </div>
                     )}
                   </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -10863,12 +11829,18 @@ function StartRecordingDialog({
               hasSavedOpenAiKey ? (
                 <Button
                   variant="destructive"
-                  className="gap-2"
+                  className="h-11 gap-2"
                   disabled={!canStart || startSubmitting}
                   onClick={handleStart}
                 >
-                  <Mic2Icon />
-                  {startSubmitting ? "Starting..." : "Start call"}
+                  {selectedAudioSourceChoice === "meeting_bot" ? <BotIcon /> : <Mic2Icon />}
+                  {startSubmitting
+                    ? selectedAudioSourceChoice === "meeting_bot"
+                      ? "Sending SalesFrame..."
+                      : "Starting..."
+                    : selectedAudioSourceChoice === "meeting_bot"
+                      ? "Join with SalesFrame"
+                      : "Start call"}
                 </Button>
               ) : (
                 <Button
@@ -10914,7 +11886,7 @@ function StartRecordingDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>{startCallTrigger}</DialogTrigger>
       <DialogContent
-        className="grid max-h-[calc(100dvh_-_2rem)] min-w-0 overflow-hidden max-sm:max-h-[calc(100dvh_-_0.75rem)] max-sm:max-w-[calc(100%_-_0.75rem)] max-sm:gap-3 max-sm:p-3 max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-3xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        className="grid max-h-[calc(100dvh_-_2rem)] min-w-0 overflow-hidden max-sm:max-h-[calc(100dvh_-_0.75rem)] max-sm:max-w-[calc(100%_-_0.75rem)] max-sm:gap-3 max-sm:p-3 [&_[data-slot=button]]:min-h-11 [&_[data-slot=input]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 sm:h-[760px] sm:max-w-3xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
@@ -14416,11 +15388,17 @@ function WorkspaceView({
   captureError,
   capturePermissionState,
   captureStatus,
+  captureStatusDetail,
+  captureStatusTitle,
   customerResearch,
   elapsed,
   initialLiveGuidance,
   isRecording,
+  isMeetingBotCapture,
   isStoppingCall,
+  meetingBotParticipants,
+  meetingBotRecoveryUrl,
+  meetingBotSessionId,
   manualCoach,
   notes,
   opportunity,
@@ -14443,6 +15421,7 @@ function WorkspaceView({
   transcript,
   workspaceId,
   onMarkQuestionAsked,
+  onRetryMeetingBot,
   onCoachFeedback,
   onNavigate,
   onOpenSettings,
@@ -14455,6 +15434,8 @@ function WorkspaceView({
   onScrollToTop,
   onStartRecording,
   onStopRecording,
+  onUseMeetingBotBrowserFallback,
+  onMeetingBotParticipantAttribution,
   onSpeakerIdentityChange,
   onTranscriptSpeakerChange,
   onDeleteCall,
@@ -14474,11 +15455,17 @@ function WorkspaceView({
   captureError: string | null
   capturePermissionState: CallCapturePermissionState
   captureStatus: CallCaptureStatus
+  captureStatusDetail?: string
+  captureStatusTitle?: string
   customerResearch: CustomerResearchConfig
   elapsed: number
   initialLiveGuidance: LiveGuidance | null
   isRecording: boolean
+  isMeetingBotCapture: boolean
   isStoppingCall: boolean
+  meetingBotParticipants: MeetingBotParticipantSnapshot[]
+  meetingBotRecoveryUrl?: string
+  meetingBotSessionId?: string
   manualCoach: ManualCoachState
   notes: string[]
   opportunity: Opportunity
@@ -14501,6 +15488,7 @@ function WorkspaceView({
   transcript: Opportunity["transcript"]
   workspaceId: string
   onMarkQuestionAsked: (question: ManualQuestion) => void
+  onRetryMeetingBot: (meetingUrl: string) => Promise<void>
   onCoachFeedback: (action: LiveSellerFeedbackAction, question: ManualQuestion) => void
   onNavigate: (view: string) => void
   onOpenSettings: () => void
@@ -14513,6 +15501,8 @@ function WorkspaceView({
   onScrollToTop: () => void
   onStartRecording: StartRecordingHandler
   onStopRecording: () => void | Promise<void>
+  onUseMeetingBotBrowserFallback: (audioCaptureMode: CallAudioCaptureMode) => Promise<void>
+  onMeetingBotParticipantAttribution: (payload: MeetingBotParticipantAttributionChange) => Promise<void>
   onSpeakerIdentityChange: (payload: SpeakerIdentityChangePayload) => Promise<SpeakerIdentityChangeResult>
   onTranscriptSpeakerChange: (segmentId: string, speaker: TranscriptSpeaker) => void
   onDeleteCall: (callId: string) => void
@@ -15258,10 +16248,17 @@ function WorkspaceView({
           captureError={captureError}
           capturePermissionState={capturePermissionState}
           captureStatus={isStoppingCall ? "stopping" : captureStatus}
+          captureStatusDetail={captureStatusDetail}
+          captureStatusTitle={captureStatusTitle}
           guidance={liveGuidance}
           isRecording={isRecording}
+          isMeetingBotCapture={isMeetingBotCapture}
+          meetingBotParticipants={meetingBotParticipants}
+          meetingBotRecoveryUrl={meetingBotRecoveryUrl}
+          meetingBotSessionId={meetingBotSessionId}
           notes={isRecording ? notes : []}
           onDeleteCall={onDeleteCall}
+          onMeetingBotParticipantAttribution={onMeetingBotParticipantAttribution}
           onSpeakerIdentityChange={onSpeakerIdentityChange}
           onTranscriptSpeakerChange={onTranscriptSpeakerChange}
           searchQuery=""
@@ -15269,6 +16266,8 @@ function WorkspaceView({
           speakerIdentities={speakerIdentities}
           startCallAction={null}
           onStopRecording={onStopRecording}
+          onRetryMeetingBot={onRetryMeetingBot}
+          onUseMeetingBotBrowserFallback={onUseMeetingBotBrowserFallback}
           transcript={isRecording ? transcript : []}
         />
       </TabsContent>
@@ -16386,12 +17385,18 @@ function RecordFieldTile({
 function SpeakerIdentityPanel({
   activeCallId,
   identities,
+  meetingBotParticipants,
+  meetingBotSessionId,
+  onMeetingBotParticipantAttribution,
   onSpeakerIdentityChange,
   sellerName,
   transcript,
 }: {
   activeCallId: string
   identities: CallSpeakerIdentityMap
+  meetingBotParticipants: MeetingBotParticipantSnapshot[]
+  meetingBotSessionId?: string
+  onMeetingBotParticipantAttribution: (payload: MeetingBotParticipantAttributionChange) => Promise<void>
   onSpeakerIdentityChange: (payload: SpeakerIdentityChangePayload) => Promise<SpeakerIdentityChangeResult>
   sellerName: string
   transcript: Opportunity["transcript"]
@@ -16405,6 +17410,7 @@ function SpeakerIdentityPanel({
   const [confirmedSpeakerContacts, setConfirmedSpeakerContacts] = React.useState<Record<string, string | null>>({})
   const [speakerContactMessage, setSpeakerContactMessage] = React.useState("")
   const [pendingSpeakerContactLabel, setPendingSpeakerContactLabel] = React.useState<TranscriptSpeaker | null>(null)
+  const speakerMapRef = React.useRef<HTMLDetailsElement>(null)
   const touchedSpeakerLabelsRef = React.useRef(new Set<TranscriptSpeaker>())
 
   React.useEffect(() => {
@@ -16416,19 +17422,28 @@ function SpeakerIdentityPanel({
   }, [activeCallId])
   const hasTranscriptText = transcript.some((line) => line.text.trim())
   const speakerRows = React.useMemo(() => {
-    const labels = new Map<TranscriptSpeaker, { contactId?: string; displayName: string; lineCount: number; speakerId?: string }>()
+    const labels = new Map<TranscriptSpeaker, {
+      contactConfirmed?: boolean
+      contactId?: string
+      contactMatchConfidence?: number
+      contactMatchProvenance?: string
+      displayName: string
+      lineCount: number
+      speakerId?: string
+    }>()
     const requiredLabels: TranscriptSpeaker[] = ["Seller", "Customer"]
 
     transcript.forEach((line) => {
       if (!line.text.trim()) return
 
       const label = getTranscriptSpeakerLabel(line)
-      if (label === "Unknown") return
-
       const existingLabel = labels.get(label)
 
       labels.set(label, {
+        contactConfirmed: existingLabel?.contactConfirmed || Boolean(line.contactConfirmedAt),
         contactId: existingLabel?.contactId || line.contactId,
+        contactMatchConfidence: existingLabel?.contactMatchConfidence ?? line.contactMatchConfidence,
+        contactMatchProvenance: existingLabel?.contactMatchProvenance || line.contactMatchProvenance,
         displayName: existingLabel?.displayName || getTranscriptSpeakerDisplayName(line),
         lineCount: (existingLabel?.lineCount ?? 0) + 1,
         speakerId: existingLabel?.speakerId || line.speakerId,
@@ -16438,10 +17453,11 @@ function SpeakerIdentityPanel({
     Object.entries(identities).forEach(([rawLabel, identity]) => {
       const label = getCanonicalTranscriptSpeakerLabel(normalizeTranscriptSpeakerLabel(rawLabel))
       if (!identity) return
-      if (label === "Unknown") return
-
       labels.set(label, {
+        contactConfirmed: labels.get(label)?.contactConfirmed,
         contactId: labels.get(label)?.contactId,
+        contactMatchConfidence: labels.get(label)?.contactMatchConfidence,
+        contactMatchProvenance: labels.get(label)?.contactMatchProvenance,
         displayName: identity.displayName || labels.get(label)?.displayName || label,
         lineCount: labels.get(label)?.lineCount ?? 0,
         speakerId: labels.get(label)?.speakerId,
@@ -16467,9 +17483,12 @@ function SpeakerIdentityPanel({
         return (leftIndex === -1 ? labelOrder.length : leftIndex) - (rightIndex === -1 ? labelOrder.length : rightIndex)
       })
       .map(([label, details]) => ({
+        contactConfirmed: details.contactConfirmed,
         contactId: Object.prototype.hasOwnProperty.call(confirmedSpeakerContacts, label)
           ? confirmedSpeakerContacts[label] ?? undefined
           : details.contactId,
+        contactMatchConfidence: details.contactMatchConfidence,
+        contactMatchProvenance: details.contactMatchProvenance,
         displayName: identities[label]?.displayName || details.displayName || label,
         isMe: Boolean(identities[label]?.isMe),
         label,
@@ -16484,6 +17503,23 @@ function SpeakerIdentityPanel({
 
     return contacts.filter((contact) => selectedIds.has(contact.id))
   }, [activeCallId, callContacts, contacts])
+  const meetingBotParticipantBySpeakerId = React.useMemo(
+    () => new Map(
+      meetingBotParticipants.flatMap((participant) =>
+        participant.callSpeakerId ? [[participant.callSpeakerId, participant] as const] : []
+      )
+    ),
+    [meetingBotParticipants]
+  )
+  const participantNeedingReview = React.useMemo(
+    () => meetingBotParticipants.find((participant) =>
+      participant.party === "unknown" &&
+      !participant.correctionLocked &&
+      Boolean(participant.callSpeakerId) &&
+      Boolean(participant.displayName?.trim())
+    ) ?? null,
+    [meetingBotParticipants]
+  )
   const [draftNames, setDraftNames] = React.useState<Record<string, string>>({})
   const nextSpeakerLabel = React.useMemo(() => {
     const visibleLabels = new Set(speakerRows.map((speaker) => speaker.label))
@@ -16498,15 +17534,35 @@ function SpeakerIdentityPanel({
       return speaker.lineCount > 0 || Boolean(savedIdentity?.isMe) || Boolean(savedName && savedName !== speaker.label)
     })
   const saveSpeakerIdentity = React.useCallback(
-    async (payload: SpeakerIdentityChangePayload) => {
+    async (payload: SpeakerIdentityChangePayload, speakerId?: string) => {
       const normalizedLabel = getCanonicalTranscriptSpeakerLabel(normalizeTranscriptSpeakerLabel(payload.label))
-      if (normalizedLabel === "Unknown") return
+      const meetingParticipant = speakerId ? meetingBotParticipantBySpeakerId.get(speakerId) : undefined
+      const isMeetingParticipantCorrection = Boolean(
+        meetingBotSessionId && meetingParticipant && (payload.isMe || meetingParticipant.party === "unknown")
+      )
+      if (normalizedLabel === "Unknown" && !isMeetingParticipantCorrection) return
 
       setPendingSpeakerLabel(normalizedLabel)
       setSpeakerSaveMessage("")
       setSpeakerSaveTone("saved")
 
       try {
+        if (meetingParticipant && isMeetingParticipantCorrection) {
+          const party = payload.isMe ? "seller" : "customer"
+          await onMeetingBotParticipantAttribution({
+            contactId: party === "customer" ? meetingParticipant.matchedContactId : null,
+            participantId: meetingParticipant.participantId,
+            party,
+          })
+          touchedSpeakerLabelsRef.current.delete(normalizedLabel)
+          setSpeakerSaveMessage(
+            party === "seller"
+              ? `${meetingParticipant.displayName || "This participant"} is now marked as you.`
+              : `${meetingParticipant.displayName || "This participant"} is now marked as a customer.`
+          )
+          return
+        }
+
         const result = await onSpeakerIdentityChange({
           ...payload,
           label: normalizedLabel,
@@ -16528,7 +17584,7 @@ function SpeakerIdentityPanel({
         setPendingSpeakerLabel(null)
       }
     },
-    [onSpeakerIdentityChange, sellerName]
+    [meetingBotParticipantBySpeakerId, meetingBotSessionId, onMeetingBotParticipantAttribution, onSpeakerIdentityChange, sellerName]
   )
 
   const saveSpeakerContact = async (
@@ -16548,7 +17604,16 @@ function SpeakerIdentityPanel({
     setPendingSpeakerContactLabel(label)
     setSpeakerContactMessage("")
     try {
-      await confirmSpeakerContact(speakerId, contactId)
+      const meetingParticipant = meetingBotParticipantBySpeakerId.get(speakerId)
+      if (meetingBotSessionId && meetingParticipant) {
+        await onMeetingBotParticipantAttribution({
+          contactId,
+          participantId: meetingParticipant.participantId,
+          party: contactId ? "customer" : "unknown",
+        })
+      } else {
+        await confirmSpeakerContact(speakerId, contactId)
+      }
       setConfirmedSpeakerContacts((items) => ({ ...items, [label]: contactId }))
       setSpeakerContactMessage(
         contactId
@@ -16584,7 +17649,29 @@ function SpeakerIdentityPanel({
   if (!hasTranscriptText || !hasSpeakerIdentityContext || speakerRows.length === 0) return null
 
   return (
-    <details className="group rounded-lg bg-muted/20 px-3 py-2">
+    <div className="grid gap-2">
+      {participantNeedingReview ? (
+        <div className="flex min-h-11 min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/30 px-3 py-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">Who is {participantNeedingReview.displayName}?</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">Confirm only if the match is clear.</p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-11 shrink-0 md:h-8"
+            aria-controls="speaker-map-details"
+            onClick={() => {
+              if (speakerMapRef.current) speakerMapRef.current.open = true
+              window.requestAnimationFrame(() => speakerMapRef.current?.querySelector<HTMLElement>("button, input, [role='combobox']")?.focus())
+            }}
+          >
+            Review speaker
+          </Button>
+        </div>
+      ) : null}
+      <details ref={speakerMapRef} id="speaker-map-details" className="group rounded-lg bg-muted/20 px-3 py-2">
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden md:min-h-0">
         <span className="text-xs font-medium text-muted-foreground">Speaker map</span>
         <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-200 ease-linear group-open:rotate-180" aria-hidden="true" />
@@ -16609,6 +17696,10 @@ function SpeakerIdentityPanel({
           const draftValue = draftNames[speaker.label] ?? ""
           const savedName = speaker.displayName === speaker.label ? "" : speaker.displayName
           const isPending = pendingSpeakerLabel === speaker.label
+          const meetingParticipant = speaker.speakerId
+            ? meetingBotParticipantBySpeakerId.get(speaker.speakerId)
+            : undefined
+          const isUnknownMeetingParticipant = meetingParticipant?.party === "unknown"
 
           return (
             <div key={speaker.label} className="grid gap-2 rounded-md bg-background p-2">
@@ -16643,7 +17734,7 @@ function SpeakerIdentityPanel({
                     void saveSpeakerIdentity({
                       displayName: draftValue,
                       label: speaker.label,
-                    })
+                    }, speaker.speakerId)
                   }
                 }}
               />
@@ -16677,14 +17768,28 @@ function SpeakerIdentityPanel({
                     size="sm"
                     className="h-11 gap-1.5 md:h-8"
                     disabled={pendingSpeakerContactLabel === speaker.label || !speaker.speakerId ||
-                      (speakerContactDrafts[speaker.label] ?? speaker.contactId ?? "__unassigned__") === (speaker.contactId ?? "__unassigned__")}
-                    onClick={() => void saveSpeakerContact(speaker.label, speaker.speakerId, speaker.contactId)}
+                      (speaker.contactConfirmed &&
+                        (speakerContactDrafts[speaker.label] ?? speaker.contactId ?? "__unassigned__") ===
+                          (speaker.contactId ?? "__unassigned__"))}
+                    onClick={() => void saveSpeakerContact(
+                      speaker.label,
+                      speaker.speakerId,
+                      speaker.contactConfirmed ? speaker.contactId : undefined
+                    )}
                   >
                     <UserRoundCheckIcon />
                     Confirm mapping
                   </Button>
                   {!speaker.speakerId ? (
                     <p className="text-xs text-muted-foreground sm:col-span-2">Save this speaker once before confirming the contact.</p>
+                  ) : null}
+                  {speaker.contactId && !speaker.contactConfirmed ? (
+                    <p className="text-xs text-muted-foreground sm:col-span-2">
+                      SalesFrame suggested this match
+                      {typeof speaker.contactMatchConfidence === "number"
+                        ? ` with ${Math.round(speaker.contactMatchConfidence * 100)}% confidence`
+                        : ""}. Confirm it only if it looks right.
+                    </p>
                   ) : null}
                 </div>
               ) : null}
@@ -16694,16 +17799,16 @@ function SpeakerIdentityPanel({
                   variant="outline"
                   size="sm"
                   className="h-11 flex-1 gap-1.5 md:h-8 sm:flex-none"
-                  disabled={isPending || draftValue.trim() === savedName.trim()}
+                  disabled={isPending || (!isUnknownMeetingParticipant && draftValue.trim() === savedName.trim())}
                   onClick={() =>
                     void saveSpeakerIdentity({
                       displayName: draftValue,
                       label: speaker.label,
-                    })
+                    }, speaker.speakerId)
                   }
                 >
-                  <CheckIcon />
-                  Save
+                  {isUnknownMeetingParticipant ? <UserRoundCheckIcon /> : <CheckIcon />}
+                  {isUnknownMeetingParticipant ? "Customer" : "Save"}
                 </Button>
                 <Button
                   type="button"
@@ -16716,7 +17821,7 @@ function SpeakerIdentityPanel({
                       displayName: sellerName || "Me",
                       isMe: true,
                       label: speaker.label,
-                    })
+                    }, speaker.speakerId)
                   }
                 >
                   <UserRoundCheckIcon />
@@ -16743,7 +17848,8 @@ function SpeakerIdentityPanel({
           <p className="px-1 text-xs text-muted-foreground" role="status">{speakerContactMessage}</p>
         ) : null}
       </div>
-    </details>
+      </details>
+    </div>
   )
 }
 
@@ -16754,13 +17860,22 @@ function LiveRail({
   captureError,
   capturePermissionState,
   captureStatus,
+  captureStatusDetail,
+  captureStatusTitle,
   guidance,
   isRecording,
+  isMeetingBotCapture,
+  meetingBotParticipants,
+  meetingBotRecoveryUrl,
+  meetingBotSessionId,
   notes,
   onDeleteCall,
+  onMeetingBotParticipantAttribution,
   onSpeakerIdentityChange,
   onTranscriptSpeakerChange,
+  onRetryMeetingBot,
   onStopRecording,
+  onUseMeetingBotBrowserFallback,
   searchQuery,
   sellerName,
   speakerIdentities,
@@ -16773,13 +17888,22 @@ function LiveRail({
   captureError: string | null
   capturePermissionState: CallCapturePermissionState
   captureStatus: CallCaptureStatus
+  captureStatusDetail?: string
+  captureStatusTitle?: string
   guidance: LiveGuidance | null
   isRecording: boolean
+  isMeetingBotCapture: boolean
+  meetingBotParticipants: MeetingBotParticipantSnapshot[]
+  meetingBotRecoveryUrl?: string
+  meetingBotSessionId?: string
   notes: string[]
   onDeleteCall: (callId: string) => void
+  onMeetingBotParticipantAttribution: (payload: MeetingBotParticipantAttributionChange) => Promise<void>
   onSpeakerIdentityChange: (payload: SpeakerIdentityChangePayload) => Promise<SpeakerIdentityChangeResult>
   onTranscriptSpeakerChange: (segmentId: string, speaker: TranscriptSpeaker) => void
+  onRetryMeetingBot: (meetingUrl: string) => Promise<void>
   onStopRecording: () => void | Promise<void>
+  onUseMeetingBotBrowserFallback: (audioCaptureMode: CallAudioCaptureMode) => Promise<void>
   searchQuery: string
   sellerName: string
   speakerIdentities: CallSpeakerIdentityMap
@@ -16800,6 +17924,13 @@ function LiveRail({
   const hasSearch = normalizeSearchText(searchQuery).length > 0
   const transcriptScrollRef = React.useRef<HTMLDivElement | null>(null)
   const shouldAutoScrollTranscriptRef = React.useRef(true)
+  const [meetingBotRecoveryAction, setMeetingBotRecoveryAction] = React.useState<"retry" | "one_channel" | "two_channels" | null>(null)
+  const [meetingBotRecoveryError, setMeetingBotRecoveryError] = React.useState("")
+  const [meetingBotRecoveryInput, setMeetingBotRecoveryInput] = React.useState(meetingBotRecoveryUrl ?? "")
+  React.useEffect(() => {
+    setMeetingBotRecoveryInput(meetingBotRecoveryUrl ?? "")
+    setMeetingBotRecoveryError("")
+  }, [meetingBotRecoveryUrl])
   const transcriptScrollSignature = visibleTranscript
     .map((line) => `${line.clientId ?? line.id}:${line.text.length}:${line.isPartial ? "partial" : "final"}`)
     .join("|")
@@ -16816,7 +17947,10 @@ function LiveRail({
     guidance,
   })
   const shouldShowSignalHealth =
-    isCaptureActive || ["permission-denied", "error", "upload-failed"].includes(displayCaptureStatus)
+    !isMeetingBotCapture &&
+    (isCaptureActive || ["permission-denied", "error", "upload-failed"].includes(displayCaptureStatus))
+  const shouldShowMeetingBotRecovery = isMeetingBotCapture && displayCaptureStatus === "error"
+  const meetingBotRecoveryValidation = validateMeetingBotUrl(meetingBotRecoveryInput)
   const canStartFromRail =
     Boolean(startCallAction) &&
     !activeCallId &&
@@ -16824,13 +17958,39 @@ function LiveRail({
     !isCaptureActive &&
     ["idle", "error", "permission-denied", "stopped", "upload-failed"].includes(captureStatus)
   const canStopFromRail = isCaptureActive && displayCaptureStatus !== "stopping"
-  const canDeleteFromRail = Boolean(activeCallId) && !isCaptureActive
+  const canDeleteFromRail = Boolean(activeCallId) && !isCaptureActive && !shouldShowMeetingBotRecovery
   const recordingActionLabel =
     displayCaptureStatus === "requesting-permission" || displayCaptureStatus === "connecting"
       ? "Cancel call"
       : displayCaptureStatus === "stopping"
         ? "Stopping call"
         : "Stop call"
+
+  const runMeetingBotRecovery = async (
+    action: "retry" | "one_channel" | "two_channels"
+  ) => {
+    if (meetingBotRecoveryAction) return
+    if (action === "retry" && !meetingBotRecoveryValidation.valid) {
+      setMeetingBotRecoveryError(meetingBotRecoveryValidation.message)
+      return
+    }
+
+    setMeetingBotRecoveryAction(action)
+    setMeetingBotRecoveryError("")
+    try {
+      if (action === "retry") {
+        await onRetryMeetingBot(meetingBotRecoveryValidation.valid ? meetingBotRecoveryValidation.normalizedUrl : meetingBotRecoveryInput)
+      } else {
+        await onUseMeetingBotBrowserFallback(action === "two_channels" ? "meeting_audio" : "microphone")
+      }
+    } catch (caughtError: unknown) {
+      setMeetingBotRecoveryError(
+        getUserFacingErrorMessage(caughtError, "SalesFrame needs another try with that capture option.")
+      )
+    } finally {
+      setMeetingBotRecoveryAction(null)
+    }
+  }
 
   const handleTranscriptScroll = React.useCallback(() => {
     const container = transcriptScrollRef.current
@@ -16852,7 +18012,7 @@ function LiveRail({
 
     return () => window.cancelAnimationFrame(animationFrame)
   }, [hasSearch, transcriptScrollSignature])
-  const captureActivityLabel =
+  const captureActivityLabel = captureStatusTitle ?? (
     displayCaptureStatus === "requesting-permission"
       ? "Waiting for audio permission"
       : displayCaptureStatus === "connecting"
@@ -16868,14 +18028,17 @@ function LiveRail({
                 : displayCaptureStatus === "error"
                   ? "Capture needs attention"
                   : "Waiting for call"
+  )
 
   return (
     <div className="grid gap-4 xl:sticky xl:top-20">
       <Card className="order-2">
         <CardHeader>
           <div>
-            <CardTitle>{getCaptureStatusLabel(displayCaptureStatus)}</CardTitle>
-            <CardDescription>{getCaptureStatusDescription(displayCaptureStatus, capturePermissionState)}</CardDescription>
+            <CardTitle>{captureStatusTitle ?? getCaptureStatusLabel(displayCaptureStatus)}</CardTitle>
+            <CardDescription>
+              {captureStatusDetail ?? getCaptureStatusDescription(displayCaptureStatus, capturePermissionState)}
+            </CardDescription>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3">
@@ -16905,6 +18068,65 @@ function LiveRail({
           {captureError ? (
             <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
               {captureError}
+            </div>
+          ) : null}
+          {shouldShowMeetingBotRecovery ? (
+            <div className="grid min-w-0 gap-3 rounded-lg border bg-muted/20 p-3">
+              <div className="grid min-w-0 gap-1.5">
+                <Label htmlFor="meeting-bot-recovery-url">Meeting URL</Label>
+                <Input
+                  id="meeting-bot-recovery-url"
+                  type="url"
+                  inputMode="url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="h-11 min-w-0"
+                  value={meetingBotRecoveryInput}
+                  aria-describedby="meeting-bot-recovery-status"
+                  aria-invalid={Boolean(meetingBotRecoveryInput.trim()) && !meetingBotRecoveryValidation.valid}
+                  onChange={(event) => {
+                    setMeetingBotRecoveryInput(event.currentTarget.value)
+                    setMeetingBotRecoveryError("")
+                  }}
+                />
+                <p id="meeting-bot-recovery-status" className="text-xs leading-snug text-muted-foreground" aria-live="polite">
+                  {meetingBotRecoveryError || (
+                    meetingBotRecoveryValidation.valid
+                      ? `${getMeetingBotPlatformLabel(meetingBotRecoveryValidation.platform)} link ready.`
+                      : "Paste the current direct meeting link to try the bot again."
+                  )}
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Button
+                  type="button"
+                  className="h-11 w-full"
+                  disabled={Boolean(meetingBotRecoveryAction) || !meetingBotRecoveryValidation.valid}
+                  onClick={() => void runMeetingBotRecovery("retry")}
+                >
+                  {meetingBotRecoveryAction === "retry" ? "Trying meeting bot" : "Try meeting bot again"}
+                </Button>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full"
+                    disabled={Boolean(meetingBotRecoveryAction)}
+                    onClick={() => void runMeetingBotRecovery("one_channel")}
+                  >
+                    {meetingBotRecoveryAction === "one_channel" ? "Starting one channel" : "Use one channel"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full"
+                    disabled={Boolean(meetingBotRecoveryAction)}
+                    onClick={() => void runMeetingBotRecovery("two_channels")}
+                  >
+                    {meetingBotRecoveryAction === "two_channels" ? "Starting two channels" : "Use two channels"}
+                  </Button>
+                </div>
+              </div>
             </div>
           ) : null}
           {audioPreflight?.statusMessage ? (
@@ -16990,6 +18212,9 @@ function LiveRail({
               <SpeakerIdentityPanel
                 activeCallId={activeCallId}
                 identities={speakerIdentities}
+                meetingBotParticipants={meetingBotParticipants}
+                meetingBotSessionId={meetingBotSessionId}
+                onMeetingBotParticipantAttribution={onMeetingBotParticipantAttribution}
                 onSpeakerIdentityChange={onSpeakerIdentityChange}
                 sellerName={sellerName}
                 transcript={transcript}

@@ -1,7 +1,11 @@
 import type { Config, Context } from "@netlify/functions"
+import type { SupabaseClient } from "@supabase/supabase-js"
 
+import type { Database } from "../../src/lib/supabase/database.types"
 import { getEnv } from "./_shared/env"
 import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson, upstreamFailure } from "./_shared/http"
+import { runMeetingBotPostCallGeneration } from "./_shared/meeting-bot-post-call"
+import { findLatestMeetingBotSessionForCall } from "./_shared/meeting-bot-store"
 import { callOpenAiJson } from "./_shared/openai"
 import { getDecryptedOpenAiKey } from "./_shared/openai-key"
 import { assertRateLimit } from "./_shared/rate-limit"
@@ -11,7 +15,7 @@ type PostCallPayload = {
   callId?: string
 }
 
-type PostCallResult = {
+export type PostCallResult = {
   followUpEmail: string
   nextCallPlan: string
   accountUpdates: Record<string, string>
@@ -367,30 +371,21 @@ function assertSpeakerCorrectionResult(value: SpeakerCorrectionResult): SpeakerC
   }
 }
 
-export default async (request: Request, _context: Context) => {
-  try {
-    if (request.method !== "POST") {
-      throw methodNotAllowed()
-    }
-
-    const payload = await readJson<PostCallPayload>(request)
-    if (!payload.callId) throw badRequest("callId is required.", "call_id_required")
-
-    const { supabase, token, user } = await requireUser(request)
-    const authorizedCall = await authorizeCall(user.id, payload.callId, supabase, { token })
-    assertRateLimit({
-      key: `${user.id}:${authorizedCall.id}`,
-      limit: 10,
-      name: "post-call generation",
-      windowMs: 10 * 60 * 1000,
-    })
-
-    const apiKey = await getDecryptedOpenAiKey(supabase, user.id, authorizedCall.workspace_id)
-
+export async function generatePostCallOutputs({
+  apiKey,
+  callId,
+  sourceMeetingBotSessionId = null,
+  supabase,
+}: {
+  apiKey: string
+  callId: string
+  sourceMeetingBotSessionId?: string | null
+  supabase: SupabaseClient<Database>
+}) {
     const { data: call, error: callError } = await supabase
       .from("calls")
       .select("*")
-      .eq("id", payload.callId)
+      .eq("id", callId)
       .single()
 
     if (callError) throw new Error(callError.message)
@@ -450,8 +445,19 @@ export default async (request: Request, _context: Context) => {
       ...segment,
       speaker: segment.speaker_id ? speakerById.get(segment.speaker_id) ?? "Unknown" : "Unknown",
     }))
+    let canonicalResult: PostCallResult | null = null
+    if (sourceMeetingBotSessionId) {
+      const { data: canonicalOutput, error: canonicalError } = await supabase
+        .from("post_call_outputs")
+        .select("*")
+        .eq("source_meeting_bot_session_id", sourceMeetingBotSessionId)
+        .maybeSingle()
+      if (canonicalError) throw new Error(canonicalError.message)
+      const storedResult = (canonicalOutput as Record<string, unknown> | null)?.generation_result
+      if (storedResult) canonicalResult = assertPostCallResult(storedResult as PostCallResult)
+    }
 
-    if (correctedTranscriptSegments.length > 0) {
+    if (!canonicalResult && correctedTranscriptSegments.length > 0) {
       const correctionResult = assertSpeakerCorrectionResult(
         await callOpenAiJson<SpeakerCorrectionResult>({
           apiKey,
@@ -524,7 +530,7 @@ export default async (request: Request, _context: Context) => {
       }
     }
 
-    const result = assertPostCallResult(
+    const result = canonicalResult ?? assertPostCallResult(
       await callOpenAiJson<PostCallResult>({
         apiKey,
         schema: postCallOutputSchema,
@@ -568,16 +574,24 @@ export default async (request: Request, _context: Context) => {
       })
     )
 
-    const { data: postCallOutput, error: outputError } = await supabase
-      .from("post_call_outputs")
-      .insert({
-        call_id: call.id,
-        follow_up_email: result.followUpEmail,
-        next_call_plan: result.nextCallPlan,
-        account_updates: result.accountUpdates,
-        opportunity_updates: result.opportunityUpdates,
-        missing_info: result.missingInfo,
-      })
+    const postCallOutputValues = {
+      call_id: call.id,
+      follow_up_email: result.followUpEmail,
+      next_call_plan: result.nextCallPlan,
+      account_updates: result.accountUpdates,
+      opportunity_updates: result.opportunityUpdates,
+      missing_info: result.missingInfo,
+      ...(sourceMeetingBotSessionId ? { generation_result: result } : {}),
+      ...(sourceMeetingBotSessionId
+        ? { source_meeting_bot_session_id: sourceMeetingBotSessionId }
+        : {}),
+    }
+    const outputWrite = sourceMeetingBotSessionId
+      ? (supabase as any)
+          .from("post_call_outputs")
+          .upsert(postCallOutputValues, { onConflict: "source_meeting_bot_session_id" })
+      : (supabase as any).from("post_call_outputs").insert(postCallOutputValues)
+    const { data: postCallOutput, error: outputError } = await outputWrite
       .select("*")
       .single()
 
@@ -591,18 +605,25 @@ export default async (request: Request, _context: Context) => {
       supabase,
     })
 
-    const { data: nextCallBrief, error: briefError } = await supabase
-      .from("next_call_briefs")
-      .insert({
-        opportunity_id: call.opportunity_id,
-        previous_call_id: call.id,
-        objective: result.nextCallBrief.objective,
-        suggested_opening: result.nextCallBrief.suggestedOpening,
-        focus_questions: result.nextCallBrief.focusQuestions,
-        missing_evidence: result.nextCallBrief.missingEvidence,
-        risk_notes: result.nextCallBrief.riskNotes,
-        recommended_next_step: result.nextCallBrief.recommendedNextStep,
-      })
+    const nextCallBriefValues = {
+      opportunity_id: call.opportunity_id,
+      previous_call_id: call.id,
+      objective: result.nextCallBrief.objective,
+      suggested_opening: result.nextCallBrief.suggestedOpening,
+      focus_questions: result.nextCallBrief.focusQuestions,
+      missing_evidence: result.nextCallBrief.missingEvidence,
+      risk_notes: result.nextCallBrief.riskNotes,
+      recommended_next_step: result.nextCallBrief.recommendedNextStep,
+      ...(sourceMeetingBotSessionId
+        ? { source_meeting_bot_session_id: sourceMeetingBotSessionId }
+        : {}),
+    }
+    const briefWrite = sourceMeetingBotSessionId
+      ? supabase
+          .from("next_call_briefs")
+          .upsert(nextCallBriefValues, { onConflict: "source_meeting_bot_session_id" })
+      : supabase.from("next_call_briefs").insert(nextCallBriefValues)
+    const { data: nextCallBrief, error: briefError } = await briefWrite
       .select("*")
       .single()
 
@@ -610,13 +631,73 @@ export default async (request: Request, _context: Context) => {
 
     await supabase.from("calls").update({ status: "post_call_draft" }).eq("id", call.id)
 
-    return dataResponse({
+    return {
       nextCallBrief,
       postCallOutput,
       result,
+    }
+}
+
+export default async (request: Request, _context: Context) => {
+  try {
+    if (request.method !== "POST") {
+      throw methodNotAllowed()
+    }
+
+    const payload = await readJson<PostCallPayload>(request)
+    if (!payload.callId) throw badRequest("callId is required.", "call_id_required")
+
+    const { supabase, token, user } = await requireUser(request)
+    const authorizedCall = await authorizeCall(user.id, payload.callId, supabase, { token })
+    assertRateLimit({
+      key: `${user.id}:${authorizedCall.id}`,
+      limit: 10,
+      name: "post-call generation",
+      windowMs: 10 * 60 * 1000,
     })
+
+    const { data: captureCall, error: captureCallError } = await supabase
+      .from("calls")
+      .select("capture_method")
+      .eq("id", payload.callId)
+      .eq("workspace_id", authorizedCall.workspace_id)
+      .single()
+    if (captureCallError) throw new Error(captureCallError.message)
+    const meetingBotSession = captureCall.capture_method === "recall_meeting_bot"
+      ? await findLatestMeetingBotSessionForCall(supabase, payload.callId)
+      : null
+    const meetingBotSessionId = meetingBotSession?.id ?? null
+
+    if (meetingBotSessionId) {
+      const generated = await runMeetingBotPostCallGeneration({
+        apiKeyUserId: user.id,
+        forceRetry: true,
+        generateOutputs: generatePostCallOutputs,
+        sessionId: meetingBotSessionId,
+        supabase,
+        workerId: `manual:${user.id}:${payload.callId}`,
+      })
+      if (!generated.output) {
+        throw upstreamFailure(
+          "The meeting recording is still being prepared. Try the post-call brief again shortly.",
+          "meeting_bot_post_call_not_ready"
+        )
+      }
+      return dataResponse(generated.output)
+    }
+
+    const apiKey = await getDecryptedOpenAiKey(supabase, user.id, authorizedCall.workspace_id)
+    const output = await generatePostCallOutputs({
+      apiKey,
+      callId: payload.callId,
+      supabase,
+    })
+    return dataResponse(output)
   } catch (error) {
-    return errorResponse(error)
+    return errorResponse(error, undefined, {
+      functionName: "post-call-outputs",
+      request,
+    })
   }
 }
 

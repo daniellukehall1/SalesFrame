@@ -27,6 +27,10 @@ const secretRules = [
     pattern: /\bsbp_[A-Fa-f0-9]{32,}\b/g,
   },
   {
+    label: "Recall API key or raw 40-character credential",
+    pattern: /\b[A-Fa-f0-9]{40}\b/g,
+  },
+  {
     label: "Credentialed Postgres URL",
     pattern: /\bpostgres(?:ql)?:\/\/[^:\s/@]+:[^@\s]+@/gi,
   },

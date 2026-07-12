@@ -22,6 +22,8 @@ export type CallPlaybookRow = Tables<"call_playbooks">
 export type CallRow = Tables<"calls">
 export type CallContactRow = Tables<"call_contacts">
 export type CallSpeakerRow = Tables<"call_speakers">
+export type MeetingBotSessionRow = Tables<"meeting_bot_sessions">
+export type MeetingBotParticipantRow = Tables<"meeting_bot_participants">
 export type TranscriptSegmentRow = Tables<"transcript_segments">
 export type CallNoteRow = Tables<"call_notes">
 export type CallIntentLedgerRow = Tables<"call_intent_ledger">
@@ -907,6 +909,24 @@ export async function listTranscriptSegments(callIds: string[], client?: SalesFr
     .order("created_at", { ascending: true })
 
   return requireData(response, "No transcript segments returned.")
+}
+
+export async function listRecentTranscriptSegments(
+  callId: string,
+  limit = 500,
+  client?: SalesFrameClient
+) {
+  if (!callId) return []
+  const safeLimit = Math.max(1, Math.min(1_000, Math.floor(limit)))
+  const response = await getSupabase(client)
+    .from("transcript_segments")
+    .select("*")
+    .eq("call_id", callId)
+    .order("start_ms", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(safeLimit)
+
+  return requireData(response, "No recent transcript segments returned.").reverse()
 }
 
 export async function listCallNotes(callIds: string[], client?: SalesFrameClient) {
