@@ -201,8 +201,13 @@ import {
   buildConversationBriefing,
   buildConversationContextualActions,
 } from "@/lib/conversation-mode"
-import { getAssistantCapability } from "@/lib/assistant-capabilities"
-import type { AssistantMessageReference, AssistantRouteContext, InterfaceMode } from "@/lib/assistant-types"
+import { getAssistantCapabilityDefinition } from "@/lib/assistant-capability-registry"
+import type {
+  AssistantActionTarget,
+  AssistantMessageReference,
+  AssistantRouteContext,
+  InterfaceMode,
+} from "@/lib/assistant-types"
 import {
   getUserFacingErrorMessage,
   isPermissionDeniedError,
@@ -8177,8 +8182,21 @@ function App() {
     workspaceId: activeWorkspaceId || undefined,
     accountId: conversationHasAccountContext ? activeAccount.id || undefined : undefined,
     opportunityId: conversationHasOpportunityContext ? activeOpportunity.id || undefined : undefined,
+    contactId: focusedContactId || undefined,
     callId: conversationHasCallContext ? activeCallId || postCallFocusCallId || undefined : undefined,
   }
+  const conversationContextContact = focusedContactId
+    ? workspaceContacts.find((contact) => contact.id === focusedContactId)
+    : undefined
+  const conversationContextCall = conversationRouteContext.callId
+    ? workspaceCalls.find((call) => call.id === conversationRouteContext.callId)
+    : undefined
+  const conversationWorkingContextLabel = [
+    conversationRouteContext.accountId ? activeAccount.name : "",
+    conversationRouteContext.opportunityId ? activeOpportunity.name : "",
+    conversationContextContact?.fullName ?? "",
+    conversationContextCall?.title ?? "",
+  ].filter((label, index, labels) => Boolean(label) && labels.indexOf(label) === index).join(" / ")
   const conversationBriefing = buildConversationBriefing({
     activeAccount: conversationHasAccountContext && activeAccount.id ? activeAccount : null,
     activeCall: conversationHasCallContext
@@ -8199,19 +8217,102 @@ function App() {
     action()
   }
 
-  const handleConversationCapability = (capabilityId: string) => {
+  const handleConversationCapability = (
+    capabilityId: string,
+    immutableTarget: AssistantActionTarget = {}
+  ) => {
+    const hasImmutableTarget = Boolean(
+      immutableTarget.accountId ||
+      immutableTarget.opportunityId ||
+      immutableTarget.contactId ||
+      immutableTarget.callId
+    )
+    const targetCall = immutableTarget.callId
+      ? workspaceCalls.find((call) => call.id === immutableTarget.callId)
+      : undefined
+    const targetContact = immutableTarget.contactId
+      ? workspaceContacts.find((contact) => contact.id === immutableTarget.contactId)
+      : undefined
+    const explicitOpportunity = immutableTarget.opportunityId
+      ? workspaceOpportunities.find((opportunity) => opportunity.id === immutableTarget.opportunityId)
+      : undefined
+    const callOpportunity = targetCall
+      ? workspaceOpportunities.find((opportunity) => opportunity.id === targetCall.opportunityId)
+      : undefined
+    const targetOpportunity = explicitOpportunity ?? callOpportunity
+    const explicitAccount = immutableTarget.accountId
+      ? workspaceAccounts.find((account) => account.id === immutableTarget.accountId)
+      : undefined
+    const relatedAccountIds = new Set(
+      [targetOpportunity?.accountId, targetContact?.accountId].filter((value): value is string => Boolean(value))
+    )
+    const relatedAccountId = [...relatedAccountIds][0]
+    const relatedAccount = relatedAccountId
+      ? workspaceAccounts.find((account) => account.id === relatedAccountId)
+      : undefined
+    const targetAccount = explicitAccount ?? relatedAccount
+    const targetIsMissing = Boolean(
+      (immutableTarget.accountId && !explicitAccount) ||
+      (immutableTarget.opportunityId && !explicitOpportunity) ||
+      (immutableTarget.contactId && !targetContact) ||
+      (immutableTarget.callId && !targetCall) ||
+      (targetCall && !callOpportunity) ||
+      (explicitOpportunity && callOpportunity && explicitOpportunity.id !== callOpportunity.id) ||
+      relatedAccountIds.size > 1 ||
+      (explicitAccount && relatedAccount && explicitAccount.id !== relatedAccount.id)
+    )
+
+    // Saved conversation actions must remain bound to the record they were
+    // issued for. Never fall back to the currently open record if that target
+    // was removed, archived, or no longer belongs to this workspace.
+    if (hasImmutableTarget && targetIsMissing) {
+      setPersistentAppAlert("That saved action is no longer available. Refresh the conversation result and try again.")
+      return
+    }
+
+    const resolvedAccountId = hasImmutableTarget ? targetAccount?.id : conversationRouteContext.accountId
+    const resolvedOpportunityId = hasImmutableTarget
+      ? targetOpportunity?.id
+      : conversationRouteContext.opportunityId
+    const resolvedCallId = hasImmutableTarget
+      ? targetCall?.id
+      : conversationRouteContext.callId
+    const resolvedContactId = hasImmutableTarget
+      ? targetContact?.id
+      : conversationRouteContext.contactId
     const openView = (view: string) => openConversationCanvas(() => handleNavigate(view))
-    const openAccountContacts = () => openConversationCanvas(() => handleAccountTabChange("contacts"))
+    const openAccountSurface = (tab: AccountRouteTab = "record", contactId?: string) => {
+      if (!resolvedAccountId) {
+        handleWorkspaceInterfaceModeChange("workspace")
+        return
+      }
+      openConversationCanvas(() => {
+        if (activeAccountIdRef.current !== resolvedAccountId) handleAccountSelect(resolvedAccountId)
+        if (tab !== "record") handleAccountTabChange(tab)
+        if (contactId) setFocusedContactId(contactId)
+      })
+    }
+    const openOpportunitySurface = (view: string) => {
+      if (!resolvedOpportunityId) {
+        openView("opportunities")
+        return
+      }
+      openConversationCanvas(() => {
+        if (activeOpportunityIdRef.current !== resolvedOpportunityId) {
+          handleOpportunitySelect(resolvedOpportunityId)
+        }
+        if (view !== "opportunity-record") handleNavigate(view)
+      })
+    }
     const openCurrentCall = () => {
-      const callId = activeCallId || postCallFocusCallId
-      if (callId) openConversationCanvas(() => handleCallSelect(callId))
+      if (resolvedCallId) openConversationCanvas(() => handleCallSelect(resolvedCallId))
       else openView("calls")
     }
-    const capability = getAssistantCapability(capabilityId)
+    const capability = getAssistantCapabilityDefinition(capabilityId)
     if (!capability) return
-    const missingAccount = capability.requiredContext.includes("account") && !conversationRouteContext.accountId
-    const missingOpportunity = capability.requiredContext.includes("opportunity") && !conversationRouteContext.opportunityId
-    const missingCall = capability.requiredContext.includes("call") && !conversationRouteContext.callId
+    const missingAccount = capability.requiredContext.includes("account") && !resolvedAccountId
+    const missingOpportunity = capability.requiredContext.includes("opportunity") && !resolvedOpportunityId
+    const missingCall = capability.requiredContext.includes("call") && !resolvedCallId
 
     if (missingCall) {
       openView("calls")
@@ -8250,73 +8351,78 @@ function App() {
         handleWorkspaceInterfaceModeChange("workspace")
         return
       case "accounts.list":
-        openView(activeAccount.id ? "account-detail" : "home")
+        if (resolvedAccountId) openAccountSurface()
+        else openView("home")
         return
       case "accounts.open":
-        if (activeAccount.id) openConversationCanvas(() => handleAccountSelect(activeAccount.id))
+        if (resolvedAccountId) openAccountSurface()
         else openView("home")
         return
       case "accounts.create":
         setCreateAccountOpen(true)
         return
       case "accounts.edit":
-        if (activeAccount.id) setEditAccountId(activeAccount.id)
+        if (resolvedAccountId) setEditAccountId(resolvedAccountId)
         else openView("home")
         return
       case "accounts.enrich":
-        if (activeAccount.id) openConversationCanvas(() => void handleRunActiveAccountEnrichment())
+        // Enrichment is costed background work. Conversation mode opens the
+        // exact account surface so the seller can review and explicitly start
+        // it; merely clicking an assistant capability never starts billing.
+        if (resolvedAccountId) openAccountSurface()
         else openView("home")
         return
       case "accounts.archive":
-        if (activeAccount.id) handleRequestArchiveAccount(activeAccount.id)
+        if (resolvedAccountId) handleRequestArchiveAccount(resolvedAccountId)
         return
       case "accounts.delete":
-        if (activeAccount.id) handleRequestDeleteAccount(activeAccount.id)
+        if (resolvedAccountId) handleRequestDeleteAccount(resolvedAccountId)
         return
       case "accounts.restore":
         openView("profile-account")
         return
       case "contacts.list":
-      case "contacts.open":
       case "contacts.create":
       case "contacts.edit":
       case "contacts.enrich":
       case "contacts.archive":
       case "contacts.restore":
-        openAccountContacts()
+        openAccountSurface("contacts", resolvedContactId)
+        return
+      case "contacts.open":
+        openAccountSurface("contacts", resolvedContactId)
         return
       case "contacts.relationships":
       case "opportunities.contacts":
-        openView("opportunity-contacts")
+        openOpportunitySurface("opportunity-contacts")
         return
       case "opportunities.list":
         openView("opportunities")
         return
       case "opportunities.open":
-        if (activeOpportunity.id) openConversationCanvas(() => handleOpportunitySelect(activeOpportunity.id))
-        else openView("opportunities")
+        openOpportunitySurface("opportunity-record")
         return
       case "opportunities.create":
-        handleOpenCreateOpportunity(activeAccount.id)
+        handleOpenCreateOpportunity(resolvedAccountId ?? "")
         return
       case "opportunities.edit":
-        if (activeOpportunity.id) setEditOpportunityId(activeOpportunity.id)
+        if (resolvedOpportunityId) setEditOpportunityId(resolvedOpportunityId)
         else openView("opportunities")
         return
       case "opportunities.next_call":
-        openView("opportunity-intelligence")
+        openOpportunitySurface("opportunity-intelligence")
         return
       case "opportunities.methodology":
-        openView("methodology")
+        openOpportunitySurface("methodology")
         return
       case "opportunities.history":
-        openView("opportunity-history")
+        openOpportunitySurface("opportunity-history")
         return
       case "opportunities.archive":
-        if (activeOpportunity.id) handleRequestArchiveOpportunity(activeOpportunity.id)
+        if (resolvedOpportunityId) handleRequestArchiveOpportunity(resolvedOpportunityId)
         return
       case "opportunities.delete":
-        if (activeOpportunity.id) handleRequestDeleteOpportunity(activeOpportunity.id)
+        if (resolvedOpportunityId) handleRequestDeleteOpportunity(resolvedOpportunityId)
         return
       case "opportunities.restore":
         openView("profile-account")
@@ -8651,6 +8757,7 @@ function App() {
                 voice={assistantVoice}
                 workspaceId={activeWorkspaceId}
                 workspaceName={activeWorkspace?.name ?? "SalesFrame"}
+                workingContextLabel={conversationWorkingContextLabel || undefined}
                 onActionCompleted={() => setWorkspaceRefreshToken((value) => value + 1)}
                 onInvokeCapability={handleConversationCapability}
                 onOpenReference={handleConversationReference}

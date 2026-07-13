@@ -50,7 +50,9 @@ export function errorResponse(
   const publicMessage = getPublicAppErrorMessage(appError, defaultMessage)
   const traceId = createTraceId()
   const requestId = options.context?.requestId
-  const clientRequestId = options.request?.headers.get("x-salesframe-client-request-id") || undefined
+  const clientRequestId = normalizeClientRequestId(
+    options.request?.headers.get("x-salesframe-client-request-id")
+  )
 
   logSafeEvent("error", "salesframe_function_error", {
     clientRequestId,
@@ -81,6 +83,13 @@ export function errorResponse(
       ...(requestId ? { "X-Netlify-Request-Id": requestId } : {}),
     }
   )
+}
+
+function normalizeClientRequestId(value: string | null | undefined) {
+  const normalized = value?.trim()
+  return normalized && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)
+    ? normalized.toLowerCase()
+    : undefined
 }
 
 export function logSafeEvent(level: LogLevel, event: string, payload: Record<string, unknown> = {}) {

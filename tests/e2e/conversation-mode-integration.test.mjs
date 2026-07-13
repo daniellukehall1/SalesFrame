@@ -38,7 +38,7 @@ test("the standard workspace remains the default and is reused as the conversati
   assert.match(app, /accountId: conversationHasAccountContext \? activeAccount\.id \|\| undefined : undefined/)
   assert.match(app, /opportunityId: conversationHasOpportunityContext \? activeOpportunity\.id \|\| undefined : undefined/)
   assert.match(app, /if \(!capability\) return/)
-  assert.match(app, /const missingAccount = capability\.requiredContext\.includes\("account"\) && !conversationRouteContext\.accountId/)
+  assert.match(app, /const missingAccount = capability\.requiredContext\.includes\("account"\) && !resolvedAccountId/)
   assert.match(app, /if \(missingCall\) \{[\s\S]*openView\("calls"\)/)
   assert.match(app, /if \(missingOpportunity\) \{[\s\S]*openView\("opportunities"\)/)
   assert.match(sidebar, />Conversation mode</)

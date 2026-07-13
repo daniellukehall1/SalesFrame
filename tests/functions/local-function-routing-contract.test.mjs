@@ -11,6 +11,7 @@ const [viteConfig, serverFunctions] = await Promise.all([
 test("Vite routes every exact browser-used function to its local Netlify module", () => {
   const expectedRoutes = new Map([
     ["/api/assistant/briefing", "assistant-briefing"],
+    ["/api/assistant/capabilities", "assistant-capabilities"],
     ["/api/assistant/preferences", "assistant-preferences"],
     ["/api/assistant/threads", "assistant-threads"],
     ["/api/assistant/turns", "assistant-turns"],

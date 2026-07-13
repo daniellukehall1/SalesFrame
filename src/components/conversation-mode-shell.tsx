@@ -1,10 +1,21 @@
 import * as React from "react"
 
+import {
+  AssistantArtifactCanvasActions,
+  AssistantArtifactCanvasView,
+  assistantArtifactNeedsCanvas,
+} from "@/components/assistant-artifact"
 import { ConversationWorkspace } from "@/components/conversation-workspace"
+import { ASSISTANT_CAPABILITIES } from "@/lib/assistant-capabilities"
+import { ASSISTANT_CAPABILITY_REGISTRY } from "@/lib/assistant-capability-registry"
 import { createAssistantClient } from "@/lib/assistant-client"
 import type {
   AssistantActionProposal,
+  AssistantArtifact,
+  AssistantArtifactAction,
+  AssistantActionTarget,
   AssistantBriefing,
+  AssistantCapability,
   AssistantContextualAction,
   AssistantMessage,
   AssistantMessageReference,
@@ -26,8 +37,9 @@ type ConversationModeShellProps = {
   voice: AssistantVoiceInput
   workspaceId: string
   workspaceName: string
+  workingContextLabel?: string
   onActionCompleted: () => void
-  onInvokeCapability: (capabilityId: string) => void
+  onInvokeCapability: (capabilityId: string, target?: AssistantActionTarget) => void
   onOpenReference: (reference: AssistantMessageReference) => void
   onOpenWorkspaceSwitcher: () => void
   onSwitchToWorkspaceView: () => void
@@ -41,6 +53,7 @@ export function ConversationModeShell({
   voice,
   workspaceId,
   workspaceName,
+  workingContextLabel,
   onActionCompleted,
   onInvokeCapability,
   onOpenReference,
@@ -48,13 +61,14 @@ export function ConversationModeShell({
   onSwitchToWorkspaceView,
 }: ConversationModeShellProps) {
   const client = React.useMemo(
-    () => createAssistantClient(createSalesFrameAssistantTransport()),
+    () => createAssistantClient(createSalesFrameAssistantTransport(), ASSISTANT_CAPABILITY_REGISTRY),
     []
   )
   const [threads, setThreads] = React.useState<AssistantThreadSummary[]>([])
   const [activeThreadId, setActiveThreadId] = React.useState("")
   const [messages, setMessages] = React.useState<AssistantMessage[]>([])
   const [proposals, setProposals] = React.useState<AssistantActionProposal[]>([])
+  const [capabilities, setCapabilities] = React.useState<readonly AssistantCapability[]>(ASSISTANT_CAPABILITIES)
   const [isLoadingThreads, setIsLoadingThreads] = React.useState(true)
   const [isLoadingMessages, setIsLoadingMessages] = React.useState(false)
   const [isResponding, setIsResponding] = React.useState(false)
@@ -62,10 +76,20 @@ export function ConversationModeShell({
   const [completedMessageId, setCompletedMessageId] = React.useState("")
   const [assistantStatus, setAssistantStatus] = React.useState("")
   const [assistantUnavailableMessage, setAssistantUnavailableMessage] = React.useState("")
+  const [activeArtifact, setActiveArtifact] = React.useState<AssistantArtifact | null>(null)
+  const [artifactActionError, setArtifactActionError] = React.useState<{
+    artifactId: string
+    message: string
+  } | null>(null)
+  const [isArtifactWorking, setIsArtifactWorking] = React.useState(false)
+  const [artifactSearchValue, setArtifactSearchValue] = React.useState("")
   const requestGenerationRef = React.useRef(0)
   const messageRequestIdRef = React.useRef(0)
   const activeThreadIdRef = React.useRef("")
   const activeTurnRef = React.useRef<AbortController | null>(null)
+  const activeArtifactRef = React.useRef<AssistantArtifact | null>(null)
+  const artifactFocusReturnRef = React.useRef<HTMLElement | null>(null)
+  const restoringArtifactIdRef = React.useRef("")
   const userStoppedTurnsRef = React.useRef(new WeakSet<AbortController>())
   const preferenceSaveQueueRef = React.useRef<Promise<void>>(Promise.resolve())
   const preferenceSaveVersionRef = React.useRef(0)
@@ -79,6 +103,11 @@ export function ConversationModeShell({
     const collection = await client.listThreads(workspaceId)
     let nextThreads = collection.threads.filter((thread) => !thread.archived)
     let nextActiveThreadId = collection.preference?.activeThreadId ?? ""
+    const requestedThreadId = readAssistantQueryId("thread")
+
+    if (requestedThreadId && nextThreads.some((thread) => thread.id === requestedThreadId)) {
+      nextActiveThreadId = requestedThreadId
+    }
 
     if (nextThreads.length === 0) {
       const createdThread = await client.ensureDefaultThread(workspaceId)
@@ -105,6 +134,7 @@ export function ConversationModeShell({
     setThreads([])
     setMessages([])
     setProposals([])
+    setCapabilities(ASSISTANT_CAPABILITIES)
     setActiveThreadId("")
     setIsLoadingThreads(Boolean(workspaceId))
     setIsLoadingMessages(false)
@@ -113,8 +143,21 @@ export function ConversationModeShell({
     setCompletedMessageId("")
     setAssistantUnavailableMessage("")
     setAssistantStatus("")
+    activeArtifactRef.current = null
+    setActiveArtifact(null)
+    setArtifactActionError(null)
+    setIsArtifactWorking(false)
+    setArtifactSearchValue("")
 
     if (!workspaceId) return
+
+    void client.listCapabilities(workspaceId)
+      .then((catalog) => {
+        if (requestGenerationRef.current === generation) setCapabilities(catalog)
+      })
+      .catch(() => {
+        // The reviewed local catalog remains available when the server catalog cannot be refreshed.
+      })
 
     void loadThreads()
       .then((result) => {
@@ -123,6 +166,7 @@ export function ConversationModeShell({
         setIsLoadingMessages(true)
         setThreads(result.threads)
         setActiveThreadId(result.activeThreadId)
+        replaceAssistantQuery({ thread: result.activeThreadId })
       })
       .catch(() => {
         if (requestGenerationRef.current !== generation) return
@@ -140,7 +184,7 @@ export function ConversationModeShell({
       activeTurnRef.current = null
       messageRequestIdRef.current += 1
     }
-  }, [loadThreads, workspaceId])
+  }, [client, loadThreads, workspaceId])
 
   const loadMessages = React.useCallback(async (threadId: string) => {
     if (!threadId) return
@@ -215,7 +259,12 @@ export function ConversationModeShell({
       setActiveThreadId(thread.id)
       setMessages([])
       setProposals([])
+      activeArtifactRef.current = null
+      setActiveArtifact(null)
+      setArtifactActionError(null)
+      setArtifactSearchValue("")
       setAssistantUnavailableMessage("")
+      replaceAssistantQuery({ thread: thread.id, artifact: null })
       return thread
     } catch {
       if (requestGenerationRef.current !== generation) return null
@@ -243,7 +292,12 @@ export function ConversationModeShell({
     setAssistantUnavailableMessage("")
     setMessages([])
     setProposals([])
+    activeArtifactRef.current = null
+    setActiveArtifact(null)
+    setArtifactActionError(null)
+    setArtifactSearchValue("")
     setActiveThreadId(threadId)
+    replaceAssistantQuery({ thread: threadId, artifact: null })
     preferenceSaveQueueRef.current = preferenceSaveQueueRef.current
       .catch(() => undefined)
       .then(async () => {
@@ -266,6 +320,23 @@ export function ConversationModeShell({
         }
       })
   }, [workspaceId])
+
+  const openArtifact = React.useCallback((artifact: AssistantArtifact, options: { updateHistory?: boolean } = {}) => {
+    const previousArtifact = activeArtifactRef.current
+    if (!previousArtifact && document.activeElement instanceof HTMLElement && document.activeElement !== document.body) {
+      artifactFocusReturnRef.current = document.activeElement
+    }
+    activeArtifactRef.current = artifact
+    if (previousArtifact?.id !== artifact.id) setArtifactSearchValue("")
+    setActiveArtifact(artifact)
+    setArtifactActionError(null)
+    if (options.updateHistory === false) return
+    if (previousArtifact || readAssistantQueryId("artifact")) {
+      replaceAssistantQuery({ artifact: artifact.id })
+    } else {
+      pushAssistantQuery({ artifact: artifact.id })
+    }
+  }, [])
 
   const handleStreamEvent = React.useCallback((event: AssistantStreamEvent, pendingMessageId: string) => {
     if (event.type === "status") {
@@ -292,6 +363,12 @@ export function ConversationModeShell({
       return
     }
 
+    if (event.type === "artifact" || event.type === "task") {
+      setMessages((items) => appendAssistantArtifact(items, pendingMessageId, event.artifact))
+      if (assistantArtifactNeedsCanvas(event.artifact)) openArtifact(event.artifact)
+      return
+    }
+
     if (event.type === "canvas") {
       onInvokeCapability(event.capabilityId)
       return
@@ -311,7 +388,7 @@ export function ConversationModeShell({
     setIsResponseStoppable(false)
     setAssistantStatus("")
     setAssistantUnavailableMessage(event.message || "SalesFrame couldn't complete that request. Nothing was changed.")
-  }, [onInvokeCapability])
+  }, [onInvokeCapability, openArtifact])
 
   const submitTurn = React.useCallback(async (text: string) => {
     const threadId = activeThreadIdRef.current
@@ -453,6 +530,75 @@ export function ConversationModeShell({
     }
   }, [client, handleStreamEvent, routeContext])
 
+  const handleArtifactAction = React.useCallback(async (
+    artifact: AssistantArtifact,
+    action: AssistantArtifactAction
+  ) => {
+    if (action.disabled || isArtifactWorking) return
+    const threadId = activeThreadIdRef.current
+    const generation = requestGenerationRef.current
+    setIsArtifactWorking(true)
+    setArtifactActionError(null)
+    try {
+      if (action.behavior === "submit_prompt") {
+        if (!action.prompt) throw new Error("That follow-up is no longer available.")
+        const submitted = await submitTurn(action.prompt)
+        if (!submitted) throw new Error("SalesFrame couldn't continue that request yet.")
+        return
+      }
+
+      if (action.behavior === "open_artifact") {
+        const artifactId = action.artifactId ?? artifact.id
+        const nextArtifact = artifactId === artifact.id
+          ? artifact
+          : await client.getArtifact(artifactId)
+        if (activeThreadIdRef.current !== threadId || requestGenerationRef.current !== generation) return
+        openArtifact(nextArtifact)
+        return
+      }
+
+      const prepared = await client.prepareArtifactAction(artifact.id, action.id)
+      if (activeThreadIdRef.current !== threadId || requestGenerationRef.current !== generation) return
+      if (action.behavior === "secure_handoff") {
+        if (!prepared.capability) throw new Error("That action is no longer available.")
+        onInvokeCapability(prepared.capability.id, prepared.capability.target)
+        return
+      }
+      if (action.behavior === "open_form") {
+        if (!prepared.capability) throw new Error("That action is no longer available.")
+        onInvokeCapability(prepared.capability.id, prepared.capability.target)
+        return
+      }
+      if (prepared.proposal) {
+        proposalRevisionRef.current += 1
+        setProposals((items) => orderAssistantProposals([
+          ...items.filter((item) => item.id !== prepared.proposal?.id),
+          prepared.proposal!,
+        ]))
+      }
+      if (prepared.artifact) {
+        setMessages((items) => upsertAssistantArtifact(items, prepared.artifact!))
+        if (assistantArtifactNeedsCanvas(prepared.artifact)) openArtifact(prepared.artifact)
+      }
+      if (prepared.reference) onOpenReference(prepared.reference)
+      if (!prepared.proposal && !prepared.artifact && !prepared.reference) {
+        throw new Error("That action is no longer available. Refresh this result and try again.")
+      }
+    } catch (error) {
+      if (activeThreadIdRef.current !== threadId || requestGenerationRef.current !== generation) return
+      setArtifactActionError({
+        artifactId: artifact.id,
+        message: error instanceof Error && error.message.trim()
+          ? error.message
+          : "SalesFrame couldn't complete that action. Nothing was changed.",
+      })
+    } finally {
+      if (activeThreadIdRef.current === threadId && requestGenerationRef.current === generation) {
+        setIsArtifactWorking(false)
+      }
+    }
+  }, [client, isArtifactWorking, onInvokeCapability, onOpenReference, openArtifact, submitTurn])
+
   const stopResponse = React.useCallback(() => {
     const controller = activeTurnRef.current
     const threadId = activeThreadIdRef.current
@@ -502,20 +648,16 @@ export function ConversationModeShell({
       item.id === proposalId ? { ...item, state: "confirming" } : item
     ))
     try {
-      await client.confirmProposal(proposalId)
+      const result = await client.confirmProposal(proposalId)
       if (activeThreadIdRef.current === proposalThreadId) {
         proposalRevisionRef.current += 1
         messageMutationVersionRef.current += 1
         setProposals((items) => items.filter((item) => item.id !== proposalId))
-        setMessages((items) => [
-          ...items,
-          {
-            id: `confirmed-${proposalId}`,
-            role: "status",
-            text: "Change confirmed.",
-            createdAtIso: new Date().toISOString(),
-          },
-        ])
+        if (result.artifact) {
+          setMessages((items) => upsertAssistantArtifact(items, result.artifact!))
+          if (assistantArtifactNeedsCanvas(result.artifact)) openArtifact(result.artifact)
+        }
+        if (result.reference) onOpenReference(result.reference)
       }
       if (requestGenerationRef.current === generation) onActionCompleted()
     } catch (error) {
@@ -535,7 +677,7 @@ export function ConversationModeShell({
     } finally {
       proposalMutationKeysRef.current.delete(proposalMutationKey)
     }
-  }, [client, onActionCompleted])
+  }, [client, onActionCompleted, onOpenReference, openArtifact])
 
   const cancelProposal = React.useCallback(async (proposalId: string) => {
     const proposalThreadId = activeThreadIdRef.current
@@ -627,14 +769,183 @@ export function ConversationModeShell({
     }
   }, [client, createThread, selectThread, threads])
 
+  const restoreArtifactFromLocation = React.useCallback(() => {
+    const artifactId = readAssistantQueryId("artifact")
+    if (!artifactId) {
+      restoringArtifactIdRef.current = ""
+      activeArtifactRef.current = null
+      setActiveArtifact(null)
+      setArtifactActionError(null)
+      restoreArtifactOriginFocus(artifactFocusReturnRef)
+      return
+    }
+    const embeddedArtifact = messages
+      .flatMap((message) => message.artifacts ?? [])
+      .find((artifact) => artifact.id === artifactId)
+    if (embeddedArtifact) {
+      restoringArtifactIdRef.current = ""
+      openArtifact(embeddedArtifact, { updateHistory: false })
+      return
+    }
+    if (activeArtifact?.id === artifactId || restoringArtifactIdRef.current === artifactId) return
+
+    const generation = requestGenerationRef.current
+    const threadId = activeThreadIdRef.current
+    restoringArtifactIdRef.current = artifactId
+    void client.getArtifact(artifactId)
+      .then((artifact) => {
+        if (
+          requestGenerationRef.current !== generation ||
+          activeThreadIdRef.current !== threadId ||
+          readAssistantQueryId("artifact") !== artifact.id
+        ) return
+        restoringArtifactIdRef.current = ""
+        openArtifact(artifact, { updateHistory: false })
+      })
+      .catch(() => {
+        if (
+          requestGenerationRef.current !== generation ||
+          activeThreadIdRef.current !== threadId ||
+          readAssistantQueryId("artifact") !== artifactId
+        ) return
+        restoringArtifactIdRef.current = ""
+        activeArtifactRef.current = null
+        setActiveArtifact(null)
+        replaceAssistantQuery({ artifact: null })
+        setAssistantUnavailableMessage("That result is no longer available. The conversation remains unchanged.")
+      })
+  }, [activeArtifact?.id, client, messages, openArtifact])
+
+  React.useEffect(() => {
+    restoreArtifactFromLocation()
+    const handlePopState = () => restoreArtifactFromLocation()
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [restoreArtifactFromLocation])
+
+  const runningTaskIds = React.useMemo(() => Array.from(new Set(
+    messages.flatMap((message) => message.artifacts ?? [])
+      .filter((artifact) => artifact.task && ["queued", "running"].includes(artifact.task.status))
+      .map((artifact) => artifact.id)
+  )).slice(0, 3), [messages])
+
+  React.useEffect(() => {
+    if (!runningTaskIds.length) return
+    const intervalId = window.setInterval(() => {
+      for (const artifactId of runningTaskIds) {
+        void client.getTask(artifactId)
+          .then((artifact) => {
+            setActiveArtifact((current) => current?.id === artifactId ? artifact : current)
+            setMessages((items) => replaceAssistantArtifact(items, artifact))
+          })
+          .catch(() => undefined)
+      }
+    }, 4_000)
+    return () => window.clearInterval(intervalId)
+  }, [client, runningTaskIds])
+
+  const closeArtifact = React.useCallback(() => {
+    const artifactId = activeArtifactRef.current?.id
+    activeArtifactRef.current = null
+    setActiveArtifact(null)
+    setArtifactActionError(null)
+    restoreArtifactOriginFocus(artifactFocusReturnRef)
+    if (
+      artifactId &&
+      readAssistantQueryId("artifact") === artifactId &&
+      window.history.state?.salesframeConversationArtifactId === artifactId
+    ) {
+      window.history.back()
+    } else {
+      replaceAssistantQuery({ artifact: null })
+    }
+  }, [])
+
+  const loadMoreArtifact = React.useCallback(async (artifact: AssistantArtifact) => {
+    if (!artifact.cursor || isArtifactWorking) return
+    setIsArtifactWorking(true)
+    setArtifactActionError(null)
+    try {
+      const updated = await client.queryArtifact(artifact.id, { cursor: artifact.cursor })
+      activeArtifactRef.current = updated
+      setActiveArtifact(updated)
+      setMessages((items) => replaceAssistantArtifact(items, updated))
+    } catch (error) {
+      setArtifactActionError({
+        artifactId: artifact.id,
+        message: error instanceof Error && error.message.trim()
+          ? error.message
+          : "SalesFrame couldn't load more results. Your current results remain available.",
+      })
+    } finally {
+      setIsArtifactWorking(false)
+    }
+  }, [client, isArtifactWorking])
+
+  const searchArtifact = React.useCallback(async (artifact: AssistantArtifact, value: string) => {
+    if (isArtifactWorking) return
+    const search = value
+      .replace(/[\u0000-\u001F\u007F]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 160)
+    setIsArtifactWorking(true)
+    setArtifactActionError(null)
+    try {
+      const updated = await client.queryArtifact(artifact.id, { search })
+      if (activeArtifactRef.current?.id !== artifact.id) return
+      activeArtifactRef.current = updated
+      setActiveArtifact(updated)
+      setMessages((items) => replaceAssistantArtifact(items, updated))
+      setArtifactSearchValue(search)
+    } catch (error) {
+      setArtifactActionError({
+        artifactId: artifact.id,
+        message: error instanceof Error && error.message.trim()
+          ? error.message
+          : "SalesFrame couldn't search these results. Your previous results remain available.",
+      })
+    } finally {
+      setIsArtifactWorking(false)
+    }
+  }, [client, isArtifactWorking])
+
+  const canvas = activeArtifact ? {
+    id: activeArtifact.id,
+    title: activeArtifact.title,
+    description: activeArtifact.description,
+    content: (
+      <AssistantArtifactCanvasView
+        artifact={activeArtifact}
+        actionError={artifactActionError?.artifactId === activeArtifact.id ? artifactActionError.message : undefined}
+        isWorking={isArtifactWorking}
+        onAction={handleArtifactAction}
+        onLoadMore={loadMoreArtifact}
+        onSearch={searchArtifact}
+        onSearchValueChange={setArtifactSearchValue}
+        searchValue={artifactSearchValue}
+      />
+    ),
+    footer: activeArtifact.actions.length ? (
+      <AssistantArtifactCanvasActions
+        artifact={activeArtifact}
+        isWorking={isArtifactWorking}
+        onAction={handleArtifactAction}
+      />
+    ) : undefined,
+  } : null
+
   return (
     <ConversationWorkspace
       activeThreadId={activeThreadId}
       assistantStatus={assistantStatus}
       assistantUnavailableMessage={assistantUnavailableMessage}
+      artifactActionError={artifactActionError}
       briefing={briefing}
+      capabilities={capabilities}
       completedMessageId={completedMessageId}
       contextualActions={contextualActions}
+      canvas={canvas}
       isComposerDisabled={isLoadingThreads || isLoadingMessages || !activeThreadId}
       isLoadingMessages={isLoadingMessages}
       isResponding={isResponding}
@@ -645,13 +956,17 @@ export function ConversationModeShell({
       userName={userName}
       voice={voice}
       workspaceName={workspaceName}
+      workingContextLabel={activeArtifact?.title ?? workingContextLabel}
       onArchiveThread={archiveThread}
       onCancelProposal={cancelProposal}
       onConfirmProposal={confirmProposal}
       onDeleteThread={deleteThread}
-      onInvokeCapability={(capabilityId) => onInvokeCapability(capabilityId)}
+      onInvokeCapability={(capabilityId, _source, target) => onInvokeCapability(capabilityId, target)}
       onNewThread={async () => { await createThread() }}
       onOpenReference={onOpenReference}
+      onOpenArtifact={openArtifact}
+      onArtifactAction={handleArtifactAction}
+      onCloseCanvas={closeArtifact}
       onOpenWorkspaceSwitcher={onOpenWorkspaceSwitcher}
       onRenameThread={renameThread}
       onSelectThread={selectThread}
@@ -700,6 +1015,106 @@ function appendAssistantReference(
     const references = message.references ?? []
     if (references.some((item) => item.id === reference.id && item.kind === reference.kind)) return message
     return { ...message, references: [...references, reference] }
+  })
+}
+
+function appendAssistantArtifact(
+  messages: AssistantMessage[],
+  pendingMessageId: string,
+  artifact: AssistantArtifact
+) {
+  return messages.map((message) => {
+    if (message.id !== pendingMessageId) return message
+    const artifacts = message.artifacts ?? []
+    return {
+      ...message,
+      artifacts: [
+        ...artifacts.filter((item) => item.id !== artifact.id),
+        artifact,
+      ],
+    }
+  })
+}
+
+function upsertAssistantArtifact(messages: AssistantMessage[], artifact: AssistantArtifact) {
+  let replaced = false
+  const nextMessages = messages.map((message) => {
+    if (!message.artifacts?.some((item) => item.id === artifact.id)) return message
+    replaced = true
+    return {
+      ...message,
+      artifacts: message.artifacts.map((item) => item.id === artifact.id ? artifact : item),
+    }
+  })
+  if (replaced) return nextMessages
+
+  let lastAssistantIndex = -1
+  for (let index = nextMessages.length - 1; index >= 0; index -= 1) {
+    if (nextMessages[index]?.role === "assistant") {
+      lastAssistantIndex = index
+      break
+    }
+  }
+  if (lastAssistantIndex < 0) return nextMessages
+  return nextMessages.map((message, index) => index === lastAssistantIndex
+    ? { ...message, artifacts: [...(message.artifacts ?? []), artifact] }
+    : message
+  )
+}
+
+function replaceAssistantArtifact(messages: AssistantMessage[], artifact: AssistantArtifact) {
+  return messages.map((message) => message.artifacts?.some((item) => item.id === artifact.id)
+    ? {
+        ...message,
+        artifacts: message.artifacts.map((item) => item.id === artifact.id ? artifact : item),
+      }
+    : message
+  )
+}
+
+function readAssistantQueryId(key: "thread" | "artifact") {
+  if (typeof window === "undefined") return ""
+  const value = new URL(window.location.href).searchParams.get(key)?.trim() ?? ""
+  return /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,179}$/.test(value) ? value : ""
+}
+
+function replaceAssistantQuery(patch: { thread?: string | null; artifact?: string | null }) {
+  updateAssistantQuery(patch, "replace")
+}
+
+function pushAssistantQuery(patch: { thread?: string | null; artifact?: string | null }) {
+  updateAssistantQuery(patch, "push")
+}
+
+function updateAssistantQuery(
+  patch: { thread?: string | null; artifact?: string | null },
+  mode: "push" | "replace"
+) {
+  if (typeof window === "undefined") return
+  const url = new URL(window.location.href)
+  for (const [key, value] of Object.entries(patch)) {
+    if (value) url.searchParams.set(key, value)
+    else url.searchParams.delete(key)
+  }
+  const nextPath = `${url.pathname}${url.search}${url.hash}`
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (nextPath === currentPath) return
+  const artifactId = Object.prototype.hasOwnProperty.call(patch, "artifact")
+    ? patch.artifact ?? ""
+    : readAssistantQueryId("artifact")
+  const state = {
+    ...window.history.state,
+    salesframeConversationArtifactId: artifactId || undefined,
+  }
+  if (mode === "push") window.history.pushState(state, "", nextPath)
+  else window.history.replaceState(state, "", nextPath)
+}
+
+function restoreArtifactOriginFocus(ref: React.RefObject<HTMLElement | null>) {
+  const target = ref.current
+  ref.current = null
+  window.requestAnimationFrame(() => {
+    if (target?.isConnected) target.focus({ preventScroll: true })
   })
 }
 

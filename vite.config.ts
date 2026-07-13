@@ -6,6 +6,8 @@ import { defineConfig, loadEnv, type Plugin } from "vite"
 
 const localFunctionRoutes: Record<string, string> = {
   "/api/assistant/briefing": "assistant-briefing",
+  "/api/assistant/capabilities": "assistant-capabilities",
+  "/api/assistant/actions/prepare": "assistant-action-prepare",
   "/api/assistant/preferences": "assistant-preferences",
   "/api/assistant/threads": "assistant-threads",
   "/api/assistant/turns": "assistant-turns",
@@ -41,6 +43,21 @@ type LocalDynamicFunctionRoute = {
 }
 
 const localDynamicFunctionRoutes: LocalDynamicFunctionRoute[] = [
+  {
+    functionName: "assistant-artifact-query",
+    parameterNames: ["artifactId"],
+    pattern: /^\/api\/assistant\/artifacts\/([^/]+)\/query$/,
+  },
+  {
+    functionName: "assistant-artifact",
+    parameterNames: ["artifactId"],
+    pattern: /^\/api\/assistant\/artifacts\/([^/]+)$/,
+  },
+  {
+    functionName: "assistant-task",
+    parameterNames: ["taskId"],
+    pattern: /^\/api\/assistant\/tasks\/([^/]+)$/,
+  },
   {
     functionName: "assistant-messages",
     parameterNames: ["threadId"],

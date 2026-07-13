@@ -43,6 +43,7 @@ export type AssistantRouteContext = {
   workspaceId?: string
   accountId?: string
   opportunityId?: string
+  contactId?: string
   callId?: string
 }
 

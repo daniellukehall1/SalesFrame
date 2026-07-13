@@ -41,6 +41,7 @@ export type AssistantRouteContext = {
   workspaceId?: string
   accountId?: string
   opportunityId?: string
+  contactId?: string
   callId?: string
 }
 
@@ -69,6 +70,122 @@ export type AssistantThreadMessages = {
   proposals: AssistantActionProposal[]
 }
 
+export type AssistantArtifactKind =
+  | "collection"
+  | "record"
+  | "summary"
+  | "relationship"
+  | "evidence"
+  | "form"
+  | "workflow"
+  | "task"
+
+export type AssistantArtifactStatus =
+  | "ready"
+  | "loading"
+  | "stale"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+
+export type AssistantArtifactActionBehavior =
+  | "open_artifact"
+  | "open_form"
+  | "submit_prompt"
+  | "prepare_action"
+  | "secure_handoff"
+
+export type AssistantActionTarget = {
+  accountId?: string
+  opportunityId?: string
+  contactId?: string
+  callId?: string
+}
+
+export type AssistantArtifactAction = {
+  id: string
+  capabilityId: string
+  label: string
+  behavior: AssistantArtifactActionBehavior
+  risk: "none" | "standard" | "costed" | "destructive"
+  target: AssistantActionTarget
+  prompt?: string
+  artifactId?: string
+  disabled?: boolean
+}
+
+export type AssistantArtifactField = {
+  id: string
+  label: string
+  value: string
+  detail?: string
+  tone?: "neutral" | "positive" | "attention" | "critical"
+}
+
+export type AssistantArtifactRecord = {
+  id: string
+  kind: "account" | "opportunity" | "contact" | "call" | "playbook" | "other"
+  label: string
+  description?: string
+  fields: AssistantArtifactField[]
+  actions: AssistantArtifactAction[]
+}
+
+export type AssistantArtifactSection = {
+  id: string
+  title?: string
+  description?: string
+  fields: AssistantArtifactField[]
+  records: AssistantArtifactRecord[]
+}
+
+export type AssistantArtifactStep = {
+  id: string
+  label: string
+  description?: string
+  status?: "pending" | "active" | "completed" | "failed"
+}
+
+export type AssistantArtifactTask = {
+  status: "queued" | "running" | "completed" | "failed"
+  progress?: number
+  detail?: string
+}
+
+export type AssistantArtifact = {
+  id: string
+  kind: AssistantArtifactKind
+  schemaVersion: 1
+  title: string
+  description?: string
+  status?: AssistantArtifactStatus
+  summary?: string
+  fields: AssistantArtifactField[]
+  records: AssistantArtifactRecord[]
+  sections: AssistantArtifactSection[]
+  steps: AssistantArtifactStep[]
+  task?: AssistantArtifactTask
+  emptyState?: string
+  cursor?: string
+  actions: AssistantArtifactAction[]
+}
+
+export type AssistantResolvedContext = AssistantActionTarget & {
+  artifactId?: string
+  source: "explicit" | "selection" | "route" | "thread"
+}
+
+export type AssistantPreparedAction = {
+  capability?: {
+    id: string
+    target: AssistantActionTarget
+  }
+  proposal?: AssistantActionProposal
+  artifact?: AssistantArtifact
+  reference?: AssistantMessageReference
+}
+
 export type AssistantMessageReference = {
   id: string
   kind:
@@ -90,6 +207,7 @@ export type AssistantMessage = {
   text: string
   createdAtIso: string
   references?: AssistantMessageReference[]
+  artifacts?: AssistantArtifact[]
 }
 
 export type AssistantContextualAction = {
@@ -155,6 +273,8 @@ export type AssistantStreamEvent =
   | { type: "text_delta"; text: string }
   | { type: "reference"; reference: AssistantMessageReference }
   | { type: "canvas"; capabilityId: string; title: string }
+  | { type: "artifact"; artifact: AssistantArtifact }
+  | { type: "task"; artifact: AssistantArtifact }
   | { type: "proposal"; proposal: AssistantActionProposal }
   | { type: "complete"; messageId: string }
   | { type: "error"; code: string; message: string }

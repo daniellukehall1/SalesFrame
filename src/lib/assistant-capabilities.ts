@@ -3,7 +3,7 @@ import type {
   AssistantCapabilityGroup,
   AssistantContextKind,
   AssistantRouteContext,
-} from "@/lib/assistant-types"
+} from "./assistant-types.ts"
 
 export const ASSISTANT_CAPABILITIES = [
   capability("workspace.search", "Search workspace", "Find accounts, opportunities, contacts, calls, and playbooks.", "workspace", "read", "list", ["workspace"], ["search", "find"]),

@@ -24,6 +24,7 @@ import {
 } from "lucide-react"
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
+import { AssistantArtifactPreview } from "@/components/assistant-artifact"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -68,6 +69,9 @@ import {
 } from "@/lib/assistant-capabilities"
 import type {
   AssistantActionProposal,
+  AssistantArtifact,
+  AssistantArtifactAction,
+  AssistantActionTarget,
   AssistantBriefing,
   AssistantCapability,
   AssistantCapabilityGroup,
@@ -90,6 +94,7 @@ export type ConversationCanvas = {
 
 export type ConversationWorkspaceProps = {
   workspaceName: string
+  workingContextLabel?: string
   userName?: string
   routeContext: AssistantRouteContext
   threads: AssistantThreadSummary[]
@@ -103,6 +108,7 @@ export type ConversationWorkspaceProps = {
   completedMessageId?: string
   assistantStatus?: string
   assistantUnavailableMessage?: string
+  artifactActionError?: { artifactId: string; message: string } | null
   isResponding?: boolean
   isLoadingMessages?: boolean
   isComposerDisabled?: boolean
@@ -113,9 +119,15 @@ export type ConversationWorkspaceProps = {
   onSubmit: (text: string) => void | boolean | Promise<void | boolean>
   onInvokeCapability: (
     capabilityId: string,
-    source: "briefing" | "contextual" | "all_actions" | "finding"
+    source: "briefing" | "contextual" | "all_actions" | "finding",
+    target?: AssistantActionTarget
   ) => void
   onOpenReference?: (reference: AssistantMessageReference) => void
+  onOpenArtifact?: (artifact: AssistantArtifact) => void
+  onArtifactAction?: (
+    artifact: AssistantArtifact,
+    action: AssistantArtifactAction
+  ) => void | Promise<void>
   onSelectThread: (threadId: string) => void
   onNewThread: () => void | Promise<void>
   onRenameThread?: (threadId: string, title: string) => void | Promise<void>
@@ -151,6 +163,7 @@ const capabilityGroupIcons = {
 
 export function ConversationWorkspace({
   workspaceName,
+  workingContextLabel,
   userName,
   routeContext,
   threads,
@@ -164,6 +177,7 @@ export function ConversationWorkspace({
   completedMessageId,
   assistantStatus,
   assistantUnavailableMessage,
+  artifactActionError,
   isResponding = false,
   isLoadingMessages = false,
   isComposerDisabled = false,
@@ -174,6 +188,8 @@ export function ConversationWorkspace({
   onSubmit,
   onInvokeCapability,
   onOpenReference,
+  onOpenArtifact,
+  onArtifactAction,
   onSelectThread,
   onNewThread,
   onRenameThread,
@@ -191,6 +207,7 @@ export function ConversationWorkspace({
   const [threadsOpen, setThreadsOpen] = React.useState(false)
   const [actionsOpen, setActionsOpen] = React.useState(false)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+  const [dismissedContextLabel, setDismissedContextLabel] = React.useState("")
   const lastAppliedVoiceTranscriptRef = React.useRef("")
   const conversationEndRef = React.useRef<HTMLDivElement | null>(null)
   const threadsTriggerRef = React.useRef<HTMLButtonElement | null>(null)
@@ -316,6 +333,9 @@ export function ConversationWorkspace({
               isLoading={isLoadingMessages}
               isResponding={isResponding}
               onOpenReference={onOpenReference}
+              onOpenArtifact={onOpenArtifact}
+              onArtifactAction={onArtifactAction}
+              artifactActionError={artifactActionError}
             />
 
             {proposal ? (
@@ -343,6 +363,13 @@ export function ConversationWorkspace({
             <div ref={conversationEndRef} aria-hidden="true" />
           </div>
         </ScrollArea>
+
+        {workingContextLabel && dismissedContextLabel !== workingContextLabel ? (
+          <WorkingContextRow
+            label={workingContextLabel}
+            onDismiss={() => setDismissedContextLabel(workingContextLabel)}
+          />
+        ) : null}
 
         <ConversationComposer
           draft={draft}
@@ -524,17 +551,26 @@ function ConversationBriefingView({
 }
 
 function ConversationMessages({
+  artifactActionError,
   completedMessageId,
   messages,
   isLoading,
   isResponding,
   onOpenReference,
+  onOpenArtifact,
+  onArtifactAction,
 }: {
+  artifactActionError?: { artifactId: string; message: string } | null
   completedMessageId?: string
   messages: AssistantMessageRecord[]
   isLoading: boolean
   isResponding: boolean
   onOpenReference?: (reference: AssistantMessageReference) => void
+  onOpenArtifact?: (artifact: AssistantArtifact) => void
+  onArtifactAction?: (
+    artifact: AssistantArtifact,
+    action: AssistantArtifactAction
+  ) => void | Promise<void>
 }) {
   const announcedCompletionIdRef = React.useRef("")
   const [completionAnnouncement, setCompletionAnnouncement] = React.useState<{
@@ -614,6 +650,15 @@ function ConversationMessages({
                     ))}
                   </MessageFooter>
                 ) : null}
+                {message.artifacts?.map((artifact) => (
+                  <AssistantArtifactPreview
+                    key={artifact.id}
+                    actionError={artifactActionError?.artifactId === artifact.id ? artifactActionError.message : undefined}
+                    artifact={artifact}
+                    onAction={onArtifactAction}
+                    onOpen={onOpenArtifact}
+                  />
+                ))}
               </MessageContent>
             </Message>
           )
@@ -740,6 +785,27 @@ function ProposalPreview({
         </Button>
       </div>
     </section>
+  )
+}
+
+function WorkingContextRow({ label, onDismiss }: { label: string; onDismiss: () => void }) {
+  return (
+    <div className="shrink-0 border-t bg-background px-3 sm:px-4" data-testid="conversation-working-context">
+      <div className="mx-auto flex min-h-11 w-full max-w-3xl min-w-0 items-center gap-2">
+        <span className="shrink-0 text-xs text-muted-foreground">Working in</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium" title={label}>{label}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="min-h-11 min-w-11 shrink-0"
+          aria-label={`Dismiss working context: ${label}`}
+          onClick={onDismiss}
+        >
+          <XIcon />
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -963,7 +1029,7 @@ function ThreadsPanel({
         </Button>
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" className="pl-9" />
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" className="!pl-10" />
         </div>
       </div>
 
@@ -1160,7 +1226,7 @@ function AllActionsPanel({
         </div>
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <Input autoFocus value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Search actions" aria-label="Search all actions" className="pl-9" />
+          <Input autoFocus value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Search actions" aria-label="Search all actions" className="!pl-10" />
         </div>
       </div>
 

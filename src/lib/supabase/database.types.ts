@@ -551,6 +551,243 @@ export type Database = {
           issued_at?: string
         }
       >
+      assistant_artifacts: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          thread_id: string
+          owner_user_id: string
+          message_id: string
+          kind: string
+          schema_version: number
+          position: number
+          title: string
+          description: string | null
+          status: string | null
+          data: Json
+          created_at: string
+          updated_at: string
+        },
+        {
+          id: string
+          workspace_id: string
+          thread_id: string
+          owner_user_id: string
+          message_id: string
+          kind: string
+          schema_version?: number
+          position: number
+          title: string
+          description?: string | null
+          status?: string | null
+          data?: Json
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          thread_id?: string
+          owner_user_id?: string
+          message_id?: string
+          kind?: string
+          schema_version?: number
+          position?: number
+          title?: string
+          description?: string | null
+          status?: string | null
+          data?: Json
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      assistant_artifact_actions: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          thread_id: string
+          owner_user_id: string
+          artifact_id: string
+          position: number
+          record_key: string | null
+          label: string
+          capability_id: string
+          behavior: string
+          risk: string
+          prompt: string | null
+          target_artifact_id: string | null
+          target_account_id: string | null
+          target_opportunity_id: string | null
+          target_contact_id: string | null
+          target_call_id: string | null
+          created_at: string
+        },
+        {
+          id: string
+          workspace_id: string
+          thread_id: string
+          owner_user_id: string
+          artifact_id: string
+          position: number
+          record_key?: string | null
+          label: string
+          capability_id: string
+          behavior: string
+          risk?: string
+          prompt?: string | null
+          target_artifact_id?: string | null
+          target_account_id?: string | null
+          target_opportunity_id?: string | null
+          target_contact_id?: string | null
+          target_call_id?: string | null
+          created_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          thread_id?: string
+          owner_user_id?: string
+          artifact_id?: string
+          position?: number
+          record_key?: string | null
+          label?: string
+          capability_id?: string
+          behavior?: string
+          risk?: string
+          prompt?: string | null
+          target_artifact_id?: string | null
+          target_account_id?: string | null
+          target_opportunity_id?: string | null
+          target_contact_id?: string | null
+          target_call_id?: string | null
+          created_at?: string
+        }
+      >
+      assistant_thread_context: TableDefinition<
+        {
+          workspace_id: string
+          thread_id: string
+          owner_user_id: string
+          account_id: string | null
+          opportunity_id: string | null
+          contact_id: string | null
+          call_id: string | null
+          last_artifact_id: string | null
+          source: string
+          created_at: string
+          updated_at: string
+        },
+        {
+          workspace_id: string
+          thread_id: string
+          owner_user_id: string
+          account_id?: string | null
+          opportunity_id?: string | null
+          contact_id?: string | null
+          call_id?: string | null
+          last_artifact_id?: string | null
+          source: string
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          workspace_id?: string
+          thread_id?: string
+          owner_user_id?: string
+          account_id?: string | null
+          opportunity_id?: string | null
+          contact_id?: string | null
+          call_id?: string | null
+          last_artifact_id?: string | null
+          source?: string
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      assistant_action_steps: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          thread_id: string
+          user_id: string
+          proposal_id: string
+          position: number
+          capability_id: string
+          title: string
+          risk: string
+          status: string
+          arguments: Json
+          preview: Json
+          result_resource_type: string | null
+          result_resource_id: string | null
+          safe_error_code: string | null
+          started_at: string | null
+          completed_at: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          thread_id: string
+          user_id: string
+          proposal_id: string
+          position: number
+          capability_id: string
+          title: string
+          risk?: string
+          status?: string
+          arguments?: Json
+          preview?: Json
+          result_resource_type?: string | null
+          result_resource_id?: string | null
+          safe_error_code?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        Record<string, unknown>
+      >
+      assistant_task_references: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          thread_id: string
+          user_id: string
+          proposal_id: string | null
+          step_id: string | null
+          artifact_id: string | null
+          task_type: string
+          task_id: string
+          label: string
+          status: string
+          progress: number | null
+          detail: string | null
+          safe_error_code: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          thread_id: string
+          user_id: string
+          proposal_id?: string | null
+          step_id?: string | null
+          artifact_id?: string | null
+          task_type: string
+          task_id: string
+          label: string
+          status: string
+          progress?: number | null
+          detail?: string | null
+          safe_error_code?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        Record<string, unknown>
+      >
       accounts: TableDefinition<
         {
           id: string
@@ -3049,6 +3286,63 @@ export type Database = {
           target_tool_rounds: number
           target_read_operations: number
           target_references?: Json
+        }
+        Returns: Json
+      }
+      complete_assistant_run_v2: {
+        Args: {
+          target_run_id: string
+          target_user_id: string
+          target_content: string
+          target_input_tokens: number | null
+          target_output_tokens: number | null
+          target_tool_rounds: number
+          target_read_operations: number
+          target_references?: Json
+          target_artifacts?: Json
+          target_context?: Json
+        }
+        Returns: Json
+      }
+      set_assistant_thread_context: {
+        Args: {
+          target_thread_id: string
+          target_user_id: string
+          target_account_id: string | null
+          target_opportunity_id: string | null
+          target_contact_id: string | null
+          target_call_id: string | null
+          target_last_artifact_id: string | null
+          target_source: string
+        }
+        Returns: Json
+      }
+      create_assistant_action_step: {
+        Args: {
+          target_proposal_id: string
+          target_user_id: string
+          target_position: number
+          target_capability_id: string
+          target_title: string
+          target_risk: string
+          target_arguments: Json
+          target_preview: Json
+        }
+        Returns: Json
+      }
+      upsert_assistant_task_reference: {
+        Args: {
+          target_thread_id: string
+          target_user_id: string
+          target_task_type: string
+          target_task_id: string
+          target_label: string
+          target_status: string
+          target_progress: number | null
+          target_detail: string | null
+          target_proposal_id?: string | null
+          target_step_id?: string | null
+          target_artifact_id?: string | null
         }
         Returns: Json
       }

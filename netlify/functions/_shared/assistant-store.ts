@@ -4,6 +4,21 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 
 import type { Database, Json } from "../../../src/lib/supabase/database.types"
 import {
+  buildAssistantAccountCollection,
+  buildAssistantCallCollection,
+  buildAssistantCapabilityHandoffArtifact,
+  buildAssistantContactCollection,
+  buildAssistantOpportunityCollection,
+  disableAssistantArtifactActions,
+  isAssistantArtifactsEnabled,
+  restoreAssistantArtifact,
+  toAssistantPersistedArtifact,
+  type AssistantSerializedArtifact,
+  type AssistantThreadContextDraft,
+} from "./assistant-artifacts"
+import { resolveServerAssistantArtifactCapability } from "./assistant-artifact-capabilities"
+import { parseAssistantCapabilityIntent } from "./assistant-capability-intents"
+import {
   ASSISTANT_PROPOSAL_TTL_MS,
   assertAssistantCapabilityId,
   assertAssistantSafePath,
@@ -14,11 +29,14 @@ import {
   type AssistantProposalRequest,
   type AssistantResourceType,
   type AssistantRisk,
+  type AssistantRouteContext,
   toAssistantTitle,
   toNullableString,
   toOptionalDate,
   toRequiredString,
 } from "./assistant-core"
+import { parseAssistantReadIntent } from "./assistant-read-intents"
+import { normalizeAssistantSearchText, rankAssistantSearch } from "./assistant-search"
 import { AppError, badRequest, forbidden, notFound, tooManyRequests } from "./http"
 import {
   authorizeAccount,
@@ -369,12 +387,20 @@ export async function listAssistantMessages(
     })
     referencesByMessage.set(reference.message_id, items)
   }
+  const artifactsByMessage = await loadAssistantArtifactsForMessages(
+    supabase,
+    thread.workspace_id,
+    thread.id,
+    options.userId,
+    messageIds
+  )
   return {
     messages: (messages ?? []).reverse().map((message) => ({
       content: message.content,
       createdAt: message.created_at,
       id: message.id,
       ordinal: message.ordinal,
+      artifacts: artifactsByMessage.get(message.id) ?? [],
       references: referencesByMessage.get(message.id) ?? [],
       role: message.role,
     })),
@@ -462,7 +488,15 @@ export async function getAssistantRunReplay(
   if (messageError) throw new Error(messageError.message)
   if (proposalsError) throw new Error(proposalsError.message)
   if (referencesError) throw new Error(referencesError.message)
+  const artifactsByMessage = await loadAssistantArtifactsForMessages(
+    supabase,
+    run.workspace_id,
+    run.thread_id,
+    userId,
+    [message.id]
+  )
   return {
+    artifacts: artifactsByMessage.get(message.id) ?? [],
     message,
     proposals: (proposals ?? []).map(serializeAssistantProposal),
     references: (references ?? []).map(toAssistantReference),
@@ -497,21 +531,248 @@ export async function getAssistantHistory(
   return retained.reverse()
 }
 
+export async function getAssistantThreadContext(
+  supabase: SupabaseClient<Database>,
+  threadId: string,
+  options: AssistantAuthorizationOptions
+) {
+  if (!isAssistantArtifactsEnabled()) return null
+  const thread = await authorizeAssistantThread(supabase, threadId, options)
+  const { data, error } = await supabase
+    .from("assistant_thread_context")
+    .select("workspace_id,thread_id,owner_user_id,account_id,opportunity_id,contact_id,call_id,last_artifact_id,source,updated_at")
+    .eq("workspace_id", thread.workspace_id)
+    .eq("thread_id", thread.id)
+    .eq("owner_user_id", options.userId)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return data
+}
+
+export async function getAssistantArtifactById(
+  supabase: SupabaseClient<Database>,
+  artifactId: string,
+  options: AssistantAuthorizationOptions
+) {
+  requireAssistantArtifactsEnabled()
+  const normalizedId = assertAssistantUuid(artifactId, "artifactId")
+  const { data: artifact, error } = await supabase
+    .from("assistant_artifacts")
+    .select("id,workspace_id,thread_id,owner_user_id,message_id,kind,schema_version,position,title,description,status,data,created_at,updated_at")
+    .eq("id", normalizedId)
+    .eq("owner_user_id", options.userId)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!artifact) throw notFound("Conversation result was not found.")
+  await authorizeWorkspace(options.userId, artifact.workspace_id, supabase, { token: options.token })
+  const { data: actions, error: actionError } = await supabase
+    .from("assistant_artifact_actions")
+    .select("id,artifact_id,position,record_key,label,capability_id,behavior,risk,prompt,target_artifact_id,target_account_id,target_opportunity_id,target_contact_id,target_call_id")
+    .eq("artifact_id", artifact.id)
+    .eq("workspace_id", artifact.workspace_id)
+    .eq("thread_id", artifact.thread_id)
+    .eq("owner_user_id", options.userId)
+    .order("position", { ascending: true })
+    .limit(64)
+  if (actionError) throw new Error(actionError.message)
+  const unavailable = await authorizeAssistantArtifactActionTargets(supabase, artifact.workspace_id, actions ?? [])
+  return disableAssistantArtifactActions(
+    restoreAssistantArtifact(artifact, actions ?? []),
+    unavailable
+  )
+}
+
+export async function queryAssistantArtifactById({
+  artifactId,
+  filters,
+  options,
+  search,
+  sort,
+  supabase,
+}: {
+  artifactId: string
+  filters?: Record<string, unknown>
+  options: AssistantAuthorizationOptions
+  search?: unknown
+  sort?: unknown
+  supabase: SupabaseClient<Database>
+}) {
+  const artifact = await getAssistantArtifactById(supabase, artifactId, options)
+  const normalizedSearch = search === undefined || search === null || search === ""
+    ? ""
+    : normalizeAssistantSearchText(assertAssistantText(search, "search", { max: 160 }))
+  const normalizedSort = sort === undefined || sort === null || sort === ""
+    ? "default"
+    : assertAssistantText(sort, "sort", { max: 32 })
+  if (!["default", "label_asc", "label_desc"].includes(normalizedSort)) {
+    throw badRequest("That result sort is not supported.", "assistant_artifact_sort_invalid")
+  }
+  const rawFilters = filters ?? {}
+  if (!isRecord(rawFilters) || Object.keys(rawFilters).some((key) => key !== "kind")) {
+    throw badRequest("That result filter is not supported.", "assistant_artifact_filter_invalid")
+  }
+  const kindFilter = rawFilters.kind === undefined || rawFilters.kind === ""
+    ? null
+    : assertAssistantText(rawFilters.kind, "filterKind", { max: 32 })
+  if (kindFilter && !["account", "opportunity", "contact", "call", "playbook", "other"].includes(kindFilter)) {
+    throw badRequest("That result filter is not supported.", "assistant_artifact_filter_invalid")
+  }
+
+  const records = Array.isArray(artifact.data.records) ? artifact.data.records.filter(isRecord) : []
+  let filtered = records.filter((record) => {
+    if (kindFilter && record.kind !== kindFilter) return false
+    if (!normalizedSearch) return true
+    const searchable = normalizeAssistantSearchText([
+      record.label,
+      record.description,
+      ...(Array.isArray(record.fields) ? record.fields.flatMap((field) => {
+        const value = isRecord(field) ? [field.label, field.value, field.detail] : []
+        return value
+      }) : []),
+    ].join(" "))
+    return normalizedSearch.split(" ").every((token) => searchable.includes(token))
+  })
+  if (normalizedSort !== "default") {
+    filtered = [...filtered].sort((left, right) => {
+      const comparison = String(left.label ?? "").localeCompare(String(right.label ?? ""), undefined, { sensitivity: "base" })
+      return normalizedSort === "label_desc" ? -comparison : comparison
+    })
+  }
+  return {
+    ...artifact,
+    data: { ...artifact.data, records: filtered.slice(0, 25) },
+  }
+}
+
+export async function getAssistantTaskArtifact(
+  supabase: SupabaseClient<Database>,
+  taskReferenceId: string,
+  options: AssistantAuthorizationOptions
+): Promise<AssistantSerializedArtifact> {
+  requireAssistantArtifactsEnabled()
+  const normalizedId = assertAssistantUuid(taskReferenceId, "taskId")
+  const { data: task, error } = await supabase
+    .from("assistant_task_references")
+    .select("id,workspace_id,thread_id,user_id,artifact_id,task_type,task_id,label,status,progress,detail,updated_at")
+    .eq("id", normalizedId)
+    .eq("user_id", options.userId)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!task) throw notFound("Progress update was not found.")
+  await authorizeWorkspace(options.userId, task.workspace_id, supabase, { token: options.token })
+  return {
+    actions: task.artifact_id ? [{
+      artifactId: task.artifact_id,
+      behavior: "open_artifact",
+      capabilityId: "conversation.artifacts.open",
+      id: `open-${task.id}`,
+      label: "Open result",
+      risk: "none",
+      target: {},
+    }] : [],
+    data: {
+      task: {
+        detail: task.detail ?? undefined,
+        progress: task.progress ?? undefined,
+        status: task.status,
+      },
+    },
+    description: task.detail ?? undefined,
+    id: task.id,
+    kind: "task",
+    schemaVersion: 1,
+    status: task.status as AssistantSerializedArtifact["status"],
+    title: task.label,
+  }
+}
+
+export async function prepareAssistantArtifactAction({
+  actionId,
+  artifactId,
+  options,
+  supabase,
+}: {
+  actionId: string
+  artifactId: string
+  options: AssistantAuthorizationOptions
+  supabase: SupabaseClient<Database>
+}) {
+  requireAssistantArtifactsEnabled()
+  const artifact = await getAssistantArtifactById(supabase, artifactId, options)
+  const normalizedActionId = assertAssistantUuid(actionId, "actionId")
+  const { data: action, error } = await supabase
+    .from("assistant_artifact_actions")
+    .select("*")
+    .eq("id", normalizedActionId)
+    .eq("artifact_id", artifact.id)
+    .eq("owner_user_id", options.userId)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!action) throw notFound("Conversation action was not found.")
+
+  const capability = resolveServerAssistantArtifactCapability(action.capability_id)
+  const immutableTarget = {
+    accountId: action.target_account_id,
+    callId: action.target_call_id,
+    contactId: action.target_contact_id,
+    opportunityId: action.target_opportunity_id,
+  }
+  if (
+    action.behavior !== capability.behavior ||
+    action.risk !== capability.risk ||
+    (capability.requiredTarget !== "workspace" && !immutableTarget[capability.requiredTarget])
+  ) {
+    throw new AppError("assistant_action_unavailable", "That action is no longer available.", 409)
+  }
+
+  const target = await authorizePersistedArtifactTarget(supabase, action, options)
+  const reference = target.call
+    ? callReference(target.call)
+    : target.contact
+      ? contactReference(target.contact)
+      : target.opportunity
+        ? opportunityReference(target.opportunity)
+        : target.account
+          ? accountReference(target.account)
+          : null
+  return {
+    capability: {
+      id: capability.id,
+      target: {
+        accountId: action.target_account_id ?? undefined,
+        callId: action.target_call_id ?? undefined,
+        contactId: action.target_contact_id ?? undefined,
+        opportunityId: action.target_opportunity_id ?? undefined,
+      },
+    },
+    reference: reference ? {
+      id: reference.id,
+      kind: toClientReferenceKind(reference.type),
+      label: reference.label,
+      route: reference.route,
+    } : undefined,
+  }
+}
+
 export async function completeAssistantRun({
+  artifacts = [],
   content,
   inputTokens,
   outputTokens,
   readOperations,
   references,
+  resolvedContext,
   run,
   supabase,
   toolRounds,
 }: {
+  artifacts?: AssistantSerializedArtifact[]
   content: string
   inputTokens: number | null
   outputTokens: number | null
   readOperations: number
   references: AssistantReference[]
+  resolvedContext?: AssistantThreadContextDraft
   run: AssistantRunRow
   supabase: SupabaseClient<Database>
   toolRounds: number
@@ -519,7 +780,8 @@ export async function completeAssistantRun({
   const uniqueReferences = Array.from(
     new Map(references.map((reference) => [`${reference.type}:${reference.id}`, reference])).values()
   ).slice(0, 20)
-  const { data, error } = await supabase.rpc("complete_assistant_run", {
+  const artifactPersistenceEnabled = isAssistantArtifactsEnabled()
+  const completionArguments = {
     target_content: content.slice(0, 12000),
     target_input_tokens: inputTokens,
     target_output_tokens: outputTokens,
@@ -533,7 +795,14 @@ export async function completeAssistantRun({
     target_run_id: run.id,
     target_tool_rounds: Math.min(toolRounds, 4),
     target_user_id: run.user_id,
-  })
+  }
+  const { data, error } = artifactPersistenceEnabled
+    ? await supabase.rpc("complete_assistant_run_v2", {
+        ...completionArguments,
+        target_artifacts: artifacts.slice(0, 12).map(toAssistantPersistedArtifact) as unknown as Json,
+        target_context: (resolvedContext ?? {}) as unknown as Json,
+      })
+    : await supabase.rpc("complete_assistant_run", completionArguments)
   if (error) {
     if (error.code === "55000" || error.code === "P0002") {
       throw new AppError("assistant_turn_inactive", "That conversation turn is no longer active.", 409)
@@ -750,6 +1019,205 @@ export async function buildAssistantBriefing(
   }
 }
 
+export async function tryAssistantDeterministicRead({
+  options,
+  routeContext,
+  supabase,
+  text,
+  workspaceId,
+}: {
+  options: AssistantAuthorizationOptions
+  routeContext: AssistantRouteContext
+  supabase: SupabaseClient<Database>
+  text: string
+  workspaceId: string
+}): Promise<{
+  artifacts: AssistantSerializedArtifact[]
+  readOperations: number
+  references: AssistantReference[]
+  resolvedContext: AssistantThreadContextDraft
+  text: string
+} | null> {
+  const intent = parseAssistantReadIntent(text, routeContext)
+  if (!intent) {
+    if (!isAssistantArtifactsEnabled()) return null
+    const capabilityIntent = parseAssistantCapabilityIntent(text, routeContext)
+    if (!capabilityIntent) return null
+    const artifact = buildAssistantCapabilityHandoffArtifact(
+      capabilityIntent.capabilityId,
+      capabilityIntent.target,
+      {
+        description: capabilityIntent.description,
+        label: capabilityIntent.label,
+        title: capabilityIntent.title,
+      }
+    )
+    return {
+      artifacts: [artifact],
+      readOperations: 0,
+      references: [],
+      resolvedContext: {
+        ...capabilityIntent.target,
+        artifactId: artifact.id,
+        source: "explicit",
+      },
+      text: capabilityIntent.text,
+    }
+  }
+
+  let account: { id: string; name: string } | null = null
+  if (intent.scopedAccountId) {
+    const authorized = await authorizeAccount(options.userId, intent.scopedAccountId, supabase, { token: options.token })
+    if (authorized.workspace_id !== workspaceId) throw forbidden()
+    const { data, error } = await supabase
+      .from("accounts")
+      .select("id,name")
+      .eq("workspace_id", workspaceId)
+      .eq("id", authorized.id)
+      .is("archived_at", null)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    account = data
+    if (!account) {
+      throw new AppError(
+        "assistant_context_unavailable",
+        "That account is no longer active. Choose another account and try again.",
+        409
+      )
+    }
+  } else if (intent.accountQuery) {
+    const resolution = await resolveAssistantAccount(supabase, workspaceId, intent.accountQuery)
+    // Ambiguous or genuinely unmatched language stays with the AI path. It can
+    // ask a more natural clarification instead of this strict router guessing.
+    if (!resolution || resolution.ambiguous) return null
+    account = resolution.account
+  }
+
+  if (intent.kind === "accounts") {
+    const { data, error, count } = await supabase
+      .from("accounts")
+      .select("id,name,website,industry,region,updated_at", { count: "exact" })
+      .eq("workspace_id", workspaceId)
+      .is("archived_at", null)
+      .order("updated_at", { ascending: false })
+      .limit(12)
+    if (error) throw new Error(error.message)
+    const rows = data ?? []
+    const artifact = buildAssistantAccountCollection(rows, count ?? rows.length)
+    return {
+      artifacts: [artifact],
+      readOperations: 1,
+      references: rows.map(accountReference),
+      resolvedContext: { artifactId: artifact.id, source: "selection" },
+      text: formatRecordList({
+        count: count ?? rows.length,
+        empty: "There are no active accounts in this workspace yet.",
+        heading: (total) => `You have ${total} active ${total === 1 ? "account" : "accounts"}.`,
+        rows: rows.map((row) => formatListLine(row.name, row.industry || row.region)),
+      }),
+    }
+  }
+
+  if (intent.kind === "opportunities") {
+    let query = supabase
+      .from("opportunities")
+      .select("id,account_id,name,stage,amount,close_date,next_step,updated_at", { count: "exact" })
+      .eq("workspace_id", workspaceId)
+      .is("archived_at", null)
+      .order("updated_at", { ascending: false })
+      .limit(20)
+    if (account) query = query.eq("account_id", account.id)
+    const { data, error, count } = await query
+    if (error) throw new Error(error.message)
+    const rows = data ?? []
+    const artifact = buildAssistantOpportunityCollection(rows, count ?? rows.length, account)
+    return {
+      artifacts: [artifact],
+      readOperations: 1 + (intent.accountQuery ? 1 : 0),
+      references: [
+        ...(account ? [accountReference(account)] : []),
+        ...rows.map(opportunityReference),
+      ].slice(0, 20),
+      resolvedContext: deterministicReadContext(intent, account, artifact.id),
+      text: formatRecordList({
+        count: count ?? rows.length,
+        empty: account
+          ? `There are no active opportunities for ${account.name}.`
+          : "There are no active opportunities in this workspace yet.",
+        heading: (total) => account
+          ? `You have ${total} active ${total === 1 ? "opportunity" : "opportunities"} for ${account.name}.`
+          : `You have ${total} active ${total === 1 ? "opportunity" : "opportunities"}.`,
+        rows: rows.map((row) => formatListLine(row.name, row.stage)),
+      }),
+    }
+  }
+
+  if (intent.kind === "contacts") {
+    let query = supabase
+      .from("contacts")
+      .select("id,account_id,full_name,job_title,department,updated_at", { count: "exact" })
+      .eq("workspace_id", workspaceId)
+      .is("archived_at", null)
+      .order("updated_at", { ascending: false })
+      .limit(20)
+    if (account) query = query.eq("account_id", account.id)
+    const { data, error, count } = await query
+    if (error) throw new Error(error.message)
+    const rows = data ?? []
+    const artifact = buildAssistantContactCollection(rows, count ?? rows.length, account)
+    return {
+      artifacts: [artifact],
+      readOperations: 1 + (intent.accountQuery ? 1 : 0),
+      references: [
+        ...(account ? [accountReference(account)] : []),
+        ...rows.map(contactReference),
+      ].slice(0, 20),
+      resolvedContext: deterministicReadContext(intent, account, artifact.id),
+      text: formatRecordList({
+        count: count ?? rows.length,
+        empty: account
+          ? `There are no active contacts saved for ${account.name}.`
+          : "There are no active contacts in this workspace yet.",
+        heading: (total) => account
+          ? `You have ${total} active ${total === 1 ? "contact" : "contacts"} for ${account.name}.`
+          : `You have ${total} active ${total === 1 ? "contact" : "contacts"}.`,
+        rows: rows.map((row) => formatListLine(row.full_name, row.job_title || row.department)),
+      }),
+    }
+  }
+
+  let query = supabase
+    .from("calls")
+    .select("id,account_id,opportunity_id,title,call_type,status,started_at,created_at", { count: "exact" })
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(12)
+  if (account) query = query.eq("account_id", account.id)
+  const { data, error, count } = await query
+  if (error) throw new Error(error.message)
+  const rows = data ?? []
+  const artifact = buildAssistantCallCollection(rows, count ?? rows.length, account)
+  return {
+    artifacts: [artifact],
+    readOperations: 1 + (intent.accountQuery ? 1 : 0),
+    references: [
+      ...(account ? [accountReference(account)] : []),
+      ...rows.map(callReference),
+    ].slice(0, 20),
+    resolvedContext: deterministicReadContext(intent, account, artifact.id),
+    text: formatRecordList({
+      count: count ?? rows.length,
+      empty: account
+        ? `There are no calls saved for ${account.name} yet.`
+        : "There are no calls saved in this workspace yet.",
+      heading: (total) => account
+        ? `I found ${total} ${total === 1 ? "call" : "calls"} for ${account.name}.`
+        : `I found ${total} ${total === 1 ? "call" : "calls"}.`,
+      rows: rows.map((row) => formatListLine(row.title, row.status)),
+    }),
+  }
+}
+
 export async function executeAssistantReadTool({
   arguments: rawArguments,
   name,
@@ -774,7 +1242,7 @@ export async function executeAssistantReadTool({
       .order("name")
       .limit(200)
     if (error) throw new Error(error.message)
-    const matches = localSearch(data ?? [], query, ["name", "website", "industry"], 12)
+    const matches = localSearch(data ?? [], query, ["name", "website", "industry", "region"], 12)
     return toolResult(matches, matches.map((item) => accountReference(item)))
   }
   if (name === "get_account") {
@@ -799,8 +1267,51 @@ export async function executeAssistantReadTool({
       .order("updated_at", { ascending: false })
       .limit(200)
     if (error) throw new Error(error.message)
-    const matches = localSearch(data ?? [], query, ["name", "stage", "next_step"], 12)
+    const accountIds = Array.from(new Set((data ?? []).map((opportunity) => opportunity.account_id)))
+    let accounts: Array<{ id: string; name: string; website: string | null; region: string }> = []
+    if (accountIds.length > 0) {
+      const { data: accountRows, error: accountError } = await supabase
+        .from("accounts")
+        .select("id,name,website,region")
+        .eq("workspace_id", workspaceId)
+        .is("archived_at", null)
+        .in("id", accountIds)
+        .limit(200)
+      if (accountError) throw new Error(accountError.message)
+      accounts = accountRows ?? []
+    }
+    const accountsById = new Map(accounts.map((account) => [account.id, account]))
+    const searchable = (data ?? []).map((opportunity) => {
+      const account = accountsById.get(opportunity.account_id)
+      return {
+        ...opportunity,
+        account_name: account?.name ?? null,
+        account_region: account?.region ?? null,
+        account_website: account?.website ?? null,
+      }
+    })
+    const matches = localSearch(
+      searchable,
+      query,
+      ["name", "stage", "next_step", "account_name", "account_website", "account_region"],
+      12
+    )
     return toolResult(matches, matches.map((item) => opportunityReference(item)))
+  }
+  if (name === "list_account_opportunities") {
+    const accountId = assertAssistantUuid(args.account_id, "accountId")
+    const account = await authorizeAccount(options.userId, accountId, supabase, { token: options.token })
+    if (account.workspace_id !== workspaceId) throw forbidden()
+    const { data, error } = await supabase
+      .from("opportunities")
+      .select("id,account_id,name,stage,amount,close_date,next_step,coverage_score,missing_count,weak_count,updated_at")
+      .eq("workspace_id", workspaceId)
+      .eq("account_id", account.id)
+      .is("archived_at", null)
+      .order("updated_at", { ascending: false })
+      .limit(50)
+    if (error) throw new Error(error.message)
+    return toolResult(data ?? [], (data ?? []).map(opportunityReference))
   }
   if (name === "get_opportunity") {
     const opportunityId = assertAssistantUuid(args.opportunity_id, "opportunityId")
@@ -814,6 +1325,70 @@ export async function executeAssistantReadTool({
     if (error) throw new Error(error.message)
     return toolResult(data, [opportunityReference(data)])
   }
+  if (name === "list_opportunity_contacts") {
+    const opportunityId = assertAssistantUuid(args.opportunity_id, "opportunityId")
+    const opportunity = await authorizeOpportunity(options.userId, opportunityId, supabase, { token: options.token })
+    if (opportunity.workspace_id !== workspaceId) throw forbidden()
+    const { data: relationships, error: relationshipError } = await supabase
+      .from("opportunity_contacts")
+      .select("contact_id,buying_roles,influence,relationship_strength,stance,is_primary,notes,updated_at")
+      .eq("workspace_id", workspaceId)
+      .eq("opportunity_id", opportunity.id)
+      .order("is_primary", { ascending: false })
+      .limit(100)
+    if (relationshipError) throw new Error(relationshipError.message)
+    const contactIds = (relationships ?? []).map((relationship) => relationship.contact_id)
+    if (contactIds.length === 0) return toolResult([], [])
+    const { data: contacts, error: contactError } = await supabase
+      .from("contacts")
+      .select("id,account_id,full_name,preferred_name,job_title,department,seniority,employment_status,location,updated_at")
+      .eq("workspace_id", workspaceId)
+      .is("archived_at", null)
+      .in("id", contactIds)
+      .limit(100)
+    if (contactError) throw new Error(contactError.message)
+    const contactsById = new Map((contacts ?? []).map((contact) => [contact.id, contact]))
+    const output = (relationships ?? []).flatMap((relationship) => {
+      const contact = contactsById.get(relationship.contact_id)
+      return contact ? [{ ...contact, opportunity_relationship: relationship }] : []
+    })
+    return toolResult(output, output.map(contactReference))
+  }
+  if (name === "list_opportunity_calls") {
+    const opportunityId = assertAssistantUuid(args.opportunity_id, "opportunityId")
+    const opportunity = await authorizeOpportunity(options.userId, opportunityId, supabase, { token: options.token })
+    if (opportunity.workspace_id !== workspaceId) throw forbidden()
+    const { data, error } = await supabase
+      .from("calls")
+      .select("id,account_id,opportunity_id,title,call_type,status,started_at,ended_at,duration_seconds,updated_at")
+      .eq("workspace_id", workspaceId)
+      .eq("opportunity_id", opportunity.id)
+      .order("created_at", { ascending: false })
+      .limit(30)
+    if (error) throw new Error(error.message)
+    return toolResult(data ?? [], (data ?? []).map(callReference))
+  }
+  if (name === "list_opportunity_playbooks") {
+    const opportunityId = assertAssistantUuid(args.opportunity_id, "opportunityId")
+    const opportunity = await authorizeOpportunity(options.userId, opportunityId, supabase, { token: options.token })
+    if (opportunity.workspace_id !== workspaceId) throw forbidden()
+    const { data: assignments, error: assignmentError } = await supabase
+      .from("opportunity_playbooks")
+      .select("playbook_id")
+      .eq("opportunity_id", opportunity.id)
+      .limit(50)
+    if (assignmentError) throw new Error(assignmentError.message)
+    const playbookIds = (assignments ?? []).map((assignment) => assignment.playbook_id)
+    if (playbookIds.length === 0) return toolResult([], [])
+    const { data, error } = await supabase
+      .from("playbooks")
+      .select("id,workspace_id,slug,name,description,best_for,evidence_standard,is_system,updated_at")
+      .in("id", playbookIds)
+      .limit(50)
+    if (error) throw new Error(error.message)
+    const scoped = (data ?? []).filter((playbook) => playbook.is_system || playbook.workspace_id === workspaceId)
+    return toolResult(scoped, [])
+  }
   if (name === "search_contacts") {
     const query = normalizeSearchQuery(args.query)
     const { data, error } = await supabase
@@ -826,6 +1401,21 @@ export async function executeAssistantReadTool({
     if (error) throw new Error(error.message)
     const matches = localSearch(data ?? [], query, ["full_name", "preferred_name", "job_title", "department"], 12)
     return toolResult(matches, matches.map((item) => contactReference(item)))
+  }
+  if (name === "list_account_contacts") {
+    const accountId = assertAssistantUuid(args.account_id, "accountId")
+    const account = await authorizeAccount(options.userId, accountId, supabase, { token: options.token })
+    if (account.workspace_id !== workspaceId) throw forbidden()
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id,account_id,full_name,preferred_name,job_title,department,seniority,employment_status,location,updated_at")
+      .eq("workspace_id", workspaceId)
+      .eq("account_id", account.id)
+      .is("archived_at", null)
+      .order("full_name")
+      .limit(100)
+    if (error) throw new Error(error.message)
+    return toolResult(data ?? [], (data ?? []).map(contactReference))
   }
   if (name === "get_contact") {
     const contactId = assertAssistantUuid(args.contact_id, "contactId")
@@ -848,6 +1438,20 @@ export async function executeAssistantReadTool({
       .limit(12)
     if (error) throw new Error(error.message)
     return toolResult(data ?? [], (data ?? []).map((item) => callReference(item)))
+  }
+  if (name === "list_account_calls") {
+    const accountId = assertAssistantUuid(args.account_id, "accountId")
+    const account = await authorizeAccount(options.userId, accountId, supabase, { token: options.token })
+    if (account.workspace_id !== workspaceId) throw forbidden()
+    const { data, error } = await supabase
+      .from("calls")
+      .select("id,account_id,opportunity_id,title,call_type,status,started_at,ended_at,duration_seconds,updated_at")
+      .eq("workspace_id", workspaceId)
+      .eq("account_id", account.id)
+      .order("created_at", { ascending: false })
+      .limit(30)
+    if (error) throw new Error(error.message)
+    return toolResult(data ?? [], (data ?? []).map(callReference))
   }
   if (name === "search_call_transcript") {
     const callId = assertAssistantUuid(args.call_id, "callId")
@@ -1132,17 +1736,89 @@ function serializeAssistantPreference(value: {
 }
 
 function normalizeSearchQuery(value: unknown) {
-  return assertAssistantText(value, "query", { max: 160 }).toLocaleLowerCase()
+  return assertAssistantText(value, "query", { max: 160 })
 }
 
 function localSearch<T extends Record<string, unknown>>(rows: T[], query: string, keys: string[], limit: number) {
-  return rows
-    .filter((row) => keys.some((key) =>
-      truncateUtf8(String(row[key] ?? ""), ASSISTANT_TOOL_FIELD_BYTE_LIMIT)
-        .toLocaleLowerCase()
-        .includes(query)
-    ))
-    .slice(0, limit)
+  const boundedRows = rows.map((row) => Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [
+      key,
+      keys.includes(key)
+        ? truncateUtf8(String(value ?? ""), ASSISTANT_TOOL_FIELD_BYTE_LIMIT)
+        : value,
+    ])
+  ) as T)
+  return rankAssistantSearch(boundedRows, query, keys, limit).map((match) => match.item)
+}
+
+async function resolveAssistantAccount(
+  supabase: SupabaseClient<Database>,
+  workspaceId: string,
+  query: string
+) {
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("id,name,website,industry,region")
+    .eq("workspace_id", workspaceId)
+    .is("archived_at", null)
+    .order("name")
+    .limit(250)
+  if (error) throw new Error(error.message)
+  const matches = rankAssistantSearch(
+    data ?? [],
+    query,
+    ["name", "website", "industry", "region"],
+    3
+  )
+  if (!matches[0]) return null
+  const ambiguous = Boolean(
+    matches[1] &&
+    matches[0].score - matches[1].score < 80
+  )
+  return {
+    account: { id: matches[0].item.id, name: matches[0].item.name },
+    ambiguous,
+  }
+}
+
+function formatRecordList({
+  count,
+  empty,
+  heading,
+  rows,
+}: {
+  count: number
+  empty: string
+  heading: (count: number) => string
+  rows: string[]
+}) {
+  if (count === 0 || rows.length === 0) return empty
+  const visible = rows.slice(0, 12)
+  const remainder = Math.max(0, count - visible.length)
+  return [
+    heading(count),
+    "",
+    ...visible.map((row) => `- ${row}`),
+    ...(remainder > 0 ? [`- ${remainder} more`] : []),
+  ].join("\n")
+}
+
+function formatListLine(primary: unknown, secondary: unknown) {
+  const title = String(primary ?? "").trim() || "Untitled"
+  const detail = String(secondary ?? "").trim()
+  return detail ? `${title} — ${detail}` : title
+}
+
+function deterministicReadContext(
+  intent: { accountQuery: string | null; scopedAccountId: string | null },
+  account: { id: string; name: string } | null,
+  artifactId: string
+): AssistantThreadContextDraft {
+  return {
+    accountId: account?.id,
+    artifactId,
+    source: intent.accountQuery ? "explicit" : intent.scopedAccountId ? "route" : "selection",
+  }
 }
 
 function toolResult(output: unknown, references: AssistantReference[]) {
@@ -1314,6 +1990,232 @@ function truncateUtf8(value: string, maxBytes: number) {
     else high = middle - 1
   }
   return `${value.slice(0, low).trimEnd()}…`
+}
+
+async function loadAssistantArtifactsForMessages(
+  supabase: SupabaseClient<Database>,
+  workspaceId: string,
+  threadId: string,
+  userId: string,
+  messageIds: string[]
+) {
+  const byMessage = new Map<string, AssistantSerializedArtifact[]>()
+  if (!isAssistantArtifactsEnabled() || messageIds.length === 0) return byMessage
+  const { data: artifacts, error } = await supabase
+    .from("assistant_artifacts")
+    .select("id,workspace_id,thread_id,owner_user_id,message_id,kind,schema_version,position,title,description,status,data,created_at,updated_at")
+    .eq("workspace_id", workspaceId)
+    .eq("thread_id", threadId)
+    .eq("owner_user_id", userId)
+    .in("message_id", messageIds)
+    .order("position", { ascending: true })
+    .limit(Math.min(400, messageIds.length * 12))
+  if (error) throw new Error(error.message)
+  const artifactIds = (artifacts ?? []).map((artifact) => artifact.id)
+  let actions: Database["public"]["Tables"]["assistant_artifact_actions"]["Row"][] = []
+  if (artifactIds.length > 0) {
+    const { data, error: actionError } = await supabase
+      .from("assistant_artifact_actions")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .eq("thread_id", threadId)
+      .eq("owner_user_id", userId)
+      .in("artifact_id", artifactIds)
+      .order("position", { ascending: true })
+      .limit(Math.min(1200, artifactIds.length * 64))
+    if (actionError) throw new Error(actionError.message)
+    actions = data ?? []
+  }
+  const actionsByArtifact = new Map<string, typeof actions>()
+  for (const action of actions) {
+    const existing = actionsByArtifact.get(action.artifact_id) ?? []
+    existing.push(action)
+    actionsByArtifact.set(action.artifact_id, existing)
+  }
+  const unavailable = await authorizeAssistantArtifactActionTargets(supabase, workspaceId, actions)
+  for (const artifact of artifacts ?? []) {
+    const existing = byMessage.get(artifact.message_id) ?? []
+    existing.push(disableAssistantArtifactActions(
+      restoreAssistantArtifact(artifact, actionsByArtifact.get(artifact.id) ?? []),
+      unavailable
+    ))
+    byMessage.set(artifact.message_id, existing)
+  }
+  return byMessage
+}
+
+async function authorizeAssistantArtifactActionTargets(
+  supabase: SupabaseClient<Database>,
+  workspaceId: string,
+  actions: Array<{
+    capability_id: string | null
+    id: string
+    target_account_id: string | null
+    target_call_id: string | null
+    target_contact_id: string | null
+    target_opportunity_id: string | null
+  }>
+) {
+  const unavailable = new Set<string>()
+  if (actions.length === 0) return unavailable
+  const accountIds = uniqueIds(actions.flatMap((action) => action.target_account_id ? [action.target_account_id] : []))
+  const opportunityIds = uniqueIds(actions.flatMap((action) => action.target_opportunity_id ? [action.target_opportunity_id] : []))
+  const contactIds = uniqueIds(actions.flatMap((action) => action.target_contact_id ? [action.target_contact_id] : []))
+  const callIds = uniqueIds(actions.flatMap((action) => action.target_call_id ? [action.target_call_id] : []))
+
+  const [accounts, opportunities, contacts, calls] = await Promise.all([
+    accountIds.length ? supabase.from("accounts").select("id,workspace_id,archived_at").eq("workspace_id", workspaceId).in("id", accountIds) : Promise.resolve({ data: [], error: null }),
+    opportunityIds.length ? supabase.from("opportunities").select("id,workspace_id,account_id,archived_at").eq("workspace_id", workspaceId).in("id", opportunityIds) : Promise.resolve({ data: [], error: null }),
+    contactIds.length ? supabase.from("contacts").select("id,workspace_id,account_id,archived_at").eq("workspace_id", workspaceId).in("id", contactIds) : Promise.resolve({ data: [], error: null }),
+    callIds.length ? supabase.from("calls").select("id,workspace_id,account_id,opportunity_id").eq("workspace_id", workspaceId).in("id", callIds) : Promise.resolve({ data: [], error: null }),
+  ])
+  for (const result of [accounts, opportunities, contacts, calls]) {
+    if (result.error) throw new Error(result.error.message)
+  }
+  const accountById = new Map((accounts.data ?? []).map((row) => [row.id, row]))
+  const opportunityById = new Map((opportunities.data ?? []).map((row) => [row.id, row]))
+  const contactById = new Map((contacts.data ?? []).map((row) => [row.id, row]))
+  const callById = new Map((calls.data ?? []).map((row) => [row.id, row]))
+
+  for (const action of actions) {
+    let capability
+    try {
+      capability = resolveServerAssistantArtifactCapability(action.capability_id ?? "")
+    } catch {
+      unavailable.add(action.id)
+      continue
+    }
+    const target = {
+      accountId: action.target_account_id,
+      callId: action.target_call_id,
+      contactId: action.target_contact_id,
+      opportunityId: action.target_opportunity_id,
+    }
+    if (capability.requiredTarget !== "workspace" && !target[capability.requiredTarget]) {
+      unavailable.add(action.id)
+      continue
+    }
+    const account = target.accountId ? accountById.get(target.accountId) : null
+    const opportunity = target.opportunityId ? opportunityById.get(target.opportunityId) : null
+    const contact = target.contactId ? contactById.get(target.contactId) : null
+    const call = target.callId ? callById.get(target.callId) : null
+    const derivedAccountIds = [
+      account?.id,
+      opportunity?.account_id,
+      contact?.account_id,
+      call?.account_id,
+    ].filter((value): value is string => Boolean(value))
+    if (
+      (target.accountId && (!account || account.archived_at)) ||
+      (target.opportunityId && (!opportunity || opportunity.archived_at)) ||
+      (target.contactId && (!contact || contact.archived_at)) ||
+      (target.callId && !call) ||
+      new Set(derivedAccountIds).size > 1 ||
+      (opportunity && call && opportunity.id !== call.opportunity_id)
+    ) unavailable.add(action.id)
+  }
+  return unavailable
+}
+
+function uniqueIds(values: string[]) {
+  return Array.from(new Set(values)).slice(0, 1000)
+}
+
+async function authorizePersistedArtifactTarget(
+  supabase: SupabaseClient<Database>,
+  action: Database["public"]["Tables"]["assistant_artifact_actions"]["Row"],
+  options: AssistantAuthorizationOptions
+) {
+  let account: Record<string, unknown> | null = null
+  let opportunity: Record<string, unknown> | null = null
+  let contact: Record<string, unknown> | null = null
+  let call: Record<string, unknown> | null = null
+  let canonicalAccountId: string | null = null
+  let canonicalOpportunityId: string | null = null
+
+  if (action.target_call_id) {
+    const scope = await authorizeCall(options.userId, action.target_call_id, supabase, { token: options.token })
+    if (scope.workspace_id !== action.workspace_id) throw forbidden()
+    const { data, error } = await supabase
+      .from("calls")
+      .select("id,workspace_id,account_id,opportunity_id,title,status")
+      .eq("id", scope.id)
+      .single()
+    if (error) throw new Error(error.message)
+    call = data
+    canonicalAccountId = data.account_id
+    canonicalOpportunityId = data.opportunity_id
+  }
+  if (action.target_opportunity_id) {
+    const scope = await authorizeOpportunity(options.userId, action.target_opportunity_id, supabase, { token: options.token })
+    if (
+      scope.workspace_id !== action.workspace_id ||
+      (canonicalAccountId && canonicalAccountId !== scope.account_id) ||
+      (canonicalOpportunityId && canonicalOpportunityId !== scope.id)
+    ) throw forbidden()
+    const { data, error } = await supabase
+      .from("opportunities")
+      .select("id,workspace_id,account_id,name,archived_at")
+      .eq("id", scope.id)
+      .single()
+    if (error) throw new Error(error.message)
+    if (data.archived_at) throw new AppError("assistant_record_archived", "That opportunity is archived.", 409)
+    opportunity = data
+    canonicalAccountId = data.account_id
+    canonicalOpportunityId = data.id
+  }
+  if (action.target_contact_id) {
+    const scope = await authorizeContact(options.userId, action.target_contact_id, supabase, { token: options.token })
+    if (
+      scope.workspace_id !== action.workspace_id ||
+      (canonicalAccountId && canonicalAccountId !== scope.account_id)
+    ) throw forbidden()
+    if (scope.archived_at) throw new AppError("assistant_record_archived", "That contact is archived.", 409)
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id,workspace_id,account_id,full_name,archived_at")
+      .eq("id", scope.id)
+      .single()
+    if (error) throw new Error(error.message)
+    contact = data
+    canonicalAccountId = data.account_id
+  }
+  if (action.target_account_id) {
+    const scope = await authorizeAccount(options.userId, action.target_account_id, supabase, { token: options.token })
+    if (scope.workspace_id !== action.workspace_id || (canonicalAccountId && canonicalAccountId !== scope.id)) {
+      throw forbidden()
+    }
+    const { data, error } = await supabase
+      .from("accounts")
+      .select("id,workspace_id,name,archived_at")
+      .eq("id", scope.id)
+      .single()
+    if (error) throw new Error(error.message)
+    if (data.archived_at) throw new AppError("assistant_record_archived", "That account is archived.", 409)
+    account = data
+    canonicalAccountId = data.id
+  }
+  if (canonicalAccountId && !account) {
+    const { data, error } = await supabase
+      .from("accounts")
+      .select("id,workspace_id,name,archived_at")
+      .eq("workspace_id", action.workspace_id)
+      .eq("id", canonicalAccountId)
+      .single()
+    if (error) throw new Error(error.message)
+    if (data.archived_at) throw new AppError("assistant_record_archived", "That account is archived.", 409)
+    account = data
+  }
+  return { account, call, contact, opportunity }
+}
+
+function requireAssistantArtifactsEnabled() {
+  if (isAssistantArtifactsEnabled()) return
+  throw new AppError(
+    "assistant_artifacts_unavailable",
+    "Interactive conversation results are temporarily unavailable. You can still ask SalesFrame in the conversation.",
+    503
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
