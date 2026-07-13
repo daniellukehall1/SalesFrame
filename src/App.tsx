@@ -174,6 +174,7 @@ import {
   type CallCaptureStatus,
 } from "@/hooks/use-call-capture"
 import { useMeetingBotCapture } from "@/hooks/use-meeting-bot-capture"
+import { useAssistantVoiceInput } from "@/hooks/use-assistant-voice-input"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   getMeetingAudioDisplayOptions,
@@ -196,6 +197,12 @@ import { formatCurrencyAmount } from "@/lib/currency-utils"
 import { makeFailedRowsCsv, type CsvImportType } from "@/lib/csv-import"
 import { reportClientError } from "@/lib/client-error-reporting"
 import { normalizeCloseDateForPersistence } from "@/lib/date-utils"
+import {
+  buildConversationBriefing,
+  buildConversationContextualActions,
+} from "@/lib/conversation-mode"
+import { getAssistantCapability } from "@/lib/assistant-capabilities"
+import type { AssistantMessageReference, AssistantRouteContext, InterfaceMode } from "@/lib/assistant-types"
 import {
   getUserFacingErrorMessage,
   isPermissionDeniedError,
@@ -235,6 +242,7 @@ import {
   getBulkImportStatus,
   getMeetingBotSessionForCall,
   getOpenAiKeyStatus,
+  getAssistantWorkspacePreference,
   getWorkspaceSessionPolicy,
   getWorkspaceSessionStatus,
   recordWorkspaceSessionActivity,
@@ -252,6 +260,7 @@ import {
   refreshNextCallBrief,
   requestSellerDomainResearch,
   saveOpenAiKey,
+  saveAssistantWorkspacePreference,
   saveWorkspaceSessionPolicy,
   meetingBotClientApi,
   SalesFrameFunctionError,
@@ -474,6 +483,11 @@ const MarketingLandingPage = React.lazy(() =>
 const PublicMarketingPage = React.lazy(() =>
   import("@/components/public-marketing-page").then((module) => ({ default: module.PublicMarketingPage }))
 )
+const ConversationModeShell = React.lazy(() =>
+  import("@/components/conversation-mode-shell").then((module) => ({
+    default: module.ConversationModeShell,
+  }))
+)
 const LiveCoachPopoutWindow = React.lazy(() => import("@/components/live-coach-popout-window"))
 const CsvImportDialog = React.lazy(() =>
   import("@/components/csv-import-dialog").then((module) => ({ default: module.CsvImportDialog }))
@@ -686,10 +700,14 @@ const mobileStartCallViews = [
   ...breadcrumbPlaybookDetailViews,
 ]
 const sellerDomainLookupDebounceMs = 2000
+const conversationUiEnabled = import.meta.env.DEV || import.meta.env.VITE_CONVERSATION_UI_ENABLED === "true"
 const colorModeStorageKey = "salesframe.color-mode"
 const captureSettingsStorageKey = "salesframe.capture-settings"
 const activeWorkspaceStorageKey = "salesframe.active-workspace"
+const workspaceInterfaceModeStorageKey = "salesframe.interface-mode"
 const quickContactPrimaryToken = "__quick_contact_draft__"
+
+type WorkspaceInterfaceMode = InterfaceMode
 
 type CaptureSettings = {
   browserTab: boolean
@@ -710,6 +728,39 @@ function getStoredActiveWorkspaceId(userId: string) {
     return window.localStorage.getItem(`${activeWorkspaceStorageKey}.${userId}`) ?? ""
   } catch {
     return ""
+  }
+}
+
+function getWorkspaceInterfaceModeStorageKey(userId: string, workspaceId: string) {
+  return `${workspaceInterfaceModeStorageKey}.${userId}.${workspaceId}`
+}
+
+function readStoredWorkspaceInterfaceMode(userId: string, workspaceId: string): WorkspaceInterfaceMode {
+  if (typeof window === "undefined" || !userId || !workspaceId) return "workspace"
+
+  try {
+    return window.localStorage.getItem(getWorkspaceInterfaceModeStorageKey(userId, workspaceId)) === "conversation"
+      ? "conversation"
+      : "workspace"
+  } catch {
+    return "workspace"
+  }
+}
+
+function normalizeWorkspaceInterfaceMode(
+  value: unknown,
+  fallback: WorkspaceInterfaceMode = "workspace"
+): WorkspaceInterfaceMode {
+  return value === "conversation" || value === "workspace" ? value : fallback
+}
+
+function writeStoredWorkspaceInterfaceMode(userId: string, workspaceId: string, mode: WorkspaceInterfaceMode) {
+  if (typeof window === "undefined" || !userId || !workspaceId) return
+
+  try {
+    window.localStorage.setItem(getWorkspaceInterfaceModeStorageKey(userId, workspaceId), mode)
+  } catch {
+    // The in-memory mode still works when browser storage is unavailable.
   }
 }
 
@@ -808,6 +859,50 @@ function getPublicAuthRouteFromPath(): PublicAuthRoute {
   if (isProtectedRoutePath(window.location.pathname)) return "login"
 
   return "landing"
+}
+
+function applyPublicAuthPageMetadata(mode: "login" | "signup" | "recovery") {
+  const title = mode === "signup"
+    ? "Create account · SalesFrame"
+    : mode === "recovery"
+      ? "Reset password · SalesFrame"
+      : "Sign in · SalesFrame"
+  const description = mode === "signup"
+    ? "Create a SalesFrame workspace for real-time, methodology-aware sales coaching."
+    : mode === "recovery"
+      ? "Reset the password for your private SalesFrame workspace."
+      : "Sign in to your private SalesFrame workspace."
+  const canonicalUrl = `https://salesframe.ai/${mode === "signup" ? "signup" : "login"}`
+  const setMeta = (selector: string, attribute: "content" | "href", value: string) => {
+    document.head.querySelector(selector)?.setAttribute(attribute, value)
+  }
+
+  document.title = title
+  setMeta('meta[name="description"]', "content", description)
+  setMeta('meta[name="robots"]', "content", "noindex, nofollow, noarchive")
+  setMeta('link[rel="canonical"]', "href", canonicalUrl)
+  setMeta('meta[property="og:url"]', "content", canonicalUrl)
+  setMeta('meta[property="og:title"]', "content", title)
+  setMeta('meta[property="og:description"]', "content", description)
+  setMeta('meta[name="twitter:title"]', "content", title)
+  setMeta('meta[name="twitter:description"]', "content", description)
+  document.getElementById("salesframe-public-page-schema")?.remove()
+}
+
+function applyAuthenticatedPageMetadata(title: string) {
+  const setMeta = (selector: string, attribute: "content" | "href", value: string) => {
+    document.head.querySelector(selector)?.setAttribute(attribute, value)
+  }
+
+  setMeta('meta[name="description"]', "content", "Private SalesFrame workspace.")
+  setMeta('meta[name="robots"]', "content", "noindex, nofollow, noarchive")
+  setMeta('link[rel="canonical"]', "href", "https://salesframe.ai/app")
+  setMeta('meta[property="og:url"]', "content", "https://salesframe.ai/app")
+  setMeta('meta[property="og:title"]', "content", title)
+  setMeta('meta[property="og:description"]', "content", "Private SalesFrame workspace.")
+  setMeta('meta[name="twitter:title"]', "content", title)
+  setMeta('meta[name="twitter:description"]', "content", "Private SalesFrame workspace.")
+  document.getElementById("salesframe-public-page-schema")?.remove()
 }
 
 function isPublicLandingRouteOverride() {
@@ -2465,6 +2560,10 @@ function App() {
   const [workspaceDataState, setWorkspaceDataState] = React.useState<WorkspaceDataState>("loading")
   const [workspaceErrorMessage, setWorkspaceErrorMessage] = React.useState("")
   const [workspaceRefreshToken, setWorkspaceRefreshToken] = React.useState(0)
+  const [workspaceInterfaceMode, setWorkspaceInterfaceMode] = React.useState<WorkspaceInterfaceMode>("workspace")
+  const [conversationCanvasOpen, setConversationCanvasOpen] = React.useState(false)
+  const [conversationWorkspaceSwitcherOpen, setConversationWorkspaceSwitcherOpen] = React.useState(false)
+  const [conversationSignOutOpen, setConversationSignOutOpen] = React.useState(false)
   const [mobileStartCallScrolledPastPrimaryAction, setMobileStartCallScrolledPastPrimaryAction] = React.useState(false)
   const [transcript, setTranscript] = React.useState<Opportunity["transcript"]>([])
   const [speakerIdentities, setSpeakerIdentities] = React.useState<CallSpeakerIdentityMap>({})
@@ -2505,6 +2604,7 @@ function App() {
   const [liveGuidanceByCallId, setLiveGuidanceByCallId] = React.useState<Record<string, LiveGuidance>>({})
   const [postCallGeneratingCallId, setPostCallGeneratingCallId] = React.useState("")
   const [postCallError, setPostCallError] = React.useState<{ callId: string; message: string } | null>(null)
+  const assistantVoice = useAssistantVoiceInput({ workspaceId: activeWorkspaceId })
   const callCapture = useCallCapture()
   const meetingBotCapture = useMeetingBotCapture({
     api: meetingBotClientApi,
@@ -2557,6 +2657,8 @@ function App() {
     initialAuthenticatedRouteRef.current ? getAuthenticatedRoutePath(initialAuthenticatedRouteRef.current) : ""
   )
   const navigationScrollResetTokenRef = React.useRef(0)
+  const workspaceInterfaceModeChangeRef = React.useRef(0)
+  const workspaceInterfaceModeSaveQueueRef = React.useRef<Promise<void>>(Promise.resolve())
   const workspaceSessionActivitySentAtRef = React.useRef(0)
   const workspaceSessionStatusRef = React.useRef<WorkspaceSessionStatusResponse | null>(null)
   const handleWorkspaceSessionExpiredRef = React.useRef<((message?: string) => void) | null>(null)
@@ -2578,6 +2680,40 @@ function App() {
       contactEnrichmentPollTimersRef.current.clear()
     }
   }, [activeWorkspaceId])
+
+  React.useEffect(() => {
+    const userId = authSession?.userId ?? ""
+    if (!userId || !activeWorkspaceId) {
+      setWorkspaceInterfaceMode("workspace")
+      setConversationCanvasOpen(false)
+      return
+    }
+
+    let cancelled = false
+    const cachedMode = conversationUiEnabled
+      ? readStoredWorkspaceInterfaceMode(userId, activeWorkspaceId)
+      : "workspace"
+    setWorkspaceInterfaceMode(cachedMode)
+    setConversationCanvasOpen(false)
+
+    if (!conversationUiEnabled) return
+
+    const modeChangeVersion = workspaceInterfaceModeChangeRef.current
+    void getAssistantWorkspacePreference(activeWorkspaceId)
+      .then((preference) => {
+        if (cancelled || workspaceInterfaceModeChangeRef.current !== modeChangeVersion) return
+        const savedMode = normalizeWorkspaceInterfaceMode(preference?.interfaceMode, cachedMode)
+        setWorkspaceInterfaceMode(savedMode)
+        writeStoredWorkspaceInterfaceMode(userId, activeWorkspaceId, savedMode)
+      })
+      .catch(() => {
+        // Local preference keeps the mode stable while the additive assistant backend is unavailable.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeWorkspaceId, authSession?.userId])
 
   const activeOpportunity =
     workspaceOpportunities.find((opportunity) => opportunity.id === activeOpportunityId) ??
@@ -2636,16 +2772,18 @@ function App() {
   ].join(":")
 
   React.useEffect(() => {
+    if (legalPage || publicMarketingPath || isPublicLandingRouteOverride()) return
+
     if (passwordRecoveryActive) {
-      document.title = "Reset password · SalesFrame"
+      applyPublicAuthPageMetadata("recovery")
       return
     }
 
     if (!authSession) {
       if (publicAuthRoute === "signup") {
-        document.title = "Create account · SalesFrame"
+        applyPublicAuthPageMetadata("signup")
       } else if (publicAuthRoute === "login" || isProtectedRoutePath(window.location.pathname)) {
-        document.title = "Sign in · SalesFrame"
+        applyPublicAuthPageMetadata("login")
       }
       return
     }
@@ -2675,13 +2813,16 @@ function App() {
     const title = recordLabel ? `${recordLabel} — ${pageLabel}` : pageLabel
 
     document.title = title === "SalesFrame" ? title : `${title} · SalesFrame`
+    applyAuthenticatedPageMetadata(document.title)
   }, [
     activeAccount.name,
     activeOpportunity.name,
     activeView,
     authenticatedRouteError,
     authSession,
+    legalPage,
     passwordRecoveryActive,
+    publicMarketingPath,
     publicAuthRoute,
   ])
 
@@ -2812,6 +2953,7 @@ function App() {
   }, [requestNavigationScrollReset, writeAuthenticatedHistory])
 
   const ensureAuthenticatedAppRoute = React.useCallback(() => {
+    if (isPublicLandingRouteOverride()) return
     if (!isAuthRoutePath(window.location.pathname) && window.location.pathname !== "/") return
 
     setLegalPage(null)
@@ -7996,6 +8138,296 @@ function App() {
     setWorkspaceRefreshToken((value) => value + 1)
   }
 
+  const handleWorkspaceInterfaceModeChange = (mode: WorkspaceInterfaceMode) => {
+    const userId = authSession?.userId ?? ""
+    const safeMode = conversationUiEnabled ? mode : "workspace"
+    workspaceInterfaceModeChangeRef.current += 1
+    setWorkspaceInterfaceMode(safeMode)
+    setConversationCanvasOpen(false)
+    writeStoredWorkspaceInterfaceMode(userId, activeWorkspaceId, safeMode)
+    if (!activeWorkspaceId) return
+
+    const workspaceId = activeWorkspaceId
+    const lastStandardPath = `${window.location.pathname}${window.location.search}`
+    workspaceInterfaceModeSaveQueueRef.current = workspaceInterfaceModeSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        await saveAssistantWorkspacePreference(workspaceId, {
+          interfaceMode: safeMode,
+          lastStandardPath,
+        })
+      })
+      .catch(() => {
+        // The local preference remains usable until the server can persist it.
+      })
+  }
+
+  const conversationHasOpportunityContext = workspaceViews.includes(activeView)
+  const conversationHasAccountContext = accountViews.includes(activeView) || conversationHasOpportunityContext
+  const conversationHasCallContext = callSurfaceViews.includes(activeView)
+  const conversationRouteContext: AssistantRouteContext = {
+    path: getAuthenticatedPathForState({
+      accountId: activeAccount.id,
+      accountTab: accountDetailTab,
+      activeView,
+      callId: activeCallId || postCallFocusCallId,
+      opportunityId: activeOpportunity.id,
+      workspaceId: activeWorkspaceId,
+    }),
+    workspaceId: activeWorkspaceId || undefined,
+    accountId: conversationHasAccountContext ? activeAccount.id || undefined : undefined,
+    opportunityId: conversationHasOpportunityContext ? activeOpportunity.id || undefined : undefined,
+    callId: conversationHasCallContext ? activeCallId || postCallFocusCallId || undefined : undefined,
+  }
+  const conversationBriefing = buildConversationBriefing({
+    activeAccount: conversationHasAccountContext && activeAccount.id ? activeAccount : null,
+    activeCall: conversationHasCallContext
+      ? workspaceCalls.find((call) => call.id === activeCallId) ?? null
+      : null,
+    activeOpportunity: conversationHasOpportunityContext && activeOpportunity.id ? activeOpportunity : null,
+    accountCount: workspaceAccounts.length,
+    nextStep: activeOpportunityDraft.nextStep,
+    opportunityCount: workspaceOpportunities.length,
+  })
+  const conversationContextualActions = buildConversationContextualActions(
+    activeView,
+    conversationRouteContext
+  )
+
+  const openConversationCanvas = (action: () => void) => {
+    setConversationCanvasOpen(true)
+    action()
+  }
+
+  const handleConversationCapability = (capabilityId: string) => {
+    const openView = (view: string) => openConversationCanvas(() => handleNavigate(view))
+    const openAccountContacts = () => openConversationCanvas(() => handleAccountTabChange("contacts"))
+    const openCurrentCall = () => {
+      const callId = activeCallId || postCallFocusCallId
+      if (callId) openConversationCanvas(() => handleCallSelect(callId))
+      else openView("calls")
+    }
+    const capability = getAssistantCapability(capabilityId)
+    if (!capability) return
+    const missingAccount = capability.requiredContext.includes("account") && !conversationRouteContext.accountId
+    const missingOpportunity = capability.requiredContext.includes("opportunity") && !conversationRouteContext.opportunityId
+    const missingCall = capability.requiredContext.includes("call") && !conversationRouteContext.callId
+
+    if (missingCall) {
+      openView("calls")
+      return
+    }
+    if (missingOpportunity) {
+      openView("opportunities")
+      return
+    }
+    if (missingAccount) {
+      handleWorkspaceInterfaceModeChange("workspace")
+      return
+    }
+
+    switch (capabilityId) {
+      case "workspace.search":
+        handleWorkspaceInterfaceModeChange("workspace")
+        return
+      case "workspace.switch":
+        setConversationWorkspaceSwitcherOpen(true)
+        return
+      case "workspace.create":
+      case "workspace.onboarding":
+        handleOpenCreateWorkspaceSetup()
+        return
+      case "workspace.import":
+      case "workspace.import_accounts":
+        handleOpenCsvImport("accounts")
+        return
+      case "workspace.import_opportunities":
+        handleOpenCsvImport("opportunities")
+        return
+      case "workspace.edit":
+      case "workspace.duplicate":
+      case "workspace.delete":
+        handleWorkspaceInterfaceModeChange("workspace")
+        return
+      case "accounts.list":
+        openView(activeAccount.id ? "account-detail" : "home")
+        return
+      case "accounts.open":
+        if (activeAccount.id) openConversationCanvas(() => handleAccountSelect(activeAccount.id))
+        else openView("home")
+        return
+      case "accounts.create":
+        setCreateAccountOpen(true)
+        return
+      case "accounts.edit":
+        if (activeAccount.id) setEditAccountId(activeAccount.id)
+        else openView("home")
+        return
+      case "accounts.enrich":
+        if (activeAccount.id) openConversationCanvas(() => void handleRunActiveAccountEnrichment())
+        else openView("home")
+        return
+      case "accounts.archive":
+        if (activeAccount.id) handleRequestArchiveAccount(activeAccount.id)
+        return
+      case "accounts.delete":
+        if (activeAccount.id) handleRequestDeleteAccount(activeAccount.id)
+        return
+      case "accounts.restore":
+        openView("profile-account")
+        return
+      case "contacts.list":
+      case "contacts.open":
+      case "contacts.create":
+      case "contacts.edit":
+      case "contacts.enrich":
+      case "contacts.archive":
+      case "contacts.restore":
+        openAccountContacts()
+        return
+      case "contacts.relationships":
+      case "opportunities.contacts":
+        openView("opportunity-contacts")
+        return
+      case "opportunities.list":
+        openView("opportunities")
+        return
+      case "opportunities.open":
+        if (activeOpportunity.id) openConversationCanvas(() => handleOpportunitySelect(activeOpportunity.id))
+        else openView("opportunities")
+        return
+      case "opportunities.create":
+        handleOpenCreateOpportunity(activeAccount.id)
+        return
+      case "opportunities.edit":
+        if (activeOpportunity.id) setEditOpportunityId(activeOpportunity.id)
+        else openView("opportunities")
+        return
+      case "opportunities.next_call":
+        openView("opportunity-intelligence")
+        return
+      case "opportunities.methodology":
+        openView("methodology")
+        return
+      case "opportunities.history":
+        openView("opportunity-history")
+        return
+      case "opportunities.archive":
+        if (activeOpportunity.id) handleRequestArchiveOpportunity(activeOpportunity.id)
+        return
+      case "opportunities.delete":
+        if (activeOpportunity.id) handleRequestDeleteOpportunity(activeOpportunity.id)
+        return
+      case "opportunities.restore":
+        openView("profile-account")
+        return
+      case "calls.list":
+      case "calls.start":
+        openView("calls")
+        return
+      case "calls.open":
+      case "calls.transcript":
+      case "calls.notes":
+      case "calls.recording":
+      case "calls.speakers":
+      case "calls.outputs":
+      case "calls.feedback":
+      case "calls.manual_question":
+      case "calls.retry_outputs":
+      case "calls.delete":
+        openCurrentCall()
+        return
+      case "playbooks.list":
+        openView("playbooks")
+        return
+      case "playbooks.open":
+      case "playbooks.create":
+      case "playbooks.edit":
+        openView("custom")
+        return
+      case "playbooks.assign":
+        openView("methodology")
+        return
+      case "settings.open":
+        openView("settings")
+        return
+      case "settings.ai":
+        openView("ai")
+        return
+      case "settings.capture":
+        openView("capture")
+        return
+      case "settings.retention":
+      case "settings.session":
+        openView("retention")
+        return
+      case "settings.billing":
+        openView("billing")
+        return
+      case "settings.support":
+        openView("help")
+        return
+      case "settings.profile":
+        openView("profile-account")
+        return
+      case "settings.roadmap":
+        openView("roadmap")
+        return
+      case "settings.theme":
+        setDarkMode((value) => !value)
+        return
+      case "settings.logout":
+        setConversationSignOutOpen(true)
+        return
+      default:
+        setConversationCanvasOpen(true)
+    }
+  }
+
+  const handleConversationReference = (reference: AssistantMessageReference) => {
+    if (reference.route?.startsWith("/calls/")) {
+      const [routePath, routeHash = ""] = reference.route.split("#", 2)
+      const callRoute = parseAuthenticatedRoute(routePath)
+      if (callRoute?.kind === "call") {
+        openConversationCanvas(() => {
+          handleCallSelect(callRoute.callId)
+          if (!routeHash) return
+          window.requestAnimationFrame(() => {
+            window.history.replaceState(
+              null,
+              "",
+              `${window.location.pathname}${window.location.search}#${routeHash}`
+            )
+          })
+        })
+        return
+      }
+    }
+
+    if (reference.kind === "account") {
+      openConversationCanvas(() => handleAccountSelect(reference.id))
+      return
+    }
+    if (reference.kind === "opportunity") {
+      openConversationCanvas(() => handleOpportunitySelect(reference.id))
+      return
+    }
+    if (reference.kind === "call") {
+      openConversationCanvas(() => handleCallSelect(reference.id))
+      return
+    }
+    if (reference.kind === "methodology") {
+      openConversationCanvas(() => handleNavigate("methodology"))
+      return
+    }
+    if (reference.kind === "brief") {
+      openConversationCanvas(() => handleNavigate("opportunity-intelligence"))
+      return
+    }
+    openConversationCanvas(() => handleNavigate(reference.kind === "contact" ? "opportunity-contacts" : "post-call"))
+  }
+  const WorkspaceContentElement = workspaceInterfaceMode === "conversation" ? "section" : "main"
+
   if (isPublicLandingRouteOverride()) {
     return (
       <React.Suspense fallback={<PublicRouteFallback darkMode={darkMode} surface="landing" />}>
@@ -8111,7 +8543,9 @@ function App() {
       >
       <SidebarProvider className="h-svh min-h-0 overflow-hidden">
         <a
-          href="#salesframe-main"
+          href={workspaceInterfaceMode === "conversation" && !conversationCanvasOpen
+            ? "#salesframe-conversation"
+            : "#salesframe-main"}
           className="fixed left-3 top-3 z-[100] -translate-y-20 rounded-md bg-background px-3 py-2 text-sm font-medium shadow-lg ring-2 ring-ring transition-transform focus:translate-y-0"
         >
           Skip to main content
@@ -8159,58 +8593,124 @@ function App() {
             />
           </DialogContent>
         </Dialog>
-        <AppSidebar
-          activeAccountId={activeAccount.id}
-          activeOpportunityId={activeOpportunity.id}
-          activeWorkspaceId={activeWorkspaceId}
-          activeView={activeView}
-          accounts={workspaceAccounts}
-          workspaces={workspaceNavItems}
-          onAccountSelect={handleAccountSelect}
-          onArchiveAccount={handleRequestArchiveAccount}
-          onArchiveOpportunity={handleRequestArchiveOpportunity}
-          onCreateAccount={() => setCreateAccountOpen(true)}
-          onCreateOpportunity={handleOpenCreateOpportunity}
-          onCreateWorkspace={handleOpenCreateWorkspaceSetup}
-          onDeleteAccount={handleRequestDeleteAccount}
-          onDeleteOpportunity={handleRequestDeleteOpportunity}
-          onDeleteWorkspace={handleDeleteWorkspace}
-          onDuplicateWorkspace={handleDuplicateWorkspace}
-          onEditAccount={handleOpenEditAccount}
-          onEditOpportunity={handleOpenEditOpportunity}
-          onUpdateWorkspace={handleUpdateWorkspace}
-          isWorkspaceLoading={Boolean(loadingWorkspace)}
-          onLogout={handleAuthLogout}
-          onNavigate={handleNavigate}
-          onOpportunitySelect={handleOpportunitySelect}
-          onWorkspaceChange={handleWorkspaceChange}
-          user={{
-            name: personalAccountProfile.fullName,
-            email: personalAccountProfile.email,
-            avatar: personalAccountProfile.avatarUrl,
-          }}
-          variant="inset"
-        />
-        <SidebarInset className="h-svh min-h-0 overflow-hidden md:h-[calc(100svh-1rem)]">
-          <AppHeader
-            account={activeAccount}
-            accountDrafts={accountDrafts}
-            accounts={workspaceAccounts}
+        {workspaceInterfaceMode === "workspace" ? (
+          <AppSidebar
+            activeAccountId={activeAccount.id}
+            activeOpportunityId={activeOpportunity.id}
+            activeWorkspaceId={activeWorkspaceId}
             activeView={activeView}
-            calls={workspaceCalls}
-            darkMode={darkMode}
-            isRecording={isCallLive}
-            opportunity={activeOpportunity}
-            opportunityDrafts={opportunityDrafts}
-            opportunities={workspaceOpportunities}
-            transcriptsByCallId={transcriptsByCallId}
-            onDarkModeChange={setDarkMode}
+            accounts={workspaceAccounts}
+            workspaces={workspaceNavItems}
             onAccountSelect={handleAccountSelect}
-            onCallSelect={handleCallSelect}
+            onArchiveAccount={handleRequestArchiveAccount}
+            onArchiveOpportunity={handleRequestArchiveOpportunity}
+            onCreateAccount={() => setCreateAccountOpen(true)}
+            onCreateOpportunity={handleOpenCreateOpportunity}
+            onCreateWorkspace={handleOpenCreateWorkspaceSetup}
+            onDeleteAccount={handleRequestDeleteAccount}
+            onDeleteOpportunity={handleRequestDeleteOpportunity}
+            onDeleteWorkspace={handleDeleteWorkspace}
+            onDuplicateWorkspace={handleDuplicateWorkspace}
+            onEditAccount={handleOpenEditAccount}
+            onEditOpportunity={handleOpenEditOpportunity}
+            onUpdateWorkspace={handleUpdateWorkspace}
+            isWorkspaceLoading={Boolean(loadingWorkspace)}
+            onLogout={handleAuthLogout}
             onNavigate={handleNavigate}
+            onOpenConversationMode={() => handleWorkspaceInterfaceModeChange("conversation")}
             onOpportunitySelect={handleOpportunitySelect}
+            onWorkspaceChange={handleWorkspaceChange}
+            showConversationMode={conversationUiEnabled}
+            user={{
+              name: personalAccountProfile.fullName,
+              email: personalAccountProfile.email,
+              avatar: personalAccountProfile.avatarUrl,
+            }}
+            variant="inset"
           />
-          <main
+        ) : null}
+        {workspaceInterfaceMode === "conversation" ? (
+          <div
+            className={cn(
+              "h-svh min-h-0 min-w-0 flex-1 overflow-hidden",
+              conversationCanvasOpen && "max-md:hidden md:w-[clamp(20rem,30vw,24rem)] md:flex-none"
+            )}
+          >
+            <React.Suspense
+              fallback={(
+                <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground" role="status">
+                  Opening conversation mode…
+                </div>
+              )}
+            >
+              <ConversationModeShell
+                briefing={conversationBriefing}
+                contextualActions={conversationContextualActions}
+                routeContext={conversationRouteContext}
+                userName={personalAccountProfile.fullName}
+                voice={assistantVoice}
+                workspaceId={activeWorkspaceId}
+                workspaceName={activeWorkspace?.name ?? "SalesFrame"}
+                onActionCompleted={() => setWorkspaceRefreshToken((value) => value + 1)}
+                onInvokeCapability={handleConversationCapability}
+                onOpenReference={handleConversationReference}
+                onOpenWorkspaceSwitcher={() => setConversationWorkspaceSwitcherOpen(true)}
+                onSwitchToWorkspaceView={() => handleWorkspaceInterfaceModeChange("workspace")}
+              />
+            </React.Suspense>
+          </div>
+        ) : null}
+        {workspaceInterfaceMode === "workspace" || conversationCanvasOpen ? (
+        <SidebarInset
+          className={cn(
+            "h-svh min-h-0 overflow-hidden md:h-[calc(100svh-1rem)]",
+            workspaceInterfaceMode === "conversation" && "border-l md:m-2 md:ml-0 md:rounded-xl md:border md:shadow-sm"
+          )}
+        >
+          {workspaceInterfaceMode === "conversation" ? (
+            <header className="flex min-h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4">
+              <Button
+                variant="ghost"
+                className="gap-2"
+                onClick={() => setConversationCanvasOpen(false)}
+              >
+                <ArrowLeftIcon />
+                <span className="max-sm:sr-only">Conversation</span>
+              </Button>
+              <Separator orientation="vertical" className="h-5" />
+              <p className="min-w-0 flex-1 truncate text-sm font-medium">
+                {viewLabels[activeView] ?? "Workspace"}
+              </p>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Toggle theme"
+                onClick={() => setDarkMode((value) => !value)}
+              >
+                {darkMode ? <SunIcon /> : <MoonIcon />}
+              </Button>
+            </header>
+          ) : (
+            <AppHeader
+              account={activeAccount}
+              accountDrafts={accountDrafts}
+              accounts={workspaceAccounts}
+              activeView={activeView}
+              calls={workspaceCalls}
+              darkMode={darkMode}
+              isRecording={isCallLive}
+              opportunity={activeOpportunity}
+              opportunityDrafts={opportunityDrafts}
+              opportunities={workspaceOpportunities}
+              transcriptsByCallId={transcriptsByCallId}
+              onDarkModeChange={setDarkMode}
+              onAccountSelect={handleAccountSelect}
+              onCallSelect={handleCallSelect}
+              onNavigate={handleNavigate}
+              onOpportunitySelect={handleOpportunitySelect}
+            />
+          )}
+          <WorkspaceContentElement
             id="salesframe-main"
             ref={appMainScrollRef}
             aria-label={viewLabels[activeView] ?? "SalesFrame workspace"}
@@ -8487,7 +8987,7 @@ function App() {
                 onNavigate={handleNavigate}
               />
             )}
-          </main>
+          </WorkspaceContentElement>
           {shouldRenderMobileStartCall ? (
             <MobileStartCallBar
               account={activeAccount}
@@ -8505,6 +9005,74 @@ function App() {
             />
           ) : null}
         </SidebarInset>
+        ) : null}
+        <Dialog open={conversationWorkspaceSwitcherOpen} onOpenChange={setConversationWorkspaceSwitcherOpen}>
+          <DialogContent className="max-sm:max-w-[calc(100%-0.75rem)] sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Switch workspace</DialogTitle>
+              <DialogDescription>
+                Your conversations stay private and separate in each workspace.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid max-h-[min(24rem,60dvh)] gap-1 overflow-y-auto">
+              {workspaceNavItems.map((workspace) => (
+                <Button
+                  key={workspace.id}
+                  variant={workspace.id === activeWorkspaceId ? "secondary" : "ghost"}
+                  className="min-h-12 w-full justify-start"
+                  onClick={() => {
+                    setConversationWorkspaceSwitcherOpen(false)
+                    handleWorkspaceChange(workspace)
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate text-left">{workspace.name}</span>
+                  {workspace.id === activeWorkspaceId ? <CheckIcon /> : null}
+                </Button>
+              ))}
+            </div>
+            <DialogActions
+              cancelLabel="Close"
+              onCancel={() => setConversationWorkspaceSwitcherOpen(false)}
+              primaryAction={
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setConversationWorkspaceSwitcherOpen(false)
+                    handleOpenCreateWorkspaceSetup()
+                  }}
+                >
+                  <PlusIcon />
+                  New workspace
+                </Button>
+              }
+            />
+          </DialogContent>
+        </Dialog>
+        <Dialog open={conversationSignOutOpen} onOpenChange={setConversationSignOutOpen}>
+          <DialogContent className="max-sm:max-w-[calc(100%-0.75rem)] sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Sign out of SalesFrame?</DialogTitle>
+              <DialogDescription>
+                Your workspace conversations are saved and will be here when you return.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogActions
+              cancelLabel="Stay signed in"
+              onCancel={() => setConversationSignOutOpen(false)}
+              primaryAction={
+                <Button
+                  onClick={() => {
+                    setConversationSignOutOpen(false)
+                    handleWorkspaceInterfaceModeChange("workspace")
+                    void handleAuthLogout()
+                  }}
+                >
+                  Sign out
+                </Button>
+              }
+            />
+          </DialogContent>
+        </Dialog>
         <CreateAccountDialog
           accountDrafts={accountDrafts}
           accounts={workspaceAccounts}
@@ -12000,6 +12568,65 @@ function MobileStartCallBar({
   )
 }
 
+function ResponsiveRecordCreationShell({
+  children,
+  description,
+  desktopContentClassName,
+  mobileContentClassName,
+  onOpenChange,
+  open,
+  title,
+}: {
+  children: React.ReactNode
+  description: React.ReactNode
+  desktopContentClassName?: string
+  mobileContentClassName?: string
+  onOpenChange: (open: boolean) => void
+  open: boolean
+  title: React.ReactNode
+}) {
+  const isMobile = useIsMobile()
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange} showSwipeHandle>
+        <DrawerContent
+          className={cn(
+            "grid max-h-[92dvh] min-h-[min(640px,92dvh)] min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-0 text-left data-[vaul-drawer-direction=bottom]:max-h-[92dvh] [&_[data-slot=button]]:min-h-11 [&_[data-slot=button]]:px-4 [&_[data-slot=input]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11",
+            mobileContentClassName
+          )}
+        >
+          <DrawerHeader className="relative z-10 bg-popover px-0 pb-3 pt-3 text-left group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
+            <DrawerTitle>{title}</DrawerTitle>
+            <DrawerDescription>{description}</DrawerDescription>
+          </DrawerHeader>
+          {children}
+        </DrawerContent>
+      </Drawer>
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className={cn(
+          "grid max-h-[calc(100svh-2rem)] min-w-0 overflow-hidden sm:max-w-2xl",
+          desktopContentClassName
+        )}
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function CreateAccountDialog({
   accountDrafts,
   accounts,
@@ -12306,19 +12933,14 @@ function CreateAccountDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent
-        className="grid max-h-[calc(100svh-2rem)] overflow-hidden max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:h-[760px] sm:max-w-2xl sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
-        onEscapeKeyDown={(event) => event.preventDefault()}
-        onInteractOutside={(event) => event.preventDefault()}
-        onPointerDownOutside={(event) => event.preventDefault()}
-      >
-        <DialogHeader>
-          <DialogTitle>Create account</DialogTitle>
-          <DialogDescription>
-            Add the customer record, optional research defaults, and the first opportunity.
-          </DialogDescription>
-        </DialogHeader>
+    <ResponsiveRecordCreationShell
+      open={open}
+      onOpenChange={handleOpenChange}
+      title="Create account"
+      description="Add the customer record, optional research defaults, and the first opportunity."
+      desktopContentClassName="sm:h-[760px] sm:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+      mobileContentClassName="min-h-[min(680px,92dvh)] grid-rows-[auto_auto_auto_minmax(0,1fr)_auto]"
+    >
 
         <p className="sr-only" aria-live="polite">
           Step {step} of {accountSteps.length}: {currentAccountStepLabel}
@@ -12365,7 +12987,7 @@ function CreateAccountDialog({
           })}
         </ol>
 
-        <div className="min-h-0 overflow-y-auto pr-1">
+        <div className="min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pr-1 max-sm:pt-3">
         {step === 1 ? (
           <div className="grid gap-4">
             <div className="flex items-center gap-2">
@@ -12799,6 +13421,7 @@ function CreateAccountDialog({
         </div>
 
         <DialogActions
+          className="min-w-0 overflow-hidden max-sm:-mx-3 max-sm:-mb-3 max-sm:border-t max-sm:bg-popover max-sm:px-3 max-sm:pt-3"
           cancelAction={
             <Button
               variant="outline"
@@ -12822,8 +13445,7 @@ function CreateAccountDialog({
             </Button>
           )}
         />
-      </DialogContent>
-    </Dialog>
+    </ResponsiveRecordCreationShell>
   )
 }
 
@@ -13172,19 +13794,14 @@ function CreateOpportunityDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent
-        className="max-h-[calc(100svh-2rem)] overflow-y-auto max-sm:max-h-[calc(100svh-0.75rem)] max-sm:max-w-[calc(100%-0.75rem)] max-sm:[&_[data-slot=button]]:min-h-11 max-sm:[&_[data-slot=button]]:px-4 max-sm:[&_[data-slot=input]]:min-h-11 max-sm:[&_[data-slot=select-trigger]]:min-h-11 sm:max-w-2xl"
-        onEscapeKeyDown={(event) => event.preventDefault()}
-        onInteractOutside={(event) => event.preventDefault()}
-        onPointerDownOutside={(event) => event.preventDefault()}
-      >
-        <DialogHeader>
-          <DialogTitle>Add opportunity</DialogTitle>
-          <DialogDescription>
-            Create a deal record under an account and choose the playbooks the live coach should enforce.
-          </DialogDescription>
-        </DialogHeader>
+    <ResponsiveRecordCreationShell
+      open={open}
+      onOpenChange={handleOpenChange}
+      title="Add opportunity"
+      description="Create a deal record under an account and choose the playbooks the live coach should enforce."
+      desktopContentClassName="grid-rows-[auto_minmax(0,1fr)_auto]"
+    >
+      <div className="min-h-0 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain pr-1 max-sm:pt-3">
 
         <div className="grid gap-4">
           <div className="flex items-center gap-2">
@@ -13353,8 +13970,10 @@ function CreateOpportunityDialog({
             {createError}
           </div>
         ) : null}
+      </div>
 
         <DialogActions
+          className="min-w-0 overflow-hidden max-sm:-mx-3 max-sm:-mb-3 max-sm:border-t max-sm:bg-popover max-sm:px-3 max-sm:pt-3"
           cancelDisabled={createSubmitting}
           onCancel={() => handleOpenChange(false)}
           primaryAction={
@@ -13364,8 +13983,7 @@ function CreateOpportunityDialog({
             </Button>
           }
         />
-      </DialogContent>
-    </Dialog>
+    </ResponsiveRecordCreationShell>
   )
 }
 
@@ -23110,7 +23728,7 @@ function WorkspaceStateView({
               {config.icon}
             </div>
             <div className="min-w-0">
-              <CardTitle className="text-2xl">{config.title}</CardTitle>
+              <h1 className="font-heading text-2xl leading-snug font-medium">{config.title}</h1>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{body}</p>
             </div>
           </div>

@@ -3,6 +3,7 @@ import {
   BookOpenCheckIcon,
   LayoutDashboardIcon,
   MessageSquareTextIcon,
+  SparklesIcon,
   TargetIcon,
 } from "lucide-react"
 
@@ -19,6 +20,8 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarMenuSkeleton,
   SidebarRail,
 } from "@/components/ui/sidebar"
@@ -106,8 +109,10 @@ export function AppSidebar({
   isWorkspaceLoading = false,
   onLogout,
   onNavigate,
+  onOpenConversationMode,
   onOpportunitySelect,
   onWorkspaceChange,
+  showConversationMode = false,
   user,
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
@@ -133,8 +138,10 @@ export function AppSidebar({
   isWorkspaceLoading?: boolean
   onLogout: () => void
   onNavigate: (id: string) => void
+  onOpenConversationMode: () => void
   onOpportunitySelect: (id: string) => void
   onWorkspaceChange: (workspace: WorkspaceNavItem) => void
+  showConversationMode?: boolean
   user: {
     name: string
     email: string
@@ -204,6 +211,21 @@ export function AppSidebar({
         )}
       </SidebarContent>
       <SidebarFooter>
+        {showConversationMode ? (
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                aria-label="Open Conversation mode"
+                className="min-h-11 gap-2 md:min-h-8"
+                tooltip="Conversation mode"
+                onClick={onOpenConversationMode}
+              >
+                <SparklesIcon />
+                <span>Conversation mode</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        ) : null}
         <NavUser user={user} onLogout={onLogout} onNavigate={onNavigate} />
       </SidebarFooter>
       <SidebarRail />

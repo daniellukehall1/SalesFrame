@@ -187,6 +187,7 @@ test("live coaching functions enforce the preparation boundary", async () => {
   )
   assert.match(liveQuestion, /status suggested and reason pre_call_brief are low-priority learning-intent hints/)
   assert.match(liveQuestion, /Never copy or reconstruct Next Call Preparation wording/)
+  assert.match(liveQuestion, /\.order\("generated_at", \{ ascending: false \}\)/)
   assert.match(liveQuestion, /\.select\("intent_cluster_id,kind"\)/)
   assert.doesNotMatch(liveQuestion, /\.select\("intent_cluster_id,kind,text"\)/)
   assert.match(liveQuestion, /ignoreDuplicates: true/)

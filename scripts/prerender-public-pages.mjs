@@ -54,11 +54,23 @@ function replaceStructuredData(html, routeSchema) {
 }
 
 function buildRouteDocument(template, route) {
-  const { canonicalUrl, description, imageAlt, imageHeight, imageUrl, imageWidth, keywords, schema, title } = route.metadata
+  const {
+    canonicalUrl,
+    description,
+    imageAlt,
+    imageHeight,
+    imageUrl,
+    imageWidth,
+    keywords,
+    robots = "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1",
+    schema,
+    title,
+  } = route.metadata
   let html = template.replace(/<title>[\s\S]*?<\/title>/, `<title>${escapeHtml(title)}</title>`)
 
   html = replaceMeta(html, "name", "description", description)
   html = replaceMeta(html, "name", "keywords", keywords)
+  html = replaceMeta(html, "name", "robots", robots)
   html = replaceCanonical(html, canonicalUrl)
   html = replaceMeta(html, "property", "og:url", canonicalUrl)
   html = replaceMeta(html, "property", "og:title", title)
@@ -80,8 +92,10 @@ function buildRouteDocument(template, route) {
 }
 
 try {
-  const { prerenderPublicMarketingPages } = await import(pathToFileURL(serverEntry).href)
-  const routes = prerenderPublicMarketingPages()
+  const { prerenderPublicLegalPages, prerenderPublicMarketingPages } = await import(pathToFileURL(serverEntry).href)
+  const marketingRoutes = prerenderPublicMarketingPages()
+  const legalRoutes = prerenderPublicLegalPages()
+  const routes = [...marketingRoutes, ...legalRoutes]
   const template = await readFile(path.join(outputDirectory, "index.html"), "utf8")
 
   for (const route of routes) {
@@ -92,7 +106,9 @@ try {
     await writeFile(outputPath, html)
   }
 
-  process.stdout.write(`Prerendered ${routes.length} public marketing pages.\n`)
+  process.stdout.write(
+    `Prerendered ${marketingRoutes.length} public marketing pages and ${legalRoutes.length} public legal pages.\n`
+  )
 } finally {
   await rm(serverBuildDirectory, { force: true, recursive: true })
 }

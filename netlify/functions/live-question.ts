@@ -465,7 +465,7 @@ async function seedNextCallBriefIntentHints({
     .eq("account_id", accountId)
     .eq("opportunity_id", opportunityId)
     .eq("schema_version", 2)
-    .order("updated_at", { ascending: false })
+    .order("generated_at", { ascending: false })
     .limit(1)
     .maybeSingle()
 

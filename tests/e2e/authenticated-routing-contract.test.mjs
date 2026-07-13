@@ -159,6 +159,17 @@ test("live calls cannot leave the protected shell or switch workspaces through b
   )
 })
 
+test("signed-in reviewers can keep the explicit public landing preview route", async () => {
+  const app = await read("src/App.tsx")
+  const ensureRoute = app.slice(
+    app.indexOf("const ensureAuthenticatedAppRoute ="),
+    app.indexOf("React.useEffect(() => {", app.indexOf("const ensureAuthenticatedAppRoute ="))
+  )
+
+  assert.match(ensureRoute, /if \(isPublicLandingRouteOverride\(\)\) return/)
+  assert.match(ensureRoute, /pendingAuthenticatedPathRef\.current \|\| "\/app"/)
+})
+
 test("workspace and entity route restoration fails closed and repairs a stale local cache once", async () => {
   const app = await read("src/App.tsx")
   const routeEffect = app.slice(
@@ -178,16 +189,18 @@ test("workspace and entity route restoration fails closed and repairs a stale lo
 
 test("authenticated routes set meaningful browser and bookmark titles", async () => {
   const app = await read("src/App.tsx")
-  const titleAssignmentIndex = app.indexOf("document.title =")
-  const titleContext = app.slice(Math.max(0, titleAssignmentIndex - 1_500), titleAssignmentIndex + 1_500)
+  const titleEffectIndex = app.indexOf('const pageLabel = viewLabels[activeView] ?? "SalesFrame"')
+  const titleContext = app.slice(titleEffectIndex, titleEffectIndex + 1_500)
 
-  assert.ok(titleAssignmentIndex >= 0, "authenticated application never updates document.title")
+  assert.ok(titleEffectIndex >= 0, "authenticated application never derives a route-aware title")
   assert.match(titleContext, /SalesFrame/)
   assert.match(titleContext, /activeView/)
   assert.match(titleContext, /activeAccount/)
   assert.match(titleContext, /activeOpportunity/)
-  assert.match(app, /document\.title = "Sign in · SalesFrame"/)
-  assert.match(app, /document\.title = "Reset password · SalesFrame"/)
+  assert.match(titleContext, /document\.title = title === "SalesFrame"/)
+  assert.match(app, /mode === "signup"[\s\S]*"Create account · SalesFrame"/)
+  assert.match(app, /mode === "recovery"[\s\S]*"Reset password · SalesFrame"/)
+  assert.match(app, /: "Sign in · SalesFrame"/)
   assert.match(app, /document\.title = "Page unavailable · SalesFrame"/)
 })
 

@@ -12,6 +12,8 @@ SalesFrame uses browser-safe Supabase variables in the Vite app and server-only 
 | `VITE_SUPABASE_URL` | Browser + Functions | Supabase project settings | Safe to expose to the browser. |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Browser + Functions | Supabase project API settings | Safe to expose to the browser. |
 | `VITE_LOGO_DEV_PUBLISHABLE_KEY` | Browser + Functions | Logo.dev publishable key | Safe to expose. Set for Builds and Functions. |
+| `VITE_CONVERSATION_UI_ENABLED` | Browser build | SalesFrame rollout gate | Keep `false` until the assistant migration, RLS tests, and full feature-parity smoke test pass. |
+| `WORKSPACE_ASSISTANT_ENABLED` | Functions only | SalesFrame operational rollout gate | Keep `false` until migration validation and assistant smoke tests pass. This independently blocks AI turns and voice tokens. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Functions only | Supabase project API settings | Secret. Never add a `VITE_` prefix. |
 | `OPENAI_KEY_ENCRYPTION_SECRET` | Functions only | Generated app secret | Encrypts each seller's OpenAI key. Keep stable. |
 | `DEEPGRAM_API_KEY` | Functions only | Deepgram project settings | Secret. Mints short-lived tokens for direct browser Flux capture only. |
@@ -130,6 +132,8 @@ netlify env:set OPENAI_LIVE_STATE_MODEL "gpt-5.4-nano"
 netlify env:set OPENAI_LIVE_QUESTION_MODEL "gpt-5.4-mini"
 netlify env:set OPENAI_LIVE_COACH_MODEL "gpt-5.4-mini"
 netlify env:set OPENAI_NEXT_CALL_BRIEF_MODEL "gpt-5.4-mini"
+netlify env:set OPENAI_WORKSPACE_ASSISTANT_MODEL "gpt-5.6-terra"
+netlify env:set WORKSPACE_ASSISTANT_ENABLED "false"
 netlify env:set OPENAI_ACCOUNT_ENRICHMENT_MODEL "gpt-5.4-mini"
 netlify env:set OPENAI_RESEARCH_WEB_SEARCH "true"
 netlify env:set DEEPGRAM_FLUX_MODEL "flux-general-en"
@@ -139,6 +143,7 @@ netlify env:set DEEPGRAM_FLUX_EOT_THRESHOLD "0.75"
 netlify env:set DEEPGRAM_FLUX_EOT_TIMEOUT_MS "5000"
 netlify env:set RECALL_REGION "us-west-2"
 netlify env:set RECALL_MEETING_BOT_ENABLED "false"
+netlify env:set VITE_CONVERSATION_UI_ENABLED "false"
 netlify env:set MEETING_BOT_MAX_PER_USER "1"
 netlify env:set MEETING_BOT_MAX_PER_WORKSPACE "5"
 netlify env:set MEETING_BOT_MAX_GLOBAL "25"

@@ -191,6 +191,366 @@ export type Database = {
           updated_at?: string
         }
       >
+      assistant_threads: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          created_by_user_id: string
+          title: string
+          archived_at: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          created_by_user_id: string
+          title?: string
+          archived_at?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          created_by_user_id?: string
+          title?: string
+          archived_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      workspace_member_preferences: TableDefinition<
+        {
+          workspace_id: string
+          user_id: string
+          interface_mode: string
+          active_thread_id: string | null
+          last_standard_path: string
+          created_at: string
+          updated_at: string
+        },
+        {
+          workspace_id: string
+          user_id: string
+          interface_mode?: string
+          active_thread_id?: string | null
+          last_standard_path?: string
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          workspace_id?: string
+          user_id?: string
+          interface_mode?: string
+          active_thread_id?: string | null
+          last_standard_path?: string
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      assistant_messages: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          thread_id: string
+          owner_user_id: string
+          role: string
+          content: string
+          client_request_id: string | null
+          ordinal: number
+          created_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          thread_id: string
+          owner_user_id: string
+          role: string
+          content?: string
+          client_request_id?: string | null
+          ordinal?: number
+          created_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          thread_id?: string
+          owner_user_id?: string
+          role?: string
+          content?: string
+          client_request_id?: string | null
+          ordinal?: number
+          created_at?: string
+        }
+      >
+      assistant_runs: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          thread_id: string
+          user_id: string
+          client_request_id: string
+          user_message_id: string
+          assistant_message_id: string | null
+          model: string
+          status: string
+          safe_error_code: string | null
+          input_tokens: number | null
+          output_tokens: number | null
+          tool_rounds: number
+          read_operations: number
+          started_at: string
+          lease_expires_at: string
+          completed_at: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          thread_id: string
+          user_id: string
+          client_request_id: string
+          user_message_id: string
+          assistant_message_id?: string | null
+          model: string
+          status?: string
+          safe_error_code?: string | null
+          input_tokens?: number | null
+          output_tokens?: number | null
+          tool_rounds?: number
+          read_operations?: number
+          started_at?: string
+          lease_expires_at?: string
+          completed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          thread_id?: string
+          user_id?: string
+          client_request_id?: string
+          user_message_id?: string
+          assistant_message_id?: string | null
+          model?: string
+          status?: string
+          safe_error_code?: string | null
+          input_tokens?: number | null
+          output_tokens?: number | null
+          tool_rounds?: number
+          read_operations?: number
+          started_at?: string
+          lease_expires_at?: string
+          completed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      assistant_turn_rate_ledger: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          user_id: string
+          client_request_id: string
+          created_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          user_id: string
+          client_request_id: string
+          created_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          user_id?: string
+          client_request_id?: string
+          created_at?: string
+        }
+      >
+      assistant_action_proposals: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          thread_id: string
+          user_id: string
+          run_id: string
+          capability_id: string
+          arguments: Json
+          preview: Json
+          expected_record_updated_at: string | null
+          target_resource_type: string | null
+          target_resource_id: string | null
+          risk: string
+          status: string
+          idempotency_key: string
+          safe_error_code: string | null
+          result_resource_type: string | null
+          result_resource_id: string | null
+          expires_at: string
+          confirmed_at: string | null
+          cancelled_at: string | null
+          executed_at: string | null
+          created_at: string
+          updated_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          thread_id: string
+          user_id: string
+          run_id: string
+          capability_id: string
+          arguments: Json
+          preview: Json
+          expected_record_updated_at?: string | null
+          target_resource_type?: string | null
+          target_resource_id?: string | null
+          risk?: string
+          status?: string
+          idempotency_key: string
+          safe_error_code?: string | null
+          result_resource_type?: string | null
+          result_resource_id?: string | null
+          expires_at?: string
+          confirmed_at?: string | null
+          cancelled_at?: string | null
+          executed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          thread_id?: string
+          user_id?: string
+          run_id?: string
+          capability_id?: string
+          arguments?: Json
+          preview?: Json
+          expected_record_updated_at?: string | null
+          target_resource_type?: string | null
+          target_resource_id?: string | null
+          risk?: string
+          status?: string
+          idempotency_key?: string
+          safe_error_code?: string | null
+          result_resource_type?: string | null
+          result_resource_id?: string | null
+          expires_at?: string
+          confirmed_at?: string | null
+          cancelled_at?: string | null
+          executed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      >
+      assistant_action_events: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          proposal_id: string
+          user_id: string
+          capability_id: string
+          target_resource_type: string | null
+          target_resource_id: string | null
+          result_resource_type: string | null
+          result_resource_id: string | null
+          event_type: string
+          safe_code: string | null
+          created_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          proposal_id: string
+          user_id: string
+          capability_id: string
+          target_resource_type?: string | null
+          target_resource_id?: string | null
+          result_resource_type?: string | null
+          result_resource_id?: string | null
+          event_type: string
+          safe_code?: string | null
+          created_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          proposal_id?: string
+          user_id?: string
+          capability_id?: string
+          target_resource_type?: string | null
+          target_resource_id?: string | null
+          result_resource_type?: string | null
+          result_resource_id?: string | null
+          event_type?: string
+          safe_code?: string | null
+          created_at?: string
+        }
+      >
+      assistant_message_references: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          thread_id: string
+          owner_user_id: string
+          message_id: string
+          reference_type: string
+          reference_id: string
+          label: string
+          route: string
+          created_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          thread_id: string
+          owner_user_id: string
+          message_id: string
+          reference_type: string
+          reference_id: string
+          label: string
+          route: string
+          created_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          thread_id?: string
+          owner_user_id?: string
+          message_id?: string
+          reference_type?: string
+          reference_id?: string
+          label?: string
+          route?: string
+          created_at?: string
+        }
+      >
+      assistant_voice_token_grants: TableDefinition<
+        {
+          id: string
+          workspace_id: string
+          user_id: string
+          issued_at: string
+        },
+        {
+          id?: string
+          workspace_id: string
+          user_id: string
+          issued_at?: string
+        },
+        {
+          id?: string
+          workspace_id?: string
+          user_id?: string
+          issued_at?: string
+        }
+      >
       accounts: TableDefinition<
         {
           id: string
@@ -2651,6 +3011,104 @@ export type Database = {
           window_seconds?: number
         }
         Returns: boolean
+      }
+      claim_assistant_voice_token_grant: {
+        Args: {
+          target_user_id: string
+          target_workspace_id: string
+          grant_limit?: number
+          window_seconds?: number
+        }
+        Returns: boolean
+      }
+      ensure_assistant_default_thread: {
+        Args: {
+          target_workspace_id: string
+          target_user_id: string
+        }
+        Returns: Json
+      }
+      begin_assistant_run: {
+        Args: {
+          target_thread_id: string
+          target_user_id: string
+          target_client_request_id: string
+          target_model: string
+          target_content: string
+          target_title: string
+        }
+        Returns: Json
+      }
+      complete_assistant_run: {
+        Args: {
+          target_run_id: string
+          target_user_id: string
+          target_content: string
+          target_input_tokens: number | null
+          target_output_tokens: number | null
+          target_tool_rounds: number
+          target_read_operations: number
+          target_references?: Json
+        }
+        Returns: Json
+      }
+      fail_assistant_run: {
+        Args: {
+          target_run_id: string
+          target_user_id: string
+          target_safe_error_code: string
+          target_tool_rounds: number
+          target_read_operations: number
+        }
+        Returns: boolean
+      }
+      renew_assistant_run_lease: {
+        Args: {
+          target_run_id: string
+          target_user_id: string
+        }
+        Returns: boolean
+      }
+      create_assistant_action_proposal: {
+        Args: {
+          target_run_id: string
+          target_user_id: string
+          target_capability_id: string
+          target_arguments: Json
+          target_preview: Json
+          target_expected_record_updated_at: string | null
+          target_resource_type: string | null
+          target_resource_id: string | null
+          target_risk: string
+          target_idempotency_key: string
+          target_expires_at: string
+        }
+        Returns: Json
+      }
+      cancel_assistant_action_proposal: {
+        Args: {
+          target_proposal_id: string
+          target_user_id: string
+        }
+        Returns: Json
+      }
+      delete_assistant_thread: {
+        Args: {
+          target_thread_id: string
+          target_user_id: string
+        }
+        Returns: boolean
+      }
+      recover_stale_assistant_state: {
+        Args: { batch_limit?: number }
+        Returns: Json
+      }
+      execute_assistant_action_proposal: {
+        Args: {
+          target_proposal_id: string
+          target_user_id: string
+        }
+        Returns: Json
       }
       register_call_recording_upload: {
         Args: {

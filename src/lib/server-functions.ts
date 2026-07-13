@@ -23,6 +23,13 @@ import type {
   NextCallBriefEvidence,
   NextCallBriefResponse,
 } from "@/lib/salesframe-core"
+import {
+  ASSISTANT_STREAM_INACTIVITY_TIMEOUT_MS,
+  ASSISTANT_STREAM_TOTAL_TIMEOUT_MS,
+  AssistantStreamError,
+  readAssistantEventStream,
+  type AssistantTransport,
+} from "@/lib/assistant-client"
 
 export type OpenAiKeyStatus = {
   connected: boolean
@@ -167,16 +174,40 @@ export type WorkspaceSessionStatusResponse = {
   warningAt: string | null
 }
 
+export type AssistantWorkspacePreference = {
+  activeThreadId: string | null
+  interfaceMode: "workspace" | "conversation"
+  lastStandardPath: string
+  workspaceId: string
+}
+
 type FunctionRequestOptions = {
   body?: unknown
   keepalive?: boolean
-  method?: "DELETE" | "GET" | "POST"
+  method?: "DELETE" | "GET" | "PATCH" | "POST"
   signal?: AbortSignal
   timeoutMs?: number
 }
 
 const workspaceSessionRequestTimeoutMs = 15_000
 let cachedFunctionAccessToken = ""
+
+async function getFunctionAccessToken(keepalive = false) {
+  let accessToken = keepalive ? cachedFunctionAccessToken : ""
+  if (accessToken) return accessToken
+
+  const supabase = createClient()
+  const {
+    data: { session },
+    error,
+  } = await supabase.auth.getSession()
+
+  if (error) throw new Error(error.message)
+  if (!session?.access_token) throw new Error("Sign in before using this feature.")
+  accessToken = session.access_token
+  cachedFunctionAccessToken = accessToken
+  return accessToken
+}
 
 export class SalesFrameFunctionError extends Error {
   code?: string
@@ -218,7 +249,10 @@ type FunctionEnvelope<T> =
 
 async function readFunctionPayload<T>(response: Response): Promise<FunctionEnvelope<T> | T | null> {
   const text = await response.text()
-  if (!text.trim()) return null
+  if (!text.trim()) {
+    if (!response.ok || response.status === 204) return null
+    throw unexpectedFunctionResponseError()
+  }
 
   try {
     return JSON.parse(text) as FunctionEnvelope<T> | T
@@ -231,8 +265,18 @@ async function readFunctionPayload<T>(response: Response): Promise<FunctionEnvel
       }
     }
 
-    return text as T
+    throw unexpectedFunctionResponseError()
   }
+}
+
+function unexpectedFunctionResponseError() {
+  return new SalesFrameFunctionError(
+    "SalesFrame received an unexpected response. Try again in a moment.",
+    {
+      code: "unexpected_function_response",
+      status: 502,
+    }
+  )
 }
 
 function getFunctionErrorMessage(payload: unknown) {
@@ -300,19 +344,7 @@ export function appendErrorReference(message: string, error: unknown) {
 }
 
 async function callFunction<T>(path: string, options: FunctionRequestOptions = {}): Promise<T> {
-  let accessToken = options.keepalive ? cachedFunctionAccessToken : ""
-  if (!accessToken) {
-    const supabase = createClient()
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.getSession()
-
-    if (error) throw new Error(error.message)
-    if (!session?.access_token) throw new Error("Sign in before using this feature.")
-    accessToken = session.access_token
-    cachedFunctionAccessToken = accessToken
-  }
+  const accessToken = await getFunctionAccessToken(options.keepalive)
 
   const controller = new AbortController()
   const clientRequestId = createClientRequestId()
@@ -379,6 +411,136 @@ async function callFunction<T>(path: string, options: FunctionRequestOptions = {
   return payload as T
 }
 
+export function createSalesFrameAssistantTransport(): AssistantTransport {
+  return {
+    request: async <T,>(path: string, init: RequestInit = {}) => {
+      let body: unknown
+      if (typeof init.body === "string" && init.body.trim()) {
+        try {
+          body = JSON.parse(init.body)
+        } catch {
+          throw new Error("SalesFrame could not prepare that conversation request.")
+        }
+      }
+
+      return callFunction<T>(path, {
+        body,
+        method: normalizeAssistantRequestMethod(init.method),
+        signal: init.signal ?? undefined,
+        timeoutMs: 20_000,
+      })
+    },
+    stream: async (path, init, onEvent) => {
+      const clientRequestId = createClientRequestId()
+      const controller = new AbortController()
+      let totalTimedOut = false
+      const abortFromCaller = () => controller.abort()
+      if (init.signal?.aborted) controller.abort()
+      else init.signal?.addEventListener("abort", abortFromCaller, { once: true })
+      const totalTimeoutId = window.setTimeout(() => {
+        totalTimedOut = true
+        controller.abort()
+      }, ASSISTANT_STREAM_TOTAL_TIMEOUT_MS)
+
+      try {
+        const accessToken = await waitForAssistantStreamStep(getFunctionAccessToken(), controller.signal)
+        const response = await fetch(path, {
+          ...init,
+          headers: {
+            ...Object.fromEntries(new Headers(init.headers).entries()),
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            "X-SalesFrame-Client-Request-Id": clientRequestId,
+          },
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          const payload = await readFunctionPayload(response)
+          const details = getFunctionErrorDetails(payload)
+          throw new SalesFrameFunctionError(getFunctionErrorMessage(payload), {
+            ...details,
+            requestId: details.requestId ?? clientRequestId,
+            status: response.status,
+          })
+        }
+
+        await readAssistantEventStream(response, onEvent, {
+          inactivityTimeoutMs: ASSISTANT_STREAM_INACTIVITY_TIMEOUT_MS,
+          signal: controller.signal,
+          totalTimeoutMs: ASSISTANT_STREAM_TOTAL_TIMEOUT_MS,
+        })
+      } catch (error) {
+        if (init.signal?.aborted) throw error
+        if (totalTimedOut) {
+          throw new SalesFrameFunctionError(
+            "SalesFrame took too long to finish this response. The saved conversation will be checked before you try again.",
+            {
+              code: "assistant_stream_total_timeout",
+              requestId: clientRequestId,
+              status: 408,
+            }
+          )
+        }
+        if (error instanceof AssistantStreamError) {
+          throw new SalesFrameFunctionError(error.message, {
+            code: error.code,
+            requestId: clientRequestId,
+            status: error.code.endsWith("timeout") ? 408 : 502,
+          })
+        }
+        if (error instanceof Error && error.name === "AbortError") {
+          throw new SalesFrameFunctionError(
+            "SalesFrame's response was interrupted. Review the saved conversation before trying again.",
+            {
+              code: "assistant_stream_interrupted",
+              requestId: clientRequestId,
+              status: 502,
+            }
+          )
+        }
+        throw error
+      } finally {
+        window.clearTimeout(totalTimeoutId)
+        init.signal?.removeEventListener("abort", abortFromCaller)
+      }
+    },
+  }
+}
+
+function waitForAssistantStreamStep<T>(operation: Promise<T>, signal: AbortSignal) {
+  if (signal.aborted) return Promise.reject(createAssistantStreamAbortError())
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const finish = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener("abort", handleAbort)
+      callback()
+    }
+    const handleAbort = () => finish(() => reject(createAssistantStreamAbortError()))
+    signal.addEventListener("abort", handleAbort, { once: true })
+    operation.then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error))
+    )
+  })
+}
+
+function createAssistantStreamAbortError() {
+  if (typeof DOMException !== "undefined") return new DOMException("The operation was aborted.", "AbortError")
+  const error = new Error("The operation was aborted.")
+  error.name = "AbortError"
+  return error
+}
+
+function normalizeAssistantRequestMethod(method?: string): FunctionRequestOptions["method"] {
+  const normalized = method?.toUpperCase() ?? "GET"
+  if (normalized === "DELETE" || normalized === "PATCH" || normalized === "POST") return normalized
+  return "GET"
+}
+
 function createClientRequestId() {
   const randomPart =
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -417,6 +579,32 @@ export function createDeepgramTranscriptionToken(
     method: "POST",
     body: { callId, ...options },
     timeoutMs: 8000,
+  })
+}
+
+export function createAssistantVoiceToken(workspaceId: string) {
+  return callFunction<DeepgramTranscriptionTokenResponse>("/api/assistant/voice-token", {
+    method: "POST",
+    body: { workspaceId },
+    timeoutMs: 8000,
+  })
+}
+
+export function getAssistantWorkspacePreference(workspaceId: string) {
+  return callFunction<AssistantWorkspacePreference>(
+    `/api/assistant/preferences?workspaceId=${encodeURIComponent(workspaceId)}`,
+    { timeoutMs: 8_000 }
+  )
+}
+
+export function saveAssistantWorkspacePreference(
+  workspaceId: string,
+  preference: Partial<Pick<AssistantWorkspacePreference, "activeThreadId" | "interfaceMode" | "lastStandardPath">>
+) {
+  return callFunction<AssistantWorkspacePreference>("/api/assistant/preferences", {
+    method: "POST",
+    body: { workspaceId, ...preference },
+    timeoutMs: 8_000,
   })
 }
 

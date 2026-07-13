@@ -32,9 +32,10 @@ export type DeepgramTranscriptionConnectionOptions = {
   onTranscriptEvent: (event: DeepgramTranscriptEvent) => void | Promise<void>
   sourceKind: AudioSourceKind
   stream: MediaStream
+  tokenProvider?: () => Promise<DeepgramTokenResponse>
 }
 
-type DeepgramTokenResponse = {
+export type DeepgramTokenResponse = {
   accessToken: string
   config: {
     diarizeModel?: string
@@ -103,6 +104,7 @@ export async function connectDeepgramLiveTranscription({
   onTranscriptEvent,
   sourceKind,
   stream,
+  tokenProvider,
 }: DeepgramTranscriptionConnectionOptions): Promise<DeepgramTranscriptionConnection> {
   let activeSocket: WebSocket | null = null
   let audioBacklog: ArrayBuffer[] = []
@@ -163,6 +165,7 @@ export async function connectDeepgramLiveTranscription({
               })
           },
           sourceKind,
+          tokenProvider,
         })
 
         return connection
@@ -256,14 +259,18 @@ async function openDeepgramSocket({
   onTranscriptEvent,
   onUnexpectedClose,
   sourceKind,
+  tokenProvider,
 }: {
   callId: string
   onTranscriptError: (error: unknown) => void
   onTranscriptEvent: (event: DeepgramTranscriptEvent) => void | Promise<void>
   onUnexpectedClose: () => void
   sourceKind: AudioSourceKind
+  tokenProvider?: () => Promise<DeepgramTokenResponse>
 }) {
-  const session = await createDeepgramTranscriptionToken(callId, { sourceKind })
+  const session = tokenProvider
+    ? await tokenProvider()
+    : await createDeepgramTranscriptionToken(callId, { sourceKind })
   const tokenResponse = normalizeDeepgramTokenResponse(session)
   const providerSessionId = createProviderSessionId(sourceKind)
   const websocketUrls = getDeepgramWebsocketUrls(tokenResponse)

@@ -1792,6 +1792,7 @@ function usePublicPageMetadata(page: PublicPage | null) {
     document.title = page.seoTitle
     setMeta('meta[name="description"]', "content", page.seoDescription)
     setMeta('meta[name="keywords"]', "content", getPageKeywords(page))
+    setMeta('meta[name="robots"]', "content", "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1")
     setMeta('link[rel="canonical"]', "href", canonicalUrl)
     setMeta('meta[property="og:url"]', "content", canonicalUrl)
     setMeta('meta[property="og:title"]', "content", page.seoTitle)

@@ -10,6 +10,7 @@ export const requiredFrontendEnvNames = [
 ] as const
 
 export const optionalFrontendEnvNames = [
+  "VITE_CONVERSATION_UI_ENABLED",
   "VITE_LOGO_DEV_PUBLISHABLE_KEY",
 ] as const
 
@@ -33,6 +34,8 @@ export const optionalServerEnvNames = [
   "OPENAI_ACCOUNT_ENRICHMENT_MODEL",
   "OPENAI_SPEAKER_ATTRIBUTION_MODEL",
   "OPENAI_TEXT_MODEL",
+  "OPENAI_WORKSPACE_ASSISTANT_MODEL",
+  "WORKSPACE_ASSISTANT_ENABLED",
   "OPENAI_RESEARCH_WEB_SEARCH",
   "RECALL_API_KEY",
   "RECALL_MEDIA_DOWNLOAD_HOSTS",

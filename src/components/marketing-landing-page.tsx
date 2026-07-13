@@ -43,6 +43,7 @@ function useLandingPageMetadata() {
   React.useEffect(() => {
     document.title = landingSeoTitle
     setLandingMeta('meta[name="description"]', "content", landingSeoDescription)
+    setLandingMeta('meta[name="robots"]', "content", "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1")
     setLandingMeta('link[rel="canonical"]', "href", "https://salesframe.ai/")
     setLandingMeta('meta[property="og:url"]', "content", "https://salesframe.ai/")
     setLandingMeta('meta[property="og:title"]', "content", landingSeoTitle)

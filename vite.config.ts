@@ -5,23 +5,116 @@ import react from "@vitejs/plugin-react"
 import { defineConfig, loadEnv, type Plugin } from "vite"
 
 const localFunctionRoutes: Record<string, string> = {
+  "/api/assistant/briefing": "assistant-briefing",
+  "/api/assistant/preferences": "assistant-preferences",
+  "/api/assistant/threads": "assistant-threads",
+  "/api/assistant/turns": "assistant-turns",
+  "/api/assistant/voice-token": "assistant-voice-token",
   "/api/client-error": "client-error",
   "/api/deepgram/health": "deepgram-health",
   "/api/deepgram/token": "deepgram-token",
   "/api/import/accounts": "import-accounts",
+  "/api/import/enrichment-status": "import-enrichment-status",
   "/api/import/opportunities": "import-opportunities",
   "/api/openai/account-enrichment": "account-enrichment",
+  "/api/openai/contact-enrichment": "contact-enrichment",
   "/api/openai/customer-research": "customer-research",
   "/api/openai/health": "openai-health",
   "/api/openai/key": "openai-key",
   "/api/openai/live-guidance": "live-guidance",
+  "/api/openai/live-question": "live-question",
   "/api/openai/live-state": "live-state",
   "/api/openai/post-call-outputs": "post-call-outputs",
   "/api/openai/seller-domain-research": "seller-domain-research",
   "/api/openai/speaker-attribution": "speaker-attribution",
+  "/api/meeting-bots": "meeting-bots",
   "/api/session/activity": "session-activity",
   "/api/session/policy": "session-policy",
   "/api/session/status": "session-status",
+  "/api/system/env": "env-check",
+}
+
+type LocalDynamicFunctionRoute = {
+  functionName: string
+  parameterNames: string[]
+  pattern: RegExp
+}
+
+const localDynamicFunctionRoutes: LocalDynamicFunctionRoute[] = [
+  {
+    functionName: "assistant-messages",
+    parameterNames: ["threadId"],
+    pattern: /^\/api\/assistant\/threads\/([^/]+)\/messages$/,
+  },
+  {
+    functionName: "assistant-thread",
+    parameterNames: ["threadId"],
+    pattern: /^\/api\/assistant\/threads\/([^/]+)$/,
+  },
+  {
+    functionName: "assistant-action-confirm",
+    parameterNames: ["proposalId"],
+    pattern: /^\/api\/assistant\/actions\/([^/]+)\/confirm$/,
+  },
+  {
+    functionName: "assistant-actions",
+    parameterNames: ["proposalId"],
+    pattern: /^\/api\/assistant\/actions\/([^/]+)$/,
+  },
+  {
+    functionName: "next-call-brief-evidence",
+    parameterNames: ["briefId", "itemId"],
+    pattern: /^\/api\/next-call-briefs\/([^/]+)\/items\/([^/]+)\/evidence$/,
+  },
+  {
+    functionName: "next-call-brief-apply",
+    parameterNames: ["briefId"],
+    pattern: /^\/api\/next-call-briefs\/([^/]+)\/apply-next-step$/,
+  },
+  {
+    functionName: "next-call-brief",
+    parameterNames: ["opportunityId"],
+    pattern: /^\/api\/opportunities\/([^/]+)\/next-call-brief$/,
+  },
+  {
+    functionName: "meeting-bots",
+    parameterNames: ["sessionId", "participantId"],
+    pattern: /^\/api\/meeting-bots\/([^/]+)\/participants\/([^/]+)\/attribution$/,
+  },
+  {
+    functionName: "meeting-bots",
+    parameterNames: ["sessionId"],
+    pattern: /^\/api\/meeting-bots\/([^/]+)\/(?:heartbeat|disconnect|fallback)$/,
+  },
+  {
+    functionName: "meeting-bots",
+    parameterNames: ["sessionId"],
+    pattern: /^\/api\/meeting-bots\/([^/]+)$/,
+  },
+]
+
+function resolveLocalFunctionRoute(pathname: string) {
+  const exactFunctionName = localFunctionRoutes[pathname]
+  if (exactFunctionName) return { functionName: exactFunctionName, params: {} as Record<string, string> }
+
+  for (const route of localDynamicFunctionRoutes) {
+    const match = route.pattern.exec(pathname)
+    if (!match) continue
+    const params = Object.fromEntries(
+      route.parameterNames.map((name, index) => [name, decodeLocalRouteParameter(match[index + 1] ?? "")])
+    )
+    return { functionName: route.functionName, params }
+  }
+
+  return null
+}
+
+function decodeLocalRouteParameter(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
 }
 
 function normalizeModuleId(id: string) {
@@ -35,9 +128,9 @@ function localNetlifyFunctionsPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const requestUrl = req.url ? new URL(req.url, `http://${req.headers.host ?? "127.0.0.1"}`) : null
-        const functionName = requestUrl ? localFunctionRoutes[requestUrl.pathname] : undefined
+        const route = requestUrl ? resolveLocalFunctionRoute(requestUrl.pathname) : null
 
-        if (!requestUrl || !functionName) {
+        if (!requestUrl || !route) {
           next()
           return
         }
@@ -53,8 +146,20 @@ function localNetlifyFunctionsPlugin(): Plugin {
             requestOptions.duplex = "half"
           }
 
-          const module = await server.ssrLoadModule(`/netlify/functions/${functionName}.ts`)
-          const response: Response = await module.default(new Request(requestUrl.toString(), requestOptions), {})
+          const module = await server.ssrLoadModule(`/netlify/functions/${route.functionName}.ts`)
+          const localContext = {
+            params: route.params,
+            requestId: `local-${Date.now().toString(36)}`,
+            waitUntil(promise: Promise<unknown>) {
+              void Promise.resolve(promise).catch(() => {
+                server.config.logger.error(`Local background work failed in ${route.functionName}.`)
+              })
+            },
+          }
+          const response: Response = await module.default(
+            new Request(requestUrl.toString(), requestOptions),
+            localContext
+          )
 
           res.statusCode = response.status
           response.headers.forEach((value, key) => res.setHeader(key, value))
