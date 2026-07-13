@@ -52,10 +52,15 @@ test("message announcements avoid replaying the whole transcript to screen reade
 test("composer, search, thread, and artifact controls meet mobile touch and focus expectations", () => {
   assert.match(workspace, /aria-label="Message SalesFrame"/)
   assert.match(workspace, /aria-describedby=\{statusId\}/)
-  assert.match(workspace, /className="max-h-32 min-h-11 min-w-0 flex-1/)
-  assert.match(workspace, /className="h-11 min-h-11 shrink-0 px-3"/)
+  assert.match(workspace, /<Input[\s\S]*type="text"[\s\S]*enterKeyHint="send"/)
+  assert.match(workspace, /className="h-11 min-h-11 min-w-0 flex-1 truncate/)
+  assert.match(workspace, /className="h-11 min-h-11 w-11 min-w-11 shrink-0 px-0 sm:w-auto sm:px-3"/)
+  assert.match(workspace, /aria-label="Stop response"/)
+  assert.match(workspace, /<span className="hidden sm:inline">Stop response<\/span>/)
   assert.match(workspace, /aria-label="Send message"/)
   assert.match(workspace, /aria-label=\{voiceActive \? "Stop voice input"/)
+  assert.match(workspace, /<MicIcon aria-hidden="true"/)
+  assert.match(workspace, /<SendIcon aria-hidden="true"/)
   assert.match(workspace, /className="flex min-h-12 min-w-0 flex-1[\s\S]*aria-current=/)
   assert.match(workspace, /<SearchIcon[\s\S]*aria-hidden="true"[\s\S]*className="!pl-10"/)
 

@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 
 import type { Database, Json } from "../../../src/lib/supabase/database.types"
 import {
+  buildAssistantActionResultArtifact,
   buildAssistantAccountCollection,
   buildAssistantCallCollection,
   buildAssistantCapabilityHandoffArtifact,
@@ -921,7 +922,7 @@ export async function confirmAssistantProposal(
   proposalId: string,
   options: AssistantAuthorizationOptions
 ) {
-  await authorizeAssistantProposal(supabase, proposalId, options)
+  const proposal = await authorizeAssistantProposal(supabase, proposalId, options)
   const { data, error } = await supabase.rpc("execute_assistant_action_proposal", {
     target_proposal_id: proposalId,
     target_user_id: options.userId,
@@ -948,7 +949,148 @@ export async function confirmAssistantProposal(
   if (isRecord(data) && data.status === "expired") {
     throw new AppError("assistant_action_expired", "That action expired. Ask SalesFrame to prepare it again.", 409)
   }
+
+  // The CRM mutation is already complete at this point. Result presentation is
+  // deliberately best-effort so a transient artifact write can never make the
+  // seller retry a change that has actually succeeded.
+  try {
+    const artifact = await buildAssistantProposalResultArtifact(supabase, proposal, data)
+    if (!artifact) return data
+    if (!isAssistantArtifactsEnabled()) return { ...asResponseRecord(data), artifact }
+
+    const { error: artifactError } = await supabase.rpc("persist_assistant_action_result_artifact", {
+      target_artifact: toAssistantPersistedArtifact(artifact) as unknown as Json,
+      target_proposal_id: proposal.id,
+      target_user_id: options.userId,
+    })
+    if (artifactError) return { ...asResponseRecord(data), artifact }
+
+    try {
+      const persistedArtifact = await getAssistantArtifactById(supabase, artifact.id, options)
+      return { ...asResponseRecord(data), artifact: persistedArtifact }
+    } catch {
+      return { ...asResponseRecord(data), artifact }
+    }
+  } catch {
+    return data
+  }
+}
+
+async function buildAssistantProposalResultArtifact(
+  supabase: SupabaseClient<Database>,
+  proposal: AssistantProposalRow,
+  result: Json
+) {
+  if (!isRecord(result) || result.status !== "completed") return null
+  const resourceType = result.resourceType
+  const resourceId = result.resourceId
+  if (
+    !["account", "opportunity", "contact"].includes(String(resourceType)) ||
+    typeof resourceId !== "string"
+  ) return null
+
+  const normalizedResourceId = assertAssistantUuid(resourceId, "resourceId")
+  const capabilityId = assertAssistantCapabilityId(proposal.capability_id)
+  const authoritativeRecord = await loadAssistantActionResultRecord(
+    supabase,
+    proposal.workspace_id,
+    resourceType as AssistantResourceType,
+    normalizedResourceId
+  )
+  const record = authoritativeRecord ?? fallbackAssistantActionResultRecord(
+    proposal,
+    resourceType as AssistantResourceType,
+    normalizedResourceId
+  )
+  return buildAssistantActionResultArtifact({
+    artifactId: proposal.id,
+    capabilityId,
+    record,
+    resourceType: resourceType as AssistantResourceType,
+  })
+}
+
+async function loadAssistantActionResultRecord(
+  supabase: SupabaseClient<Database>,
+  workspaceId: string,
+  resourceType: AssistantResourceType,
+  resourceId: string
+): Promise<Record<string, unknown> | null> {
+  if (resourceType === "account") {
+    const { data, error } = await supabase
+      .from("accounts")
+      .select("id,name,website,industry,region,archived_at")
+      .eq("workspace_id", workspaceId)
+      .eq("id", resourceId)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    return data
+  }
+  if (resourceType === "opportunity") {
+    const { data, error } = await supabase
+      .from("opportunities")
+      .select("id,account_id,name,stage,amount,close_date,next_step,archived_at")
+      .eq("workspace_id", workspaceId)
+      .eq("id", resourceId)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    return data
+  }
+  const { data, error } = await supabase
+    .from("contacts")
+    .select("id,account_id,full_name,job_title,department,seniority,archived_at")
+    .eq("workspace_id", workspaceId)
+    .eq("id", resourceId)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
   return data
+}
+
+function fallbackAssistantActionResultRecord(
+  proposal: AssistantProposalRow,
+  resourceType: AssistantResourceType,
+  resourceId: string
+) {
+  const argumentsValue = isRecord(proposal.arguments) ? proposal.arguments : {}
+  const values = isRecord(argumentsValue.values) ? argumentsValue.values : {}
+  const preview = isRecord(proposal.preview) ? proposal.preview : {}
+  const previewTitle = typeof preview.title === "string" ? preview.title : ""
+  const previewLabel = previewTitle.includes(":")
+    ? previewTitle.slice(previewTitle.indexOf(":") + 1).trim()
+    : ""
+  const accountId = typeof argumentsValue.accountId === "string" ? argumentsValue.accountId : undefined
+  if (resourceType === "account") {
+    return {
+      id: resourceId,
+      industry: values.industry,
+      name: values.name ?? (previewLabel || "Account"),
+      region: values.region,
+      website: values.website,
+    }
+  }
+  if (resourceType === "opportunity") {
+    return {
+      account_id: accountId,
+      amount: values.amount,
+      close_date: values.closeDate,
+      id: resourceId,
+      name: values.name ?? (previewLabel || "Opportunity"),
+      next_step: values.nextStep,
+      stage: values.stage,
+    }
+  }
+  return {
+    account_id: accountId,
+    department: values.department,
+    full_name: values.fullName ?? (previewLabel || "Contact"),
+    id: resourceId,
+    job_title: values.jobTitle,
+    seniority: values.seniority,
+  }
+}
+
+function asResponseRecord(value: Json) {
+  return isRecord(value) ? value : {}
 }
 
 export async function buildAssistantBriefing(
@@ -2009,7 +2151,7 @@ async function loadAssistantArtifactsForMessages(
     .eq("owner_user_id", userId)
     .in("message_id", messageIds)
     .order("position", { ascending: true })
-    .limit(Math.min(400, messageIds.length * 12))
+    .limit(Math.min(400, messageIds.length * 16))
   if (error) throw new Error(error.message)
   const artifactIds = (artifacts ?? []).map((artifact) => artifact.id)
   let actions: Database["public"]["Tables"]["assistant_artifact_actions"]["Row"][] = []

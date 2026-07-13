@@ -82,6 +82,16 @@ test("assistant read intent covers contacts, calls, accounts, and current accoun
     kind: "opportunities",
     scopedAccountId: "7d0df7a2-caf4-4f92-a54f-130f249334c5",
   })
+
+  assert.deepEqual(parseAssistantReadIntent("Show all active opportunities across the workspace", {
+    path: "/opportunities/8916471e-69f0-4f35-980a-2432a3a464c3",
+    accountId: "7d0df7a2-caf4-4f92-a54f-130f249334c5",
+    opportunityId: "8916471e-69f0-4f35-980a-2432a3a464c3",
+  }), {
+    accountQuery: null,
+    kind: "opportunities",
+    scopedAccountId: null,
+  })
 })
 
 test("assistant read intent does not intercept writes or live coaching questions", () => {

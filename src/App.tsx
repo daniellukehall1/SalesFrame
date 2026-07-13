@@ -8351,8 +8351,9 @@ function App() {
         handleWorkspaceInterfaceModeChange("workspace")
         return
       case "accounts.list":
-        if (resolvedAccountId) openAccountSurface()
-        else openView("home")
+        // A collection action is workspace-scoped. It must never inherit the
+        // currently selected account or opportunity when used as a fallback.
+        openView("home")
         return
       case "accounts.open":
         if (resolvedAccountId) openAccountSurface()

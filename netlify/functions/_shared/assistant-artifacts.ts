@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 
 import { getEnv } from "./env"
 import { resolveServerAssistantArtifactCapability } from "./assistant-artifact-capabilities"
+import type { AssistantCapabilityId, AssistantResourceType } from "./assistant-core"
 
 export const assistantArtifactKinds = [
   "collection",
@@ -108,6 +109,21 @@ export type AssistantPersistedArtifact = {
   data: Record<string, unknown>
   actions: Array<AssistantArtifactAction & { recordId?: string }>
 }
+
+const assistantActionResultDefinitions = {
+  create_account: { operation: "created", resourceType: "account" },
+  update_account: { operation: "updated", resourceType: "account" },
+  archive_account: { operation: "archived", resourceType: "account" },
+  create_opportunity: { operation: "created", resourceType: "opportunity" },
+  update_opportunity: { operation: "updated", resourceType: "opportunity" },
+  archive_opportunity: { operation: "archived", resourceType: "opportunity" },
+  create_contact: { operation: "created", resourceType: "contact" },
+  update_contact: { operation: "updated", resourceType: "contact" },
+  archive_contact: { operation: "archived", resourceType: "contact" },
+} satisfies Record<AssistantCapabilityId, {
+  operation: "created" | "updated" | "archived"
+  resourceType: AssistantResourceType
+}>
 
 export function buildAssistantCapabilityHandoffArtifact(
   capabilityId: string,
@@ -222,6 +238,100 @@ export function buildAssistantContactCollection(
       ? `${count} ${count === 1 ? "contact" : "contacts"} for ${account.name}`
       : count === 1 ? "1 contact" : `${count} contacts`,
   })
+}
+
+export function buildAssistantActionResultArtifact({
+  artifactId,
+  capabilityId,
+  record,
+  resourceType,
+}: {
+  artifactId: string
+  capabilityId: AssistantCapabilityId
+  record: Record<string, unknown>
+  resourceType: AssistantResourceType
+}): AssistantSerializedArtifact {
+  const definition = assistantActionResultDefinitions[capabilityId]
+  if (
+    definition.resourceType !== resourceType ||
+    String(record.id ?? "") === "" ||
+    (resourceType !== "account" && String(record.account_id ?? "") === "")
+  ) {
+    throw new Error("Assistant action result was invalid.")
+  }
+
+  const operation = definition.operation
+  const labels = {
+    account: requiredLabel(record.name, "Account"),
+    contact: requiredLabel(record.full_name, "Contact"),
+    opportunity: requiredLabel(record.name, "Opportunity"),
+  }
+  const label = labels[resourceType]
+  const isArchived = operation === "archived"
+  const action = isArchived
+    ? archivedRecordAction(resourceType)
+    : openRecordAction(resourceType, resourceType === "account"
+      ? { accountId: String(record.id) }
+      : resourceType === "opportunity"
+        ? { accountId: String(record.account_id), opportunityId: String(record.id) }
+        : { accountId: String(record.account_id), contactId: String(record.id) })
+
+  const artifactRecord: AssistantArtifactRecord = resourceType === "account"
+    ? {
+        actions: [action],
+        description: optionalText(record.website),
+        fields: compactFields([
+          field("industry", "Industry", record.industry),
+          field("region", "Region", record.region),
+        ]),
+        id: String(record.id),
+        kind: "account",
+        label,
+      }
+    : resourceType === "opportunity"
+      ? {
+          actions: [action],
+          description: optionalText(record.next_step) ? `Next step: ${optionalText(record.next_step)}` : undefined,
+          fields: compactFields([
+            field("stage", "Stage", record.stage),
+            field("amount", "Amount", record.amount),
+            field("close-date", "Close date", record.close_date),
+          ]),
+          id: String(record.id),
+          kind: "opportunity",
+          label,
+        }
+      : {
+          actions: [action],
+          description: optionalText(record.job_title),
+          fields: compactFields([
+            field("department", "Department", record.department),
+            field("seniority", "Seniority", record.seniority),
+          ]),
+          id: String(record.id),
+          kind: "contact",
+          label,
+        }
+
+  const resourceLabel = resourceType === "opportunity"
+    ? "Opportunity"
+    : resourceType === "account"
+      ? "Account"
+      : "Contact"
+  return {
+    actions: [],
+    data: { records: [artifactRecord] },
+    description: operation === "created"
+      ? `${label} is ready.`
+      : operation === "updated"
+        ? `Your changes to ${label} are saved.`
+        : `${label} was archived.`,
+    id: artifactId,
+    kind: "record",
+    schemaVersion: 1,
+    status: "completed",
+    title: `${resourceLabel} ${operation}`,
+  }
 }
 
 export function buildAssistantCallCollection(
@@ -499,6 +609,20 @@ function openRecordAction(
     label: labels[kind],
     risk: "none",
     target,
+  }
+}
+
+function archivedRecordAction(
+  kind: "account" | "opportunity" | "contact"
+): AssistantArtifactAction {
+  const plural = kind === "opportunity" ? "opportunities" : `${kind}s`
+  return {
+    behavior: "secure_handoff",
+    capabilityId: `${plural}.restore`,
+    id: randomUUID(),
+    label: `View archived ${plural}`,
+    risk: "standard",
+    target: {},
   }
 }
 

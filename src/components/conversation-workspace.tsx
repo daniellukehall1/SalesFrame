@@ -61,7 +61,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { Textarea } from "@/components/ui/textarea"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   ASSISTANT_CAPABILITIES,
@@ -831,7 +830,7 @@ function ConversationComposer({
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
 }) {
   const statusId = React.useId()
-  const composerInputRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const composerInputRef = React.useRef<HTMLInputElement | null>(null)
   const restoreComposerFocusRef = React.useRef(false)
   const voiceActive = voice?.state === "listening"
   const voiceRequesting = voice?.state === "requesting"
@@ -846,23 +845,25 @@ function ConversationComposer({
   return (
     <div className="shrink-0 border-t bg-background px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-6 sm:pb-4">
       <form className="mx-auto w-full max-w-3xl min-w-0" onSubmit={onSubmit}>
-        <div className="flex min-w-0 items-end gap-2 rounded-2xl border bg-background p-2 shadow-sm focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30">
-          <Textarea
+        <div className="flex min-w-0 items-center gap-1 rounded-2xl border bg-background p-2 shadow-sm focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30 sm:gap-2">
+          <Input
             ref={composerInputRef}
+            type="text"
             value={draft}
             readOnly={isBusy}
             aria-busy={isBusy}
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return
+              if (event.key !== "Enter" || event.nativeEvent.isComposing) return
               event.preventDefault()
               event.currentTarget.form?.requestSubmit()
             }}
             placeholder={placeholder}
             aria-label="Message SalesFrame"
             aria-describedby={statusId}
-            rows={1}
-            className="max-h-32 min-h-11 min-w-0 flex-1 resize-none border-0 bg-transparent px-2.5 py-2.5 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+            autoComplete="off"
+            enterKeyHint="send"
+            className="h-11 min-h-11 min-w-0 flex-1 truncate border-0 bg-transparent px-2.5 text-base shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
           />
 
           {voice ? (
@@ -870,7 +871,7 @@ function ConversationComposer({
               type="button"
               variant={voiceActive ? "secondary" : "ghost"}
               size="icon"
-              className="shrink-0"
+              className="h-11 min-h-11 w-11 min-w-11 shrink-0"
               disabled={voiceBusy || isBusy || (voiceRequesting && !voice.onDiscard)}
               aria-label={voiceActive ? "Stop voice input" : voiceRequesting ? "Cancel voice input" : "Start voice input"}
               aria-pressed={voiceActive}
@@ -880,7 +881,7 @@ function ConversationComposer({
                 else void voice.onStart()
               }}
             >
-              {voiceActive ? <CircleStopIcon /> : voiceRequesting ? <XIcon /> : <MicIcon />}
+              {voiceActive ? <CircleStopIcon aria-hidden="true" /> : voiceRequesting ? <XIcon aria-hidden="true" /> : <MicIcon aria-hidden="true" />}
             </Button>
           ) : null}
 
@@ -888,18 +889,20 @@ function ConversationComposer({
             <Button
               type="button"
               variant="ghost"
-              className="h-11 min-h-11 shrink-0 px-3"
+              className="h-11 min-h-11 w-11 min-w-11 shrink-0 px-0 sm:w-auto sm:px-3"
+              aria-label="Stop response"
+              title="Stop response"
               onClick={() => {
                 restoreComposerFocusRef.current = true
                 onStopResponse()
               }}
             >
-              <CircleStopIcon data-icon="inline-start" />
-              Stop response
+              <CircleStopIcon aria-hidden="true" />
+              <span className="hidden sm:inline">Stop response</span>
             </Button>
           ) : (
-            <Button type="submit" size="icon" className="shrink-0" disabled={!draft.trim() || isBusy} aria-label="Send message">
-              <SendIcon />
+            <Button type="submit" size="icon" className="h-11 min-h-11 w-11 min-w-11 shrink-0" disabled={!draft.trim() || isBusy} aria-label="Send message">
+              <SendIcon aria-hidden="true" />
             </Button>
           )}
         </div>
@@ -1226,7 +1229,7 @@ function AllActionsPanel({
         </div>
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <Input autoFocus value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Search actions" aria-label="Search all actions" className="!pl-10" />
+          <Input autoFocus={titleKind === "dialog"} value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Search actions" aria-label="Search all actions" className="!pl-10" />
         </div>
       </div>
 

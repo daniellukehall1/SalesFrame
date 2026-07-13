@@ -16,12 +16,17 @@ export function parseAssistantReadIntent(
   if (!kind) return null
   if (!isReadRequest(normalized, kind)) return null
   const accountQuery = kind === "accounts" ? null : extractAccountQuery(text)
+  const workspaceScoped = isWorkspaceScopedRequest(normalized)
 
   return {
     accountQuery,
     kind,
-    scopedAccountId: accountQuery ? null : routeContext.accountId ?? null,
+    scopedAccountId: accountQuery || workspaceScoped ? null : routeContext.accountId ?? null,
   }
+}
+
+function isWorkspaceScopedRequest(text: string) {
+  return /\b(?:across (?:the )?workspace|workspace-wide|all active)\b/.test(text)
 }
 
 function isReadRequest(text: string, kind: AssistantReadIntent["kind"]) {

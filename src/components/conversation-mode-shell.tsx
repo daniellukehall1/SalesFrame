@@ -45,6 +45,16 @@ type ConversationModeShellProps = {
   onSwitchToWorkspaceView: () => void
 }
 
+// These read capabilities have native collection artifacts. Route them through
+// the deterministic assistant read lane so a click opens usable data in
+// Conversation mode instead of inheriting whichever record tab is active.
+const assistantCollectionPrompts: Readonly<Record<string, string>> = {
+  "accounts.list": "Show all active accounts across the workspace",
+  "contacts.list": "Show me contacts",
+  "opportunities.list": "Show all active opportunities across the workspace",
+  "calls.list": "Show all calls across the workspace",
+}
+
 export function ConversationModeShell({
   briefing,
   contextualActions,
@@ -93,6 +103,7 @@ export function ConversationModeShell({
   const userStoppedTurnsRef = React.useRef(new WeakSet<AbortController>())
   const preferenceSaveQueueRef = React.useRef<Promise<void>>(Promise.resolve())
   const preferenceSaveVersionRef = React.useRef(0)
+  const replacementThreadAfterDeleteRef = React.useRef("")
   const messageMutationVersionRef = React.useRef(0)
   const proposalRevisionRef = React.useRef(0)
   const proposalMutationKeysRef = React.useRef(new Set<string>())
@@ -127,6 +138,7 @@ export function ConversationModeShell({
     messageMutationVersionRef.current += 1
     proposalRevisionRef.current += 1
     proposalMutationKeysRef.current.clear()
+    replacementThreadAfterDeleteRef.current = ""
     activeTurnRef.current?.abort()
     activeTurnRef.current = null
     messageRequestIdRef.current += 1
@@ -230,6 +242,7 @@ export function ConversationModeShell({
   }, [activeThreadId, loadMessages])
 
   const createThread = React.useCallback(async () => {
+    replacementThreadAfterDeleteRef.current = ""
     const generation = requestGenerationRef.current
     const activationVersion = preferenceSaveVersionRef.current + 1
     preferenceSaveVersionRef.current = activationVersion
@@ -746,27 +759,79 @@ export function ConversationModeShell({
     }
   }, [client, createThread, selectThread, threads])
 
-  const deleteThread = React.useCallback(async (threadId: string) => {
+  const deleteThread = React.useCallback((threadId: string) => {
     const generation = requestGenerationRef.current
-    try {
-      const deletion = preferenceSaveQueueRef.current
-        .catch(() => undefined)
-        .then(() => requestGenerationRef.current === generation
-          ? client.deleteThread(threadId).then(() => true)
-          : false
-        )
-      preferenceSaveQueueRef.current = deletion.then(() => undefined, () => undefined)
-      if (!await deletion) return
-      if (requestGenerationRef.current !== generation) return
-      const remaining = threads.filter((thread) => thread.id !== threadId)
-      setThreads(remaining)
-      if (threadId !== activeThreadIdRef.current) return
-      if (remaining[0]) selectThread(remaining[0].id)
-      else await createThread()
-    } catch {
-      if (requestGenerationRef.current !== generation) return
-      setAssistantUnavailableMessage("SalesFrame couldn't delete that conversation. Nothing was changed.")
+    const deletedIndex = threads.findIndex((thread) => thread.id === threadId)
+    if (deletedIndex < 0) return
+    const deletedThread = threads[deletedIndex]
+    if (!deletedThread) return
+    const remaining = threads.filter((thread) => thread.id !== threadId)
+    const wasActiveThread = threadId === activeThreadIdRef.current
+    const needsReplacementThread = wasActiveThread && remaining.length === 0
+    if (needsReplacementThread) replacementThreadAfterDeleteRef.current = threadId
+    const deletion = preferenceSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => requestGenerationRef.current === generation
+        ? client.deleteThread(threadId).then(() => true)
+        : false
+      )
+    preferenceSaveQueueRef.current = deletion.then(() => undefined, () => undefined)
+
+    // Remove first so the destructive confirmation feels immediate. The exact
+    // server-owned thread continues deleting in the background and is restored
+    // in its original position if that request fails.
+    setAssistantUnavailableMessage("")
+    setThreads(remaining)
+    if (wasActiveThread) {
+      if (remaining[0]) {
+        selectThread(remaining[0].id)
+      } else {
+        preferenceSaveVersionRef.current += 1
+        messageMutationVersionRef.current += 1
+        proposalRevisionRef.current += 1
+        activeTurnRef.current?.abort()
+        activeTurnRef.current = null
+        messageRequestIdRef.current += 1
+        activeThreadIdRef.current = ""
+        activeArtifactRef.current = null
+        setActiveThreadId("")
+        setMessages([])
+        setProposals([])
+        setActiveArtifact(null)
+        setArtifactActionError(null)
+        setArtifactSearchValue("")
+        setCompletedMessageId("")
+        setAssistantStatus("")
+        setIsResponding(false)
+        setIsResponseStoppable(false)
+        setIsLoadingMessages(true)
+        replaceAssistantQuery({ thread: null, artifact: null })
+      }
     }
+
+    void deletion.then(async (deleted) => {
+      if (!deleted || requestGenerationRef.current !== generation) return
+      if (
+        !needsReplacementThread ||
+        replacementThreadAfterDeleteRef.current !== threadId ||
+        activeThreadIdRef.current
+      ) return
+      const replacement = await createThread()
+      if (!replacement && requestGenerationRef.current === generation && !activeThreadIdRef.current) {
+        setIsLoadingMessages(false)
+      }
+    }).catch(() => {
+      if (requestGenerationRef.current !== generation) return
+      if (replacementThreadAfterDeleteRef.current === threadId) {
+        replacementThreadAfterDeleteRef.current = ""
+      }
+      setThreads((items) => restoreThreadAtIndex(items, deletedThread, deletedIndex))
+      setAssistantUnavailableMessage("SalesFrame couldn't delete that conversation. It has been restored.")
+      if (needsReplacementThread && !activeThreadIdRef.current) {
+        setIsLoadingMessages(false)
+        selectThread(deletedThread.id)
+      }
+    })
   }, [client, createThread, selectThread, threads])
 
   const restoreArtifactFromLocation = React.useCallback(() => {
@@ -910,6 +975,19 @@ export function ConversationModeShell({
     }
   }, [client, isArtifactWorking])
 
+  const handleCapabilityInvocation = React.useCallback((
+    capabilityId: string,
+    _source: "briefing" | "contextual" | "all_actions" | "finding",
+    target?: AssistantActionTarget
+  ) => {
+    const collectionPrompt = assistantCollectionPrompts[capabilityId]
+    if (collectionPrompt && activeThreadIdRef.current) {
+      void submitTurn(collectionPrompt)
+      return
+    }
+    onInvokeCapability(capabilityId, target)
+  }, [onInvokeCapability, submitTurn])
+
   const canvas = activeArtifact ? {
     id: activeArtifact.id,
     title: activeArtifact.title,
@@ -961,7 +1039,7 @@ export function ConversationModeShell({
       onCancelProposal={cancelProposal}
       onConfirmProposal={confirmProposal}
       onDeleteThread={deleteThread}
-      onInvokeCapability={(capabilityId, _source, target) => onInvokeCapability(capabilityId, target)}
+      onInvokeCapability={handleCapabilityInvocation}
       onNewThread={async () => { await createThread() }}
       onOpenReference={onOpenReference}
       onOpenArtifact={openArtifact}
@@ -984,6 +1062,17 @@ function orderAssistantProposals(proposals: AssistantActionProposal[]) {
     if (leftFailed !== rightFailed) return leftFailed - rightFailed
     return left.expiresAt.localeCompare(right.expiresAt)
   })
+}
+
+function restoreThreadAtIndex(
+  threads: AssistantThreadSummary[],
+  thread: AssistantThreadSummary,
+  index: number
+) {
+  if (threads.some((item) => item.id === thread.id)) return threads
+  const nextThreads = [...threads]
+  nextThreads.splice(Math.min(Math.max(index, 0), nextThreads.length), 0, thread)
+  return nextThreads
 }
 
 function hasProposalMutationForThread(keys: Set<string>, threadId: string) {

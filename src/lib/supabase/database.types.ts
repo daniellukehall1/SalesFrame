@@ -3404,6 +3404,14 @@ export type Database = {
         }
         Returns: Json
       }
+      persist_assistant_action_result_artifact: {
+        Args: {
+          target_proposal_id: string
+          target_user_id: string
+          target_artifact: Json
+        }
+        Returns: Json
+      }
       register_call_recording_upload: {
         Args: {
           target_workspace_id: string

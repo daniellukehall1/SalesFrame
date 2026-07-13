@@ -56,6 +56,7 @@ test("threads and all actions remain available without an AI response", async ()
   assert.match(component, /Delete this conversation\?/)
   assert.match(component, /Search all actions/)
   assert.match(component, /placeholder="Search actions"[^>]*className="!pl-10"/)
+  assert.match(component, /autoFocus=\{titleKind === "dialog"\}/)
   assert.match(component, /SalesFrame will help you choose the right record\./)
   assert.match(component, /onInvoke\(item\.id\)/)
   assert.match(component, /titleKind=\{isMobile \? "drawer" : "dialog"\}/)
@@ -177,6 +178,25 @@ test("assistant streaming accepts only allowlisted event shapes", async () => {
   assert.match(client, /encodeURIComponent\(proposalId\)/)
 })
 
+test("browse actions open native collections without inheriting the current record", async () => {
+  const shell = await read("src/components/conversation-mode-shell.tsx")
+  const app = await read("src/App.tsx")
+
+  assert.match(shell, /"accounts\.list": "Show all active accounts across the workspace"/)
+  assert.match(shell, /"opportunities\.list": "Show all active opportunities across the workspace"/)
+  assert.match(shell, /"contacts\.list": "Show me contacts"/)
+  assert.match(shell, /"calls\.list": "Show all calls across the workspace"/)
+  assert.match(shell, /collectionPrompt && activeThreadIdRef\.current[\s\S]*void submitTurn\(collectionPrompt\)/)
+  assert.match(shell, /onInvokeCapability=\{handleCapabilityInvocation\}/)
+
+  const accountsListCase = app.slice(
+    app.indexOf('case "accounts.list":'),
+    app.indexOf('case "accounts.open":')
+  )
+  assert.match(accountsListCase, /openView\("home"\)/)
+  assert.doesNotMatch(accountsListCase, /openAccountSurface/)
+})
+
 test("thread changes isolate stale messages, streams, and proposals", async () => {
   const shell = await read("src/components/conversation-mode-shell.tsx")
 
@@ -187,6 +207,26 @@ test("thread changes isolate stale messages, streams, and proposals", async () =
   assert.match(shell, /setMessages\(\[\]\)\s*\n\s*setProposals\(\[\]\)/)
   assert.match(shell, /activeThreadIdRef\.current === proposalThreadId/)
   assert.match(shell, /isComposerDisabled=\{isLoadingThreads \|\| isLoadingMessages \|\| !activeThreadId\}/)
+})
+
+test("conversation deletion removes immediately while the exact server deletion continues in the background", async () => {
+  const shell = await read("src/components/conversation-mode-shell.tsx")
+  const deletion = shell.slice(
+    shell.indexOf("const deleteThread = React.useCallback"),
+    shell.indexOf("const restoreArtifactFromLocation")
+  )
+
+  assert.match(deletion, /const deletedThread = threads\[deletedIndex\]/)
+  assert.match(deletion, /setThreads\(remaining\)/)
+  assert.match(deletion, /void deletion\.then/)
+  assert.doesNotMatch(deletion, /await deletion/)
+  assert.ok(deletion.indexOf("setThreads(remaining)") < deletion.indexOf("void deletion.then"))
+  assert.match(deletion, /restoreThreadAtIndex\(items, deletedThread, deletedIndex\)/)
+  assert.match(deletion, /It has been restored\./)
+  assert.match(deletion, /needsReplacementThread[\s\S]*createThread\(\)/)
+  assert.match(shell, /const replacementThreadAfterDeleteRef = React\.useRef\(""\)/)
+  assert.match(deletion, /replacementThreadAfterDeleteRef\.current !== threadId/)
+  assert.match(shell, /const createThread = React\.useCallback[\s\S]*replacementThreadAfterDeleteRef\.current = ""/)
 })
 
 test("failed requests preserve the draft and reconcile optimistic messages", async () => {
