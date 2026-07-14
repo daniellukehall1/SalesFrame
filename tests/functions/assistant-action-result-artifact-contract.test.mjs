@@ -64,4 +64,6 @@ test("the client inserts the result inline and lets the seller choose when to op
   assert.match(shell, /setMessages\(\(items\) => upsertAssistantArtifact\(items, result\.artifact!\)\)/)
   assert.match(artifacts, /kind: "record"/)
   assert.match(artifacts, /status: "completed"/)
+  assert.match(shell, /onActionCompleted\(result\.artifact\)/)
+  assert.match(shell, /if \(canOpenImmediately\) \{[\s\S]*onInvokeCapability\(action\.capabilityId, action\.target\)/)
 })

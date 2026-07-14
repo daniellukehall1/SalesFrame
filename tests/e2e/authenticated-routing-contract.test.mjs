@@ -213,7 +213,9 @@ test("account and opportunity tabs are controlled by their authenticated routes"
   assert.match(app, /setAccountTab: handleAccountTabChange/)
   assert.match(app, /activeView === "opportunity-contacts"[\s\S]*\? "contacts"/)
   assert.match(app, /activeView === "opportunity-history"[\s\S]*\? "history"/)
-  assert.match(app, /<Tabs[\s\S]*value=\{defaultTab\}[\s\S]*value === "contacts"[\s\S]*"opportunity-contacts"[\s\S]*value === "history"[\s\S]*"opportunity-history"/)
+  assert.match(app, /const handleOpportunitySectionChange = \(value: string\) => \{[\s\S]*value === "contacts"[\s\S]*"opportunity-contacts"[\s\S]*value === "history"[\s\S]*"opportunity-history"/)
+  assert.match(app, /<Tabs[\s\S]*value=\{defaultTab\}[\s\S]*onValueChange=\{handleOpportunitySectionChange\}/)
+  assert.match(app, /<ResponsiveSectionTabs[\s\S]*id="opportunity-sections"[\s\S]*value=\{defaultTab\}[\s\S]*onValueChange=\{handleOpportunitySectionChange\}/)
   assert.deepEqual(routes.parseAuthenticatedRoute("/opportunities/opportunity-1/next-call"), {
     kind: "opportunity",
     opportunityId: "opportunity-1",

@@ -54,15 +54,19 @@ test("artifact hydration reauthorizes targets and disables stale actions before 
   const reauthorizationPattern = /authorizeAssistantArtifactActionTargets|authorizePersistedArtifactTarget/
   const getReauthorizes = reauthorizationPattern.test(getArtifact)
   const historyReauthorizes = reauthorizationPattern.test(loadHistoryArtifacts)
-  const staleActionsAreDisabled = /disabled/.test(getArtifact + loadHistoryArtifacts)
+  const staleActionsAreDisabled = /disableAssistantArtifactActions/.test(getArtifact + loadHistoryArtifacts)
   const prepareIndex = secureHandoff.indexOf("client.prepareArtifactAction(artifact.id, action.id)")
   const handoffIndex = secureHandoff.indexOf('action.behavior === "secure_handoff"')
   const openReferenceIndex = secureHandoff.indexOf("prepared.capability.target")
   const everyHandoffIsPreparedServerSide =
     prepareIndex >= 0 && handoffIndex > prepareIndex && openReferenceIndex > handoffIndex
+  const immediateNavigationIsNarrowAndRevalidated =
+    /action\.behavior === "secure_handoff"[\s\S]*action\.risk === "none"[\s\S]*\["read", "navigate"\]/.test(secureHandoff) &&
+    /if \(canOpenImmediately\) \{[\s\S]*onInvokeCapability\(action\.capabilityId, action\.target\)[\s\S]*client\.prepareArtifactAction\(artifact\.id, action\.id\)/.test(secureHandoff)
 
   assert.ok(
-    (getReauthorizes && historyReauthorizes && staleActionsAreDisabled) || everyHandoffIsPreparedServerSide,
+    (getReauthorizes && historyReauthorizes && staleActionsAreDisabled && immediateNavigationIsNarrowAndRevalidated) ||
+      everyHandoffIsPreparedServerSide,
     "Saved actions must be reauthorized and disabled during direct/history hydration, or every handoff click must be prepared server-side."
   )
 })

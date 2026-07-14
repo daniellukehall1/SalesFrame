@@ -5,9 +5,10 @@ import test from "node:test"
 const root = new URL("../../", import.meta.url)
 const read = (path) => readFile(new URL(path, root), "utf8")
 
-const [workspace, artifactRenderer, shell, app] = await Promise.all([
+const [workspace, artifactRenderer, actionChip, shell, app] = await Promise.all([
   read("src/components/conversation-workspace.tsx"),
   read("src/components/assistant-artifact.tsx"),
+  read("src/components/assistant-action-chip.tsx"),
   read("src/components/conversation-mode-shell.tsx"),
   read("src/App.tsx"),
 ])
@@ -39,6 +40,30 @@ test("desktop and mobile overlays use the appropriate calm shadcn surface and re
   assert.match(workspace, /<DialogDescription asChild>/)
 })
 
+test("the mobile all-actions drawer owns a bounded vertical touch-scroll viewport", () => {
+  const allActions = workspace.slice(
+    workspace.indexOf("function AllActionsOverlay"),
+    workspace.indexOf("function DesktopCanvas")
+  )
+
+  assert.match(allActions, /h-\[min\(660px,92dvh\)\] max-h-\[92dvh\] overflow-hidden/)
+  assert.match(allActions, /grid min-h-0 flex-1 grid-rows-\[minmax\(0,1fr\)\] overflow-hidden/)
+  assert.match(allActions, /data-testid="all-actions-scroll-area"/)
+  assert.match(allActions, /className="h-full min-h-0 overflow-hidden overscroll-contain touch-pan-y"/)
+  assert.match(allActions, /data-vaul-no-drag=""/)
+})
+
+test("the mobile conversation drawer uses the same bounded touch-scroll structure", () => {
+  const conversations = workspace.slice(
+    workspace.indexOf("function ThreadsOverlay"),
+    workspace.indexOf("function AllActionsOverlay")
+  )
+
+  assert.match(conversations, /h-\[min\(620px,92dvh\)\] max-h-\[92dvh\] overflow-hidden/)
+  assert.match(conversations, /grid min-h-0 flex-1 grid-rows-\[minmax\(0,1fr\)\] overflow-hidden/)
+  assert.match(conversations, /className="h-full min-h-0 overflow-hidden overscroll-contain touch-pan-y" data-vaul-no-drag=""/)
+})
+
 test("message announcements avoid replaying the whole transcript to screen readers", () => {
   assert.match(workspace, /aria-label="Conversation messages"[\s\S]*aria-live="off"[\s\S]*role="log"/)
   assert.match(workspace, /<span className="sr-only">\{fromSeller \? "You said:" : "SalesFrame replied:"\}<\/span>/)
@@ -65,13 +90,27 @@ test("composer, search, thread, and artifact controls meet mobile touch and focu
   assert.match(workspace, /<SearchIcon[\s\S]*aria-hidden="true"[\s\S]*className="!pl-10"/)
 
   assert.match(artifactRenderer, /className="flex min-h-11 min-w-0 flex-1/)
-  assert.match(artifactRenderer, /className="min-h-11 max-w-full"/)
   assert.match(artifactRenderer, /className="min-h-11 w-full sm:w-auto"/)
   assert.match(artifactRenderer, /focus-visible:ring-3 focus-visible:ring-ring\/50/)
+  assert.match(actionChip, /after:-inset-y-1\.5/)
+  assert.match(actionChip, /!h-8 !min-h-8/)
+})
+
+test("generated actions expose one compact recommendation and a complete overflow menu", () => {
+  const contextualActions = workspace.slice(
+    workspace.indexOf("function ContextualActions"),
+    workspace.indexOf("function ProposalPreview")
+  )
+
+  assert.match(contextualActions, /const primaryAction = actions\[0\]/)
+  assert.match(contextualActions, /const remainingActions = actions\.slice\(1\)/)
+  assert.match(contextualActions, /<AssistantActionChip[\s\S]*onClick=\{\(\) => onInvoke\(primaryAction\)\}/)
+  assert.match(contextualActions, /<DropdownMenu[\s\S]*remainingActions\.map/)
+  assert.match(contextualActions, /More \$\{label\.toLocaleLowerCase\(\)\}/)
 })
 
 test("the composer respects mobile safe areas and returns focus after stopping a response", () => {
-  assert.match(workspace, /pb-\[calc\(0\.75rem\+env\(safe-area-inset-bottom\)\)\]/)
+  assert.match(workspace, /pb-\[calc\(0\.625rem\+env\(safe-area-inset-bottom\)\)\]/)
   assert.match(workspace, /restoreComposerFocusRef\.current = true[\s\S]*onStopResponse\(\)/)
   assert.match(workspace, /composerInputRef\.current\?\.focus\(\{ preventScroll: true \}\)/)
   assert.match(workspace, /role="status" aria-live="polite"[\s\S]*SalesFrame will ask before it changes anything/)
@@ -91,9 +130,33 @@ test("proposal confirmation is explicit, expiring, and visually distinguishes de
   assert.match(workspace, /whitespace-pre-wrap break-words[\s\S]*\[overflow-wrap:anywhere\]/)
 })
 
+test("artifact handoffs replace the current canvas and keep action review visible", () => {
+  const replacement = shell.slice(
+    shell.indexOf("const replaceArtifactWithWorkspaceSurface"),
+    shell.indexOf("const handleArtifactAction")
+  )
+  const interaction = shell.slice(
+    shell.indexOf("const handleArtifactAction"),
+    shell.indexOf("const stopResponse")
+  )
+  const workspaceMain = workspace.slice(
+    workspace.indexOf("<ScrollArea className=\"min-h-0 flex-1\""),
+    workspace.indexOf("<ThreadsOverlay")
+  )
+
+  assert.match(replacement, /activeArtifactRef\.current = null[\s\S]*setActiveArtifact\(null\)[\s\S]*replaceAssistantQuery\(\{ artifact: null \}\)/)
+  assert.match(interaction, /if \(canOpenImmediately\) \{[\s\S]*replaceArtifactWithWorkspaceSurface\(\)[\s\S]*onInvokeCapability/)
+  assert.match(interaction, /if \(prepared\.proposal\) \{[\s\S]*replaceArtifactWithWorkspaceSurface\(\)[\s\S]*setProposals/)
+  assert.ok(
+    workspaceMain.indexOf("</ScrollArea>") < workspaceMain.indexOf("{proposal ? ("),
+    "proposal review remains outside the scrolling message history"
+  )
+  assert.match(workspace, /!proposal &&[\s\S]*!isResponding &&[\s\S]*!artifactActionError/)
+})
+
 test("artifact rendering is plain-text, bounded, responsive, and reduced-motion aware", () => {
-  assert.match(artifactRenderer, /artifact\.records\.slice\(0, 3\)/)
-  assert.match(artifactRenderer, /artifact\.fields\.slice\(0, 4\)/)
+  assert.match(artifactRenderer, /artifact\.records\.slice\(0, 2\)/)
+  assert.match(artifactRenderer, /artifact\.fields\.slice\(0, 2\)/)
   assert.match(artifactRenderer, /actions\.slice\(0, 4\)/)
   assert.match(artifactRenderer, /grid-cols-1[\s\S]*sm:grid-cols-2/)
   assert.match(artifactRenderer, /break-words/)
@@ -128,7 +191,8 @@ test("artifact interactions carry exact IDs and never bypass the proposal confir
   assert.match(interaction, /client\.prepareArtifactAction\(artifact\.id, action\.id\)/)
   assert.match(interaction, /action\.behavior === "secure_handoff"[\s\S]*onInvokeCapability\(prepared\.capability\.id, prepared\.capability\.target\)/)
   assert.match(interaction, /action\.behavior === "open_form"[\s\S]*onInvokeCapability\(prepared\.capability\.id, prepared\.capability\.target\)/)
-  assert.doesNotMatch(interaction, /onInvokeCapability\(action\.capabilityId, action\.target\)/)
+  assert.match(interaction, /if \(canOpenImmediately\) \{[\s\S]*onInvokeCapability\(action\.capabilityId, action\.target\)[\s\S]*client\.prepareArtifactAction\(artifact\.id, action\.id\)/)
+  assert.match(interaction, /action\.risk === "none"/)
   assert.match(interaction, /if \(prepared\.proposal\)[\s\S]*setProposals/)
   assert.doesNotMatch(interaction, /confirmProposal|onActionCompleted|execute/)
 })

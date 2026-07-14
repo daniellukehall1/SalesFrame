@@ -125,6 +125,7 @@ import {
 } from "@/components/ui/message"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Progress } from "@/components/ui/progress"
+import { ResponsiveSectionTabs } from "@/components/responsive-section-tabs"
 import {
   Select,
   SelectContent,
@@ -202,8 +203,10 @@ import {
   buildConversationContextualActions,
 } from "@/lib/conversation-mode"
 import { getAssistantCapabilityDefinition } from "@/lib/assistant-capability-registry"
+import { getAssistantCreatedOpportunity } from "@/lib/assistant-result-sync"
 import type {
   AssistantActionTarget,
+  AssistantArtifact,
   AssistantMessageReference,
   AssistantRouteContext,
   InterfaceMode,
@@ -3582,7 +3585,11 @@ function App() {
       loadedWorkspaceIdRef.current === activeWorkspaceId &&
       (previousDataState === "ready" || previousDataState === "empty")
 
-    setWorkspaceDataState("loading")
+    // Initial loads and workspace switches need a blocking skeleton. Routine
+    // background reconciliation must preserve the already-authorised UI so a
+    // newly created record can open immediately instead of waiting on every
+    // related workspace query.
+    if (!canPreserveCurrentWorkspace) setWorkspaceDataState("loading")
     setWorkspaceErrorMessage("")
 
     try {
@@ -8217,6 +8224,47 @@ function App() {
     action()
   }
 
+  const handleConversationActionCompleted = React.useCallback((artifact?: AssistantArtifact) => {
+    const createdOpportunity = getAssistantCreatedOpportunity(artifact)
+    if (createdOpportunity) {
+      const optimisticOpportunity = {
+        ...createStarterOpportunity({
+          accountId: createdOpportunity.accountId,
+          callType: "Discovery",
+          id: createdOpportunity.id,
+          name: createdOpportunity.name,
+        }),
+        stage: createdOpportunity.stage,
+      }
+
+      setWorkspaceOpportunities((items) =>
+        items.some((item) => item.id === optimisticOpportunity.id)
+          ? items
+          : [...items, optimisticOpportunity]
+      )
+      setWorkspaceAccounts((items) => items.map((account) =>
+        account.id !== createdOpportunity.accountId ||
+        account.opportunities.some((opportunity) => opportunity.id === createdOpportunity.id)
+          ? account
+          : {
+              ...account,
+              opportunities: [
+                ...account.opportunities,
+                {
+                  id: createdOpportunity.id,
+                  name: createdOpportunity.name,
+                  stage: createdOpportunity.stage,
+                },
+              ],
+            }
+      ))
+    }
+
+    // Reconcile every field and related record without making the seller wait
+    // to open the newly created resource.
+    setWorkspaceRefreshToken((value) => value + 1)
+  }, [])
+
   const handleConversationCapability = (
     capabilityId: string,
     immutableTarget: AssistantActionTarget = {}
@@ -8759,7 +8807,7 @@ function App() {
                 workspaceId={activeWorkspaceId}
                 workspaceName={activeWorkspace?.name ?? "SalesFrame"}
                 workingContextLabel={conversationWorkingContextLabel || undefined}
-                onActionCompleted={() => setWorkspaceRefreshToken((value) => value + 1)}
+                onActionCompleted={handleConversationActionCompleted}
                 onInvokeCapability={handleConversationCapability}
                 onOpenReference={handleConversationReference}
                 onOpenWorkspaceSwitcher={() => setConversationWorkspaceSwitcherOpen(true)}
@@ -15350,6 +15398,10 @@ function AccountView({
     opportunitySort
   )
   const accountHasDraftChanges = !areAccountDraftsEqual(accountDraft, savedAccountDraft)
+  const handleAccountSectionChange = (value: string) => {
+    setAccountTab(value as typeof accountTab)
+    onScrollToTop()
+  }
 
   return (
     <div className="grid w-full min-w-0 gap-4">
@@ -15390,17 +15442,21 @@ function AccountView({
       <Tabs
         value={accountTab}
         className="grid w-full min-w-0 gap-4"
-        onValueChange={(value) => {
-          setAccountTab(value as typeof accountTab)
-          onScrollToTop()
-        }}
+        onValueChange={handleAccountSectionChange}
       >
-        <TabsList className="w-full md:w-fit">
-          <TabsTrigger className="min-w-28" value="record">Account record</TabsTrigger>
-          <TabsTrigger className="min-w-28" value="contacts">Contacts</TabsTrigger>
-          <TabsTrigger className="min-w-28" value="opportunities">Opportunities</TabsTrigger>
-          <TabsTrigger className="min-w-28" value="intelligence">Intelligence</TabsTrigger>
-        </TabsList>
+        <ResponsiveSectionTabs
+          id="account-sections"
+          label="Account section"
+          value={accountTab}
+          onValueChange={handleAccountSectionChange}
+          triggerClassName="min-w-28"
+          items={[
+            { value: "record", label: "Account record" },
+            { value: "contacts", label: "Contacts" },
+            { value: "opportunities", label: "Opportunities" },
+            { value: "intelligence", label: "Intelligence" },
+          ]}
+        />
 
         <TabsContent value="record" className="m-0 grid w-full min-w-0 gap-4">
           <Card className="w-full min-w-0">
@@ -16346,6 +16402,10 @@ function WorkspaceView({
     : false
   const coachPopoutLimitNotice =
     activeCallId && isRecording ? getLiveCallLimitNotice(elapsed, MAX_LIVE_CALL_SECONDS) : ""
+  const handleOpportunityWorkspaceChange = (value: string) => {
+    onScrollToTop()
+    onNavigate(value === "opportunity" ? "opportunity-record" : value === "post-call" ? "post-call" : "workspace")
+  }
   const coachPopoutSnapshot = React.useMemo<LiveCoachPopoutSnapshot>(() => ({
     type: "snapshot",
     version: liveCoachPopoutVersion,
@@ -16963,18 +17023,24 @@ function WorkspaceView({
     <Tabs
       value={defaultTab}
       className="grid w-full min-w-0 gap-4"
-      onValueChange={(value) => {
-        onScrollToTop()
-        onNavigate(value === "opportunity" ? "opportunity-record" : value === "post-call" ? "post-call" : "workspace")
-      }}
+      onValueChange={handleOpportunityWorkspaceChange}
     >
       <h1 className="sr-only">{account.name} — {opportunity.name}</h1>
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <TabsList className="grid w-full grid-cols-3 md:w-fit">
-          <TabsTrigger value="opportunity">Opportunity</TabsTrigger>
-          <TabsTrigger value="cockpit">Call cockpit</TabsTrigger>
-          <TabsTrigger value="post-call">Post-call</TabsTrigger>
-        </TabsList>
+        <div className="w-full md:w-auto">
+          <ResponsiveSectionTabs
+            id="opportunity-modes"
+            label="Opportunity workspace"
+            value={defaultTab}
+            onValueChange={handleOpportunityWorkspaceChange}
+            triggerClassName="min-w-28"
+            items={[
+              { value: "opportunity", label: "Opportunity" },
+              { value: "cockpit", label: "Call cockpit" },
+              { value: "post-call", label: "Post-call" },
+            ]}
+          />
+        </div>
       </div>
 
       <TabsContent value="cockpit" className="m-0 grid w-full min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -17184,25 +17250,26 @@ function OpportunityWorkspace({
           : activeView === "opportunity-intelligence"
             ? "intelligence"
             : "record"
+  const handleOpportunitySectionChange = (value: string) => {
+    const nextView =
+      value === "contacts"
+        ? "opportunity-contacts"
+        : value === "history"
+          ? "opportunity-history"
+          : value === "intelligence"
+            ? "opportunity-intelligence"
+            : value === "methodology"
+              ? "methodology"
+              : "opportunity-record"
+    onScrollToTop()
+    onNavigate(nextView)
+  }
 
   return (
     <Tabs
       value={defaultTab}
       className="grid w-full min-w-0 gap-4"
-      onValueChange={(value) => {
-        const nextView =
-          value === "contacts"
-            ? "opportunity-contacts"
-            : value === "history"
-              ? "opportunity-history"
-              : value === "intelligence"
-                ? "opportunity-intelligence"
-                : value === "methodology"
-                  ? "methodology"
-                  : "opportunity-record"
-        onScrollToTop()
-        onNavigate(nextView)
-      }}
+      onValueChange={handleOpportunitySectionChange}
     >
       <OpportunitySummaryStrip
         startCallAction={
@@ -17223,13 +17290,19 @@ function OpportunityWorkspace({
           ) : null
         }
       />
-      <TabsList className="w-full md:w-fit">
-        <TabsTrigger className="min-w-24" value="record">Record</TabsTrigger>
-        <TabsTrigger className="min-w-24" value="contacts">Contacts</TabsTrigger>
-        <TabsTrigger className="min-w-24" value="intelligence">Next call</TabsTrigger>
-        <TabsTrigger className="min-w-24" value="methodology">Methodology</TabsTrigger>
-        <TabsTrigger className="min-w-24" value="history">History</TabsTrigger>
-      </TabsList>
+      <ResponsiveSectionTabs
+        id="opportunity-sections"
+        label="Opportunity section"
+        value={defaultTab}
+        onValueChange={handleOpportunitySectionChange}
+        items={[
+          { value: "record", label: "Record" },
+          { value: "contacts", label: "Contacts" },
+          { value: "intelligence", label: "Next call" },
+          { value: "methodology", label: "Methodology" },
+          { value: "history", label: "History" },
+        ]}
+      />
       <TabsContent value="record" className="m-0 grid w-full min-w-0 gap-4" data-testid="opportunity-record-stack">
         <OpportunityProfile
           account={account}
@@ -22036,6 +22109,7 @@ function PlaybooksView({
   const [customSaveMessage, setCustomSaveMessage] = React.useState("")
   const [customSaveTone, setCustomSaveTone] = React.useState<"success" | "error" | "info">("info")
   const [customSaving, setCustomSaving] = React.useState(false)
+  const [playbookDetailTab, setPlaybookDetailTab] = React.useState("overview")
   const playbookCatalog = React.useMemo(
     () =>
       playbooks
@@ -22059,6 +22133,10 @@ function PlaybooksView({
   const selectedPlaybook = playbookCatalog.find((playbook) => playbook.id === activeView)
   const visiblePlaybooks = playbookCatalog
   const hasCustomChanges = JSON.stringify(customDraft) !== JSON.stringify(savedCustomFramework)
+
+  React.useEffect(() => {
+    setPlaybookDetailTab("overview")
+  }, [selectedPlaybook?.id])
 
   React.useEffect(() => {
     setSavedCustomFramework(workspaceCustomFramework)
@@ -22256,12 +22334,18 @@ function PlaybooksView({
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="gap-4">
-        <TabsList className="w-full justify-start sm:w-fit">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="fields">Fields</TabsTrigger>
-          <TabsTrigger value="exit-criteria">Exit criteria</TabsTrigger>
-        </TabsList>
+      <Tabs value={playbookDetailTab} onValueChange={setPlaybookDetailTab} className="gap-4">
+        <ResponsiveSectionTabs
+          id="playbook-sections"
+          label="Playbook section"
+          value={playbookDetailTab}
+          onValueChange={setPlaybookDetailTab}
+          items={[
+            { value: "overview", label: "Overview" },
+            { value: "fields", label: "Fields" },
+            { value: "exit-criteria", label: "Exit criteria" },
+          ]}
+        />
 
         <TabsContent value="overview" className="m-0 grid gap-4">
           <div className="grid gap-3 md:grid-cols-2">

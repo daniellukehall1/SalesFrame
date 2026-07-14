@@ -65,9 +65,13 @@ export function createAssistantClient(
       const response = await transport.request<AssistantThreadsWireResponse>(`/api/assistant/threads?${query}`)
       return normalizeThreadCollection(response)
     },
-    createThread: async (workspaceId: string, title?: string) => {
+    createThread: async (workspaceId: string, title?: string, threadId?: string) => {
       const response = await transport.request<{ thread: AssistantThreadWire }>("/api/assistant/threads", {
-        body: JSON.stringify({ workspaceId, ...(title?.trim() ? { title: title.trim() } : {}) }),
+        body: JSON.stringify({
+          workspaceId,
+          ...(threadId ? { threadId } : {}),
+          ...(title?.trim() ? { title: title.trim() } : {}),
+        }),
         headers: { "content-type": "application/json" },
         method: "POST",
       })

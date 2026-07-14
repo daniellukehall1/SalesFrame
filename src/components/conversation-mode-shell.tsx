@@ -7,7 +7,10 @@ import {
 } from "@/components/assistant-artifact"
 import { ConversationWorkspace } from "@/components/conversation-workspace"
 import { ASSISTANT_CAPABILITIES } from "@/lib/assistant-capabilities"
-import { ASSISTANT_CAPABILITY_REGISTRY } from "@/lib/assistant-capability-registry"
+import {
+  ASSISTANT_CAPABILITY_REGISTRY,
+  getAssistantCapabilityDefinition,
+} from "@/lib/assistant-capability-registry"
 import { createAssistantClient } from "@/lib/assistant-client"
 import type {
   AssistantActionProposal,
@@ -38,7 +41,7 @@ type ConversationModeShellProps = {
   workspaceId: string
   workspaceName: string
   workingContextLabel?: string
-  onActionCompleted: () => void
+  onActionCompleted: (artifact?: AssistantArtifact) => void
   onInvokeCapability: (capabilityId: string, target?: AssistantActionTarget) => void
   onOpenReference: (reference: AssistantMessageReference) => void
   onOpenWorkspaceSwitcher: () => void
@@ -107,6 +110,7 @@ export function ConversationModeShell({
   const messageMutationVersionRef = React.useRef(0)
   const proposalRevisionRef = React.useRef(0)
   const proposalMutationKeysRef = React.useRef(new Set<string>())
+  const pendingThreadCreationsRef = React.useRef(new Map<string, Promise<AssistantThreadSummary | null>>())
   const proposal = proposals[0] ?? null
 
   const loadThreads = React.useCallback(async () => {
@@ -138,6 +142,7 @@ export function ConversationModeShell({
     messageMutationVersionRef.current += 1
     proposalRevisionRef.current += 1
     proposalMutationKeysRef.current.clear()
+    pendingThreadCreationsRef.current.clear()
     replacementThreadAfterDeleteRef.current = ""
     activeTurnRef.current?.abort()
     activeTurnRef.current = null
@@ -200,6 +205,10 @@ export function ConversationModeShell({
 
   const loadMessages = React.useCallback(async (threadId: string) => {
     if (!threadId) return
+    if (pendingThreadCreationsRef.current.has(threadId)) {
+      setIsLoadingMessages(false)
+      return
+    }
     const generation = requestGenerationRef.current
     const requestId = messageRequestIdRef.current + 1
     const proposalRevision = proposalRevisionRef.current
@@ -241,49 +250,88 @@ export function ConversationModeShell({
     void loadMessages(activeThreadId)
   }, [activeThreadId, loadMessages])
 
-  const createThread = React.useCallback(async () => {
+  const createThread = React.useCallback(() => {
     replacementThreadAfterDeleteRef.current = ""
     const generation = requestGenerationRef.current
     const activationVersion = preferenceSaveVersionRef.current + 1
     preferenceSaveVersionRef.current = activationVersion
-    try {
-      const creation = preferenceSaveQueueRef.current
-        .catch(() => undefined)
-        .then(() => requestGenerationRef.current === generation
-          ? client.createThread(workspaceId)
-          : null
-        )
-      preferenceSaveQueueRef.current = creation.then(() => undefined, () => undefined)
-      const thread = await creation
-      if (!thread) return null
-      if (requestGenerationRef.current !== generation) return null
-      setThreads((items) => [thread, ...items.filter((item) => item.id !== thread.id)])
-      if (preferenceSaveVersionRef.current !== activationVersion) return thread
-      messageMutationVersionRef.current += 1
-      proposalRevisionRef.current += 1
-      activeTurnRef.current?.abort()
-      activeTurnRef.current = null
-      messageRequestIdRef.current += 1
-      activeThreadIdRef.current = thread.id
-      setIsResponding(false)
-      setIsResponseStoppable(false)
-      setCompletedMessageId("")
-      setAssistantStatus("")
-      setActiveThreadId(thread.id)
-      setMessages([])
-      setProposals([])
-      activeArtifactRef.current = null
-      setActiveArtifact(null)
-      setArtifactActionError(null)
-      setArtifactSearchValue("")
-      setAssistantUnavailableMessage("")
-      replaceAssistantQuery({ thread: thread.id, artifact: null })
-      return thread
-    } catch {
-      if (requestGenerationRef.current !== generation) return null
-      setAssistantUnavailableMessage("SalesFrame couldn't start a new conversation yet. Your current conversation is unchanged.")
-      return null
+    const previousThreadId = activeThreadIdRef.current
+    const optimisticThreadId = crypto.randomUUID()
+    const createdAtIso = new Date().toISOString()
+    const optimisticThread: AssistantThreadSummary = {
+      createdAtIso,
+      id: optimisticThreadId,
+      title: "New conversation",
+      updatedAtIso: createdAtIso,
     }
+
+    // Move first. The seller should never wait on network latency just to see
+    // an empty conversation that already has its final opaque identifier.
+    messageMutationVersionRef.current += 1
+    proposalRevisionRef.current += 1
+    activeTurnRef.current?.abort()
+    activeTurnRef.current = null
+    messageRequestIdRef.current += 1
+    activeThreadIdRef.current = optimisticThreadId
+    activeArtifactRef.current = null
+    setThreads((items) => [optimisticThread, ...items.filter((item) => item.id !== optimisticThreadId)])
+    setActiveThreadId(optimisticThreadId)
+    setMessages([])
+    setProposals([])
+    setActiveArtifact(null)
+    setArtifactActionError(null)
+    setArtifactSearchValue("")
+    setCompletedMessageId("")
+    setAssistantStatus("")
+    setAssistantUnavailableMessage("")
+    setIsLoadingMessages(false)
+    setIsResponding(false)
+    setIsResponseStoppable(false)
+    replaceAssistantQuery({ thread: optimisticThreadId, artifact: null })
+
+    const creation = preferenceSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => requestGenerationRef.current === generation
+        ? client.createThread(workspaceId, undefined, optimisticThreadId)
+        : null
+      )
+      .then((thread) => {
+        if (!thread || requestGenerationRef.current !== generation) return null
+        setThreads((items) => [
+          thread,
+          ...items.filter((item) => item.id !== optimisticThreadId && item.id !== thread.id),
+        ])
+        if (
+          activeThreadIdRef.current === optimisticThreadId &&
+          preferenceSaveVersionRef.current === activationVersion
+        ) {
+          activeThreadIdRef.current = thread.id
+          setActiveThreadId(thread.id)
+          if (thread.id !== optimisticThreadId) replaceAssistantQuery({ thread: thread.id, artifact: null })
+        }
+        return thread
+      })
+      .catch(() => {
+        if (requestGenerationRef.current !== generation) return null
+        setThreads((items) => items.filter((item) => item.id !== optimisticThreadId))
+        if (activeThreadIdRef.current === optimisticThreadId) {
+          activeThreadIdRef.current = previousThreadId
+          setActiveThreadId(previousThreadId)
+          setMessages([])
+          setProposals([])
+          setIsLoadingMessages(Boolean(previousThreadId))
+          replaceAssistantQuery({ thread: previousThreadId || null, artifact: null })
+        }
+        setAssistantUnavailableMessage("SalesFrame couldn't start a new conversation yet. Your previous conversation is unchanged.")
+        return null
+      })
+      .finally(() => {
+        pendingThreadCreationsRef.current.delete(optimisticThreadId)
+      })
+
+    pendingThreadCreationsRef.current.set(optimisticThreadId, creation)
+    preferenceSaveQueueRef.current = creation.then(() => undefined, () => undefined)
+    return creation
   }, [client, workspaceId])
 
   const selectThread = React.useCallback((threadId: string) => {
@@ -404,7 +452,7 @@ export function ConversationModeShell({
   }, [onInvokeCapability, openArtifact])
 
   const submitTurn = React.useCallback(async (text: string) => {
-    const threadId = activeThreadIdRef.current
+    let threadId = activeThreadIdRef.current
     if (!threadId) {
       setAssistantUnavailableMessage("Conversation mode is still opening. Try again in a moment or use Workspace view.")
       return false
@@ -436,6 +484,20 @@ export function ConversationModeShell({
     setCompletedMessageId("")
 
     try {
+      const pendingCreation = pendingThreadCreationsRef.current.get(threadId)
+      if (pendingCreation) {
+        setAssistantStatus("Starting your conversation")
+        const persistedThread = await pendingCreation
+        if (!persistedThread) throw new Error("SalesFrame couldn't start that conversation yet.")
+        threadId = persistedThread.id
+        if (
+          activeTurnRef.current !== controller ||
+          activeThreadIdRef.current !== threadId ||
+          requestGenerationRef.current !== generation
+        ) return false
+        setAssistantStatus("Understanding what you need")
+      }
+
       let streamedErrorMessage = ""
       await client.sendTurn(
         { threadId, text, clientRequestId, routeContext },
@@ -543,6 +605,13 @@ export function ConversationModeShell({
     }
   }, [client, handleStreamEvent, routeContext])
 
+  const replaceArtifactWithWorkspaceSurface = React.useCallback(() => {
+    activeArtifactRef.current = null
+    setActiveArtifact(null)
+    setArtifactActionError(null)
+    replaceAssistantQuery({ artifact: null })
+  }, [])
+
   const handleArtifactAction = React.useCallback(async (
     artifact: AssistantArtifact,
     action: AssistantArtifactAction
@@ -570,19 +639,44 @@ export function ConversationModeShell({
         return
       }
 
+      const capability = getAssistantCapabilityDefinition(action.capabilityId)
+      const canOpenImmediately =
+        action.behavior === "secure_handoff" &&
+        action.risk === "none" &&
+        Boolean(capability && ["read", "navigate"].includes(capability.executionMode))
+
+      // Read-only record links are already immutable server-issued actions,
+      // and replayed artifacts are reauthorised when messages are loaded.
+      // Opening them must not wait for another network round-trip. The target
+      // is validated again against the currently loaded workspace in App, and
+      // the server action is revalidated asynchronously for audit continuity.
+      if (canOpenImmediately) {
+        replaceArtifactWithWorkspaceSurface()
+        onInvokeCapability(action.capabilityId, action.target)
+        void client.prepareArtifactAction(artifact.id, action.id).catch(() => {
+          // The protected destination enforces current access and the local
+          // workspace check prevents a stale cross-record handoff. A delayed
+          // audit revalidation must never hold the navigation UI hostage.
+        })
+        return
+      }
+
       const prepared = await client.prepareArtifactAction(artifact.id, action.id)
       if (activeThreadIdRef.current !== threadId || requestGenerationRef.current !== generation) return
       if (action.behavior === "secure_handoff") {
         if (!prepared.capability) throw new Error("That action is no longer available.")
+        replaceArtifactWithWorkspaceSurface()
         onInvokeCapability(prepared.capability.id, prepared.capability.target)
         return
       }
       if (action.behavior === "open_form") {
         if (!prepared.capability) throw new Error("That action is no longer available.")
+        replaceArtifactWithWorkspaceSurface()
         onInvokeCapability(prepared.capability.id, prepared.capability.target)
         return
       }
       if (prepared.proposal) {
+        replaceArtifactWithWorkspaceSurface()
         proposalRevisionRef.current += 1
         setProposals((items) => orderAssistantProposals([
           ...items.filter((item) => item.id !== prepared.proposal?.id),
@@ -610,7 +704,7 @@ export function ConversationModeShell({
         setIsArtifactWorking(false)
       }
     }
-  }, [client, isArtifactWorking, onInvokeCapability, onOpenReference, openArtifact, submitTurn])
+  }, [client, isArtifactWorking, onInvokeCapability, onOpenReference, openArtifact, replaceArtifactWithWorkspaceSurface, submitTurn])
 
   const stopResponse = React.useCallback(() => {
     const controller = activeTurnRef.current
@@ -672,7 +766,7 @@ export function ConversationModeShell({
         }
         if (result.reference) onOpenReference(result.reference)
       }
-      if (requestGenerationRef.current === generation) onActionCompleted()
+      if (requestGenerationRef.current === generation) onActionCompleted(result.artifact)
     } catch (error) {
       if (activeThreadIdRef.current !== proposalThreadId) return
       proposalRevisionRef.current += 1
@@ -985,8 +1079,9 @@ export function ConversationModeShell({
       void submitTurn(collectionPrompt)
       return
     }
+    replaceArtifactWithWorkspaceSurface()
     onInvokeCapability(capabilityId, target)
-  }, [onInvokeCapability, submitTurn])
+  }, [onInvokeCapability, replaceArtifactWithWorkspaceSurface, submitTurn])
 
   const canvas = activeArtifact ? {
     id: activeArtifact.id,

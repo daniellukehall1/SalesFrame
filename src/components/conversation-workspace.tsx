@@ -24,6 +24,7 @@ import {
 } from "lucide-react"
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
+import { AssistantActionChip } from "@/components/assistant-action-chip"
 import { AssistantArtifactPreview } from "@/components/assistant-artifact"
 import { Button } from "@/components/ui/button"
 import {
@@ -202,6 +203,7 @@ export function ConversationWorkspace({
   onSwitchToWorkspaceView,
 }: ConversationWorkspaceProps) {
   const isMobile = useIsMobile()
+  const useCanvasOverlay = useCompactConversationSurface()
   const [internalDrafts, setInternalDrafts] = React.useState<Record<string, string>>({})
   const [threadsOpen, setThreadsOpen] = React.useState(false)
   const [actionsOpen, setActionsOpen] = React.useState(false)
@@ -277,8 +279,15 @@ export function ConversationWorkspace({
 
   const visibleContextualActions = contextualActions.slice(0, 4)
   const showContextualActions =
-    visibleContextualActions.length > 0 && (messages.length > 0 || briefing.actions.length === 0)
+    visibleContextualActions.length > 0 &&
+    !proposal &&
+    !isResponding &&
+    !artifactActionError &&
+    (messages.length > 0 || briefing.actions.length === 0)
   const isBusy = isResponding || isSubmitting || isComposerDisabled
+  const canvasIsInline = Boolean(canvas && !useCanvasOverlay)
+  const visibleWorkingContextLabel =
+    workingContextLabel && dismissedContextLabel !== workingContextLabel ? workingContextLabel : undefined
 
   const latestMessageId = messages.at(-1)?.id ?? ""
   React.useEffect(() => {
@@ -290,7 +299,7 @@ export function ConversationWorkspace({
     <div
       className={cn(
         "grid h-full min-h-0 w-full min-w-0 overflow-hidden bg-background",
-        canvas && !isMobile ? "md:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]" : "grid-cols-1"
+        canvasIsInline ? "grid-cols-[minmax(280px,320px)_minmax(0,1fr)]" : "grid-cols-1"
       )}
       data-interface-mode="conversation"
       data-testid="conversation-workspace"
@@ -316,7 +325,10 @@ export function ConversationWorkspace({
         />
 
         <ScrollArea className="min-h-0 flex-1" data-testid="conversation-scroll-area">
-          <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-8 px-4 py-8 sm:px-6 sm:py-10">
+          <div className={cn(
+            "mx-auto flex w-full min-w-0 flex-col px-4",
+            canvasIsInline ? "max-w-none gap-4 py-4" : "max-w-4xl gap-5 py-5 sm:px-6 sm:py-6"
+          )}>
             {messages.length === 0 && !isLoadingMessages ? (
               <ConversationBriefingView
                 briefing={briefing}
@@ -337,15 +349,6 @@ export function ConversationWorkspace({
               artifactActionError={artifactActionError}
             />
 
-            {proposal ? (
-              <ProposalPreview
-                key={proposal.id}
-                proposal={proposal}
-                onCancel={onCancelProposal}
-                onConfirm={onConfirmProposal}
-              />
-            ) : null}
-
             {showContextualActions ? (
               <ContextualActions
                 actions={visibleContextualActions}
@@ -363,11 +366,17 @@ export function ConversationWorkspace({
           </div>
         </ScrollArea>
 
-        {workingContextLabel && dismissedContextLabel !== workingContextLabel ? (
-          <WorkingContextRow
-            label={workingContextLabel}
-            onDismiss={() => setDismissedContextLabel(workingContextLabel)}
-          />
+        {proposal ? (
+          <div className="max-h-[42dvh] shrink-0 overflow-x-hidden overflow-y-auto border-t bg-background px-3 py-2.5 sm:px-4">
+            <div className="mx-auto w-full max-w-4xl min-w-0">
+              <ProposalPreview
+                key={proposal.id}
+                proposal={proposal}
+                onCancel={onCancelProposal}
+                onConfirm={onConfirmProposal}
+              />
+            </div>
+          </div>
         ) : null}
 
         <ConversationComposer
@@ -376,14 +385,18 @@ export function ConversationWorkspace({
           status={assistantStatus}
           isBusy={isBusy}
           isResponding={isResponding}
+          workingContextLabel={visibleWorkingContextLabel}
           voice={voice}
+          onDismissWorkingContext={visibleWorkingContextLabel
+            ? () => setDismissedContextLabel(visibleWorkingContextLabel)
+            : undefined}
           onDraftChange={setDraft}
           onStopResponse={onStopResponse}
           onSubmit={handleSubmit}
         />
       </main>
 
-      {canvas && !isMobile ? (
+      {canvas && canvasIsInline ? (
         <DesktopCanvas canvas={canvas} onClose={onCloseCanvas} />
       ) : null}
 
@@ -424,7 +437,7 @@ export function ConversationWorkspace({
         }}
       />
 
-      {canvas && isMobile ? (
+      {canvas && useCanvasOverlay ? (
         <MobileCanvas canvas={canvas} onClose={onCloseCanvas} />
       ) : null}
     </div>
@@ -452,7 +465,7 @@ function ConversationHeader({
     <header className="flex min-h-14 min-w-0 shrink-0 items-center gap-1.5 border-b px-2 sm:gap-2 sm:px-4">
       <Button
         variant="ghost"
-        className="min-w-0 max-w-[min(42vw,240px)] justify-start px-2"
+        className="min-w-0 flex-1 !shrink justify-start px-2"
         aria-label={`Current workspace: ${workspaceName}`}
         aria-haspopup={onOpenWorkspaceSwitcher ? "dialog" : undefined}
         onClick={onOpenWorkspaceSwitcher}
@@ -465,8 +478,6 @@ function ConversationHeader({
       <Button ref={threadsTriggerRef} variant="ghost" size="icon" onClick={onOpenThreads} aria-label="Open conversations">
         <MessageSquareTextIcon />
       </Button>
-
-      <div className="min-w-0 flex-1" />
 
       <Button ref={actionsTriggerRef} variant="ghost" size="icon" onClick={onOpenActions} aria-label="Open all actions">
         <SearchIcon />
@@ -488,19 +499,19 @@ function ConversationBriefingView({
   onInvokeCapability: ConversationWorkspaceProps["onInvokeCapability"]
 }) {
   return (
-    <section className="grid min-w-0 gap-6" aria-labelledby="conversation-briefing-title">
-      <div className="grid gap-2">
+    <section className="grid min-w-0 gap-4" aria-labelledby="conversation-briefing-title">
+      <div className="grid gap-1.5">
         <p className="text-sm text-muted-foreground">{userName ? `Good ${getDayPeriod()}, ${firstName(userName)}.` : "Welcome back."}</p>
-        <h2 id="conversation-briefing-title" className="text-balance text-2xl font-medium tracking-tight sm:text-3xl">
+        <h2 id="conversation-briefing-title" className="text-balance text-xl font-medium tracking-tight sm:text-2xl">
           {briefing.title}
         </h2>
-        <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground sm:text-base">
+        <p className="max-w-2xl text-pretty text-sm leading-5 text-muted-foreground">
           {briefing.description}
         </p>
       </div>
 
       {briefing.findings.length > 0 ? (
-        <div className="grid divide-y rounded-xl border" aria-label="Workspace briefing">
+        <div className="grid divide-y rounded-lg border" aria-label="Workspace briefing">
           {briefing.findings.slice(0, 3).map((finding) => {
             const content = (
               <>
@@ -516,13 +527,13 @@ function ConversationBriefingView({
               <button
                 key={finding.id}
                 type="button"
-                className="flex min-h-14 w-full min-w-0 items-center gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50"
+                className="flex min-h-12 w-full min-w-0 items-center gap-2.5 px-3 py-2.5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50"
                 onClick={() => onInvokeCapability(finding.capabilityId!, "finding")}
               >
                 {content}
               </button>
             ) : (
-              <div key={finding.id} className="flex min-h-14 min-w-0 items-center gap-3 px-4 py-3">
+              <div key={finding.id} className="flex min-h-12 min-w-0 items-center gap-2.5 px-3 py-2.5">
                 {content}
               </div>
             )
@@ -531,19 +542,11 @@ function ConversationBriefingView({
       ) : null}
 
       {briefing.actions.length > 0 ? (
-        <div className="flex min-w-0 flex-wrap gap-2" aria-label="Suggested actions">
-          {briefing.actions.slice(0, 4).map((action, index) => (
-            <Button
-              key={action.id}
-              variant={action.emphasis === "primary" || (!action.emphasis && index === 0) ? "default" : "outline"}
-              className="max-w-full"
-              disabled={action.disabled}
-              onClick={() => onInvokeCapability(action.capabilityId, "briefing")}
-            >
-              <span className="truncate">{action.label}</span>
-            </Button>
-          ))}
-        </div>
+        <ConversationActionStrip
+          actions={briefing.actions.slice(0, 4)}
+          label="Suggested actions"
+          onInvoke={(action) => onInvokeCapability(action.capabilityId, "briefing")}
+        />
       ) : null}
     </section>
   )
@@ -608,7 +611,7 @@ function ConversationMessages({
   return (
     <>
       <MessageGroup
-        className="gap-6"
+        className="gap-4"
         aria-label="Conversation messages"
         aria-live="off"
         role="log"
@@ -628,7 +631,7 @@ function ConversationMessages({
               <MessageContent className={fromSeller ? "max-w-[88%] sm:max-w-[75%]" : "max-w-full"}>
                 <span className="sr-only">{fromSeller ? "You said:" : "SalesFrame replied:"}</span>
                 <Bubble variant={fromSeller ? "secondary" : "ghost"} align={fromSeller ? "end" : "start"}>
-                  <BubbleContent className={fromSeller ? "whitespace-pre-wrap" : "whitespace-pre-wrap text-[0.95rem] leading-7 sm:text-base"}>
+                  <BubbleContent className={fromSeller ? "whitespace-pre-wrap" : "whitespace-pre-wrap text-[0.925rem] leading-6"}>
                     {message.text}
                   </BubbleContent>
                 </Bubble>
@@ -638,7 +641,7 @@ function ConversationMessages({
                       <Button
                         key={reference.id}
                         variant="ghost"
-                        size="sm"
+                        size="xs"
                         className="max-w-full text-muted-foreground"
                         onClick={() => onOpenReference?.(reference)}
                         disabled={!onOpenReference}
@@ -687,18 +690,64 @@ function ContextualActions({
   onInvokeCapability: ConversationWorkspaceProps["onInvokeCapability"]
 }) {
   return (
-    <div className="flex min-w-0 flex-wrap gap-2" aria-label="Relevant actions" data-testid="conversation-contextual-actions">
-      {actions.map((action) => (
-        <Button
-          key={action.id}
-          variant={action.emphasis === "primary" ? "default" : action.emphasis === "quiet" ? "ghost" : "outline"}
-          className="max-w-full"
-          disabled={action.disabled}
-          onClick={() => onInvokeCapability(action.capabilityId, "contextual")}
-        >
-          <span className="truncate">{action.label}</span>
-        </Button>
-      ))}
+    <ConversationActionStrip
+      actions={actions}
+      label="Relevant actions"
+      testId="conversation-contextual-actions"
+      onInvoke={(action) => onInvokeCapability(action.capabilityId, "contextual")}
+    />
+  )
+}
+
+function ConversationActionStrip({
+  actions,
+  label,
+  onInvoke,
+  testId,
+}: {
+  actions: AssistantContextualAction[]
+  label: string
+  onInvoke: (action: AssistantContextualAction) => void
+  testId?: string
+}) {
+  const primaryAction = actions[0]
+  const remainingActions = actions.slice(1)
+  if (!primaryAction) return null
+
+  return (
+    <div
+      className="flex min-h-11 min-w-0 flex-wrap items-center gap-x-1.5 gap-y-3"
+      aria-label={label}
+      data-testid={testId}
+    >
+      <AssistantActionChip
+        tone={primaryAction.emphasis === "quiet" ? "secondary" : "primary"}
+        disabled={primaryAction.disabled}
+        onClick={() => onInvoke(primaryAction)}
+      >
+        {primaryAction.label}
+      </AssistantActionChip>
+      {remainingActions.length ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <AssistantActionChip icon="more" tone="quiet" aria-label={`More ${label.toLocaleLowerCase()}`}>
+              More
+            </AssistantActionChip>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            {remainingActions.map((action) => (
+              <DropdownMenuItem
+                key={action.id}
+                disabled={action.disabled}
+                onSelect={() => onInvoke(action)}
+              >
+                <span className="min-w-0 flex-1 truncate">{action.label}</span>
+                <ChevronRightIcon className="text-muted-foreground" aria-hidden="true" />
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </div>
   )
 }
@@ -742,7 +791,7 @@ function ProposalPreview({
       : "Nothing will change until you confirm."
 
   return (
-    <section className="min-w-0 rounded-xl border bg-muted/20 p-4 sm:p-5" aria-labelledby={`proposal-${proposal.id}`}>
+    <section className="min-w-0 rounded-lg border bg-muted/20 p-3" aria-labelledby={`proposal-${proposal.id}`} role="region">
       <div className="grid gap-1">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Review change</p>
         <h2 id={`proposal-${proposal.id}`} className="text-base font-medium">{proposal.summary}</h2>
@@ -750,7 +799,7 @@ function ProposalPreview({
       </div>
 
       {proposal.fields.length > 0 ? (
-        <dl className="mt-4 grid min-w-0 gap-x-6 gap-y-3 border-y py-4 sm:grid-cols-2">
+        <dl className="mt-3 grid min-w-0 gap-x-5 gap-y-2.5 border-y py-3 sm:grid-cols-2">
           {proposal.fields.map((field, index) => (
             <div key={`${field.label}-${index}`} className="min-w-0">
               <dt className="text-xs font-medium text-muted-foreground">{field.label}</dt>
@@ -770,7 +819,7 @@ function ProposalPreview({
         </p>
       ) : null}
 
-      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
         <Button variant="outline" onClick={() => onCancel?.(proposal.id)} disabled={isConfirming || !onCancel}>
           {isExpired ? "Dismiss" : "Cancel"}
         </Button>
@@ -787,34 +836,15 @@ function ProposalPreview({
   )
 }
 
-function WorkingContextRow({ label, onDismiss }: { label: string; onDismiss: () => void }) {
-  return (
-    <div className="shrink-0 border-t bg-background px-3 sm:px-4" data-testid="conversation-working-context">
-      <div className="mx-auto flex min-h-11 w-full max-w-3xl min-w-0 items-center gap-2">
-        <span className="shrink-0 text-xs text-muted-foreground">Working in</span>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium" title={label}>{label}</span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="min-h-11 min-w-11 shrink-0"
-          aria-label={`Dismiss working context: ${label}`}
-          onClick={onDismiss}
-        >
-          <XIcon />
-        </Button>
-      </div>
-    </div>
-  )
-}
-
 function ConversationComposer({
   draft,
   placeholder,
   status,
   isBusy,
   isResponding,
+  workingContextLabel,
   voice,
+  onDismissWorkingContext,
   onDraftChange,
   onStopResponse,
   onSubmit,
@@ -824,7 +854,9 @@ function ConversationComposer({
   status?: string
   isBusy: boolean
   isResponding: boolean
+  workingContextLabel?: string
   voice?: AssistantVoiceInput
+  onDismissWorkingContext?: () => void
   onDraftChange: (value: string) => void
   onStopResponse?: () => void
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
@@ -835,6 +867,9 @@ function ConversationComposer({
   const voiceActive = voice?.state === "listening"
   const voiceRequesting = voice?.state === "requesting"
   const voiceBusy = voice?.state === "transcribing"
+  const visibleStatus = voice?.state === "error"
+    ? voice.errorMessage ?? "Voice input is unavailable. You can keep typing."
+    : voice?.statusText ?? status
 
   React.useEffect(() => {
     if (isResponding || !restoreComposerFocusRef.current) return
@@ -843,8 +878,28 @@ function ConversationComposer({
   }, [isResponding])
 
   return (
-    <div className="shrink-0 border-t bg-background px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-6 sm:pb-4">
-      <form className="mx-auto w-full max-w-3xl min-w-0" onSubmit={onSubmit}>
+    <div className="shrink-0 border-t bg-background px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] sm:px-5 sm:pb-3">
+      <form className="mx-auto w-full max-w-4xl min-w-0" onSubmit={onSubmit}>
+        {workingContextLabel ? (
+          <div className="mb-2 flex min-h-8 min-w-0 items-center" data-testid="conversation-working-context">
+            <div className="inline-flex min-w-0 max-w-full items-center rounded-full bg-muted/60 pl-2.5 text-xs text-muted-foreground">
+              <span className="shrink-0">Working in</span>
+              <span className="ml-1 min-w-0 truncate font-medium text-foreground" title={workingContextLabel}>
+                {workingContextLabel}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="relative ml-0.5 !size-7 shrink-0 rounded-full after:absolute after:-inset-2 after:content-[''] sm:after:inset-0"
+                aria-label={`Dismiss working context: ${workingContextLabel}`}
+                onClick={onDismissWorkingContext}
+              >
+                <XIcon />
+              </Button>
+            </div>
+          </div>
+        ) : null}
         <div className="flex min-w-0 items-center gap-1 rounded-2xl border bg-background p-2 shadow-sm focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30 sm:gap-2">
           <Input
             ref={composerInputRef}
@@ -906,10 +961,13 @@ function ConversationComposer({
             </Button>
           )}
         </div>
-        <div id={statusId} className="mt-1.5 min-h-5 px-1 text-xs text-muted-foreground" role="status" aria-live="polite">
-          {voice?.state === "error"
-            ? voice.errorMessage ?? "Voice input is unavailable. You can keep typing."
-            : voice?.statusText ?? status ?? "SalesFrame will ask before it changes anything."}
+        <div
+          id={statusId}
+          className={cn(visibleStatus ? "mt-1.5 min-h-5 px-1 text-xs text-muted-foreground" : "sr-only")}
+          role="status"
+          aria-live="polite"
+        >
+          {visibleStatus ?? "SalesFrame will ask before it changes anything."}
         </div>
       </form>
     </div>
@@ -958,8 +1016,8 @@ function ThreadsOverlay({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange} showSwipeHandle>
-        <DrawerContent onCloseAutoFocus={onCloseAutoFocus} className="max-h-[92dvh] min-h-[min(620px,92dvh)] overflow-hidden text-left">
-          <div className="min-h-0 flex-1 overflow-hidden">{content}</div>
+        <DrawerContent onCloseAutoFocus={onCloseAutoFocus} className="h-[min(620px,92dvh)] max-h-[92dvh] overflow-hidden text-left">
+          <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden">{content}</div>
         </DrawerContent>
       </Drawer>
     )
@@ -1036,7 +1094,7 @@ function ThreadsPanel({
         </div>
       </div>
 
-      <ScrollArea className="min-h-0">
+      <ScrollArea className="h-full min-h-0 overflow-hidden overscroll-contain touch-pan-y" data-vaul-no-drag="">
         <div className="grid gap-1 p-2">
           {visibleThreads.length === 0 ? (
             <p className="px-3 py-8 text-center text-sm text-muted-foreground">No conversations found.</p>
@@ -1181,8 +1239,8 @@ function AllActionsOverlay({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange} showSwipeHandle>
-        <DrawerContent onCloseAutoFocus={onCloseAutoFocus} className="max-h-[92dvh] min-h-[min(660px,92dvh)] overflow-hidden text-left">
-          <div className="min-h-0 flex-1 overflow-hidden">{content}</div>
+        <DrawerContent onCloseAutoFocus={onCloseAutoFocus} className="h-[min(660px,92dvh)] max-h-[92dvh] overflow-hidden text-left">
+          <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden">{content}</div>
         </DrawerContent>
       </Drawer>
     )
@@ -1233,7 +1291,11 @@ function AllActionsPanel({
         </div>
       </div>
 
-      <ScrollArea className="min-h-0">
+      <ScrollArea
+        className="h-full min-h-0 overflow-hidden overscroll-contain touch-pan-y"
+        data-vaul-no-drag=""
+        data-testid="all-actions-scroll-area"
+      >
         <div className="grid gap-5 p-3 sm:p-5">
           {capabilities.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">No actions match that search.</p>
@@ -1281,7 +1343,7 @@ function AllActionsPanel({
 function DesktopCanvas({ canvas, onClose }: { canvas: ConversationCanvas; onClose?: () => void }) {
   return (
     <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background" aria-labelledby={`conversation-canvas-${canvas.id}`} data-testid="conversation-desktop-canvas">
-      <div className="flex min-h-14 min-w-0 shrink-0 items-center gap-3 border-b px-4">
+      <div className="flex min-h-12 min-w-0 shrink-0 items-center gap-3 border-b px-3.5">
         <div className="min-w-0 flex-1">
           <h2 id={`conversation-canvas-${canvas.id}`} className="truncate text-sm font-medium">{canvas.title}</h2>
           {canvas.description ? <p className="truncate text-xs text-muted-foreground">{canvas.description}</p> : null}
@@ -1290,10 +1352,10 @@ function DesktopCanvas({ canvas, onClose }: { canvas: ConversationCanvas; onClos
           <XIcon />
         </Button>
       </div>
-      <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain p-4 sm:p-6">
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
         {canvas.content}
       </div>
-      {canvas.footer ? <div className="shrink-0 border-t p-4">{canvas.footer}</div> : null}
+      {canvas.footer ? <div className="shrink-0 border-t px-3.5 py-2">{canvas.footer}</div> : null}
     </section>
   )
 }
@@ -1302,7 +1364,7 @@ function MobileCanvas({ canvas, onClose }: { canvas: ConversationCanvas; onClose
   return (
     <Sheet open onOpenChange={(nextOpen) => { if (!nextOpen) onClose?.() }}>
       <SheetContent side="right" className="grid w-full max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0" showCloseButton={false}>
-        <SheetHeader className="flex min-h-14 flex-row items-center gap-3 border-b px-4 py-2 text-left">
+        <SheetHeader className="flex min-h-12 flex-row items-center gap-3 border-b px-3 py-1.5 text-left">
           <div className="min-w-0 flex-1">
             <SheetTitle className="truncate">{canvas.title}</SheetTitle>
             {canvas.description ? <SheetDescription className="truncate">{canvas.description}</SheetDescription> : null}
@@ -1311,13 +1373,29 @@ function MobileCanvas({ canvas, onClose }: { canvas: ConversationCanvas; onClose
             <XIcon />
           </Button>
         </SheetHeader>
-        <div className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
+        <div className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain p-3">
           {canvas.content}
         </div>
-        {canvas.footer ? <div className="shrink-0 border-t p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">{canvas.footer}</div> : <div />}
+        {canvas.footer ? <div className="shrink-0 border-t px-3 pt-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">{canvas.footer}</div> : <div />}
       </SheetContent>
     </Sheet>
   )
+}
+
+function useCompactConversationSurface() {
+  const [isCompact, setIsCompact] = React.useState(() =>
+    typeof window === "undefined" ? true : window.innerWidth < 1120
+  )
+
+  React.useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 1119px)")
+    const update = () => setIsCompact(mediaQuery.matches)
+    update()
+    mediaQuery.addEventListener("change", update)
+    return () => mediaQuery.removeEventListener("change", update)
+  }, [])
+
+  return isCompact
 }
 
 function getDayPeriod() {

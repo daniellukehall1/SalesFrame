@@ -91,7 +91,8 @@ test("the capability registry provides discoverable parity fallbacks", async () 
 test("desktop and mobile receive purpose-built canvas and overlay presentations", async () => {
   const component = await read("src/components/conversation-workspace.tsx")
 
-  assert.match(component, /md:grid-cols-\[minmax\(320px,380px\)_minmax\(0,1fr\)\]/)
+  assert.match(component, /grid-cols-\[minmax\(280px,320px\)_minmax\(0,1fr\)\]/)
+  assert.match(component, /window\.matchMedia\("\(max-width: 1119px\)"\)/)
   assert.match(component, /data-testid="conversation-desktop-canvas"/)
   assert.match(component, /<Drawer open=\{open\} onOpenChange=\{onOpenChange\} showSwipeHandle>/)
   assert.match(component, /<SheetContent side="right" className="grid w-full max-w-none/)
@@ -160,7 +161,7 @@ test("assistant streaming accepts only allowlisted event shapes", async () => {
   const client = await read("src/lib/assistant-client.ts")
 
   assert.match(client, /listThreads: async \(workspaceId: string/)
-  assert.match(client, /createThread: async \(workspaceId: string, title\?: string\)/)
+  assert.match(client, /createThread: async \(workspaceId: string, title\?: string, threadId\?: string\)/)
   assert.match(client, /getThread: async \(threadId: string\)/)
   assert.match(client, /updateThread: async/)
   assert.match(client, /archiveThread: async/)
@@ -227,6 +228,24 @@ test("conversation deletion removes immediately while the exact server deletion 
   assert.match(shell, /const replacementThreadAfterDeleteRef = React\.useRef\(""\)/)
   assert.match(deletion, /replacementThreadAfterDeleteRef\.current !== threadId/)
   assert.match(shell, /const createThread = React\.useCallback[\s\S]*replacementThreadAfterDeleteRef\.current = ""/)
+})
+
+test("new conversations open immediately while durable creation continues in order", async () => {
+  const shell = await read("src/components/conversation-mode-shell.tsx")
+  const creation = shell.slice(
+    shell.indexOf("const createThread = React.useCallback"),
+    shell.indexOf("const selectThread = React.useCallback")
+  )
+
+  assert.match(creation, /const optimisticThreadId = crypto\.randomUUID\(\)/)
+  assert.match(creation, /activeThreadIdRef\.current = optimisticThreadId/)
+  assert.match(creation, /setActiveThreadId\(optimisticThreadId\)/)
+  assert.match(creation, /replaceAssistantQuery\(\{ thread: optimisticThreadId, artifact: null \}\)/)
+  assert.match(creation, /client\.createThread\(workspaceId, undefined, optimisticThreadId\)/)
+  assert.ok(creation.indexOf("setActiveThreadId(optimisticThreadId)") < creation.indexOf("client.createThread"))
+  assert.match(creation, /pendingThreadCreationsRef\.current\.set\(optimisticThreadId, creation\)/)
+  assert.match(shell, /const pendingCreation = pendingThreadCreationsRef\.current\.get\(threadId\)[\s\S]*await pendingCreation/)
+  assert.match(creation, /SalesFrame couldn't start a new conversation yet\. Your previous conversation is unchanged\./)
 })
 
 test("failed requests preserve the draft and reconcile optimistic messages", async () => {

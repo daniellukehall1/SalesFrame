@@ -229,11 +229,13 @@ export async function listAssistantThreads(
 export async function createAssistantThread({
   options,
   supabase,
+  threadId,
   title,
   workspaceId,
 }: {
   options: AssistantAuthorizationOptions
   supabase: SupabaseClient<Database>
+  threadId?: string
   title?: unknown
   workspaceId: string
 }) {
@@ -243,21 +245,37 @@ export async function createAssistantThread({
     .from("assistant_threads")
     .insert({
       created_by_user_id: options.userId,
+      ...(threadId ? { id: threadId } : {}),
       title: normalizedTitle,
       workspace_id: workspaceId,
     })
     .select("*")
     .single()
 
-  if (error) throw new Error(error.message)
+  let savedThread = data
+  if (error && threadId && error.code === "23505") {
+    const { data: existing, error: existingError } = await supabase
+      .from("assistant_threads")
+      .select("*")
+      .eq("id", threadId)
+      .eq("workspace_id", workspaceId)
+      .eq("created_by_user_id", options.userId)
+      .maybeSingle()
+    if (existingError) throw new Error(existingError.message)
+    if (!existing) throw new Error(error.message)
+    savedThread = existing
+  } else if (error) {
+    throw new Error(error.message)
+  }
+  if (!savedThread) throw new Error("Conversation creation returned no record.")
   await updateAssistantPreference({
-    activeThreadId: data.id,
+    activeThreadId: savedThread.id,
     interfaceMode: "conversation",
     options,
     supabase,
     workspaceId,
   })
-  return serializeAssistantThread(data)
+  return serializeAssistantThread(savedThread)
 }
 
 export async function ensureAssistantDefaultThread({

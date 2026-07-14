@@ -11,7 +11,8 @@ const shellSource = fs.readFileSync(
 test("saved conversation actions remain bound to their immutable resource targets", () => {
   assert.match(shellSource, /client\.prepareArtifactAction\(artifact\.id, action\.id\)/)
   assert.match(shellSource, /action\.behavior === "secure_handoff"[\s\S]*onInvokeCapability\(prepared\.capability\.id, prepared\.capability\.target\)/)
-  assert.doesNotMatch(shellSource, /onInvokeCapability\(action\.capabilityId, action\.target\)/)
+  assert.match(shellSource, /if \(canOpenImmediately\) \{[\s\S]*onInvokeCapability\(action\.capabilityId, action\.target\)[\s\S]*client\.prepareArtifactAction\(artifact\.id, action\.id\)/)
+  assert.match(shellSource, /action\.risk === "none"/)
   assert.match(appSource, /immutableTarget: AssistantActionTarget/)
   assert.match(appSource, /workspaceContacts\.find\(\(contact\) => contact\.id === immutableTarget\.contactId\)/)
   assert.match(appSource, /workspaceOpportunities\.find\(\(opportunity\) => opportunity\.id === immutableTarget\.opportunityId\)/)

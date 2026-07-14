@@ -2105,8 +2105,25 @@ test("opportunity workspace tabs show opportunity before call cockpit", async ()
 
   assert.match(
     app,
-    /<TabsTrigger value="opportunity">Opportunity<\/TabsTrigger>\s*<TabsTrigger value="cockpit">Call cockpit<\/TabsTrigger>\s*<TabsTrigger value="post-call">Post-call<\/TabsTrigger>/
+    /id="opportunity-modes"[\s\S]*\{ value: "opportunity", label: "Opportunity" \}[\s\S]*\{ value: "cockpit", label: "Call cockpit" \}[\s\S]*\{ value: "post-call", label: "Post-call" \}/
   )
+})
+
+test("opportunity sections use a mobile selector without squeezing five tabs", async () => {
+  const app = await read("src/App.tsx")
+  const opportunityWorkspace = app.slice(
+    app.indexOf("function OpportunityWorkspace("),
+    app.indexOf("function OpportunityProfile(")
+  )
+
+  assert.match(opportunityWorkspace, /<ResponsiveSectionTabs[\s\S]*id="opportunity-sections"[\s\S]*label="Opportunity section"/)
+  assert.match(opportunityWorkspace, /value=\{defaultTab\}[\s\S]*onValueChange=\{handleOpportunitySectionChange\}/)
+  assert.match(opportunityWorkspace, /\{ value: "record", label: "Record" \}/)
+  assert.match(opportunityWorkspace, /\{ value: "contacts", label: "Contacts" \}/)
+  assert.match(opportunityWorkspace, /\{ value: "intelligence", label: "Next call" \}/)
+  assert.match(opportunityWorkspace, /\{ value: "methodology", label: "Methodology" \}/)
+  assert.match(opportunityWorkspace, /\{ value: "history", label: "History" \}/)
+  assert.doesNotMatch(opportunityWorkspace, /<TabsList className="w-full md:w-fit">/)
 })
 
 test("call cockpit tab does not repeat account and opportunity context heading", async () => {
@@ -2262,7 +2279,7 @@ test("opportunity history tab shows previous recordings as a simple list", async
     app.indexOf("function PostCallPanel(")
   )
 
-  assert.match(opportunityWorkspace, /<TabsTrigger className="min-w-24" value="history">History<\/TabsTrigger>/)
+  assert.match(opportunityWorkspace, /id="opportunity-sections"[\s\S]*\{ value: "history", label: "History" \}/)
   assert.match(opportunityWorkspace, /<OpportunityRecordingHistory[\s\S]*calls=\{calls\}[\s\S]*onDeleteCall=\{onDeleteCall\}/)
   assert.match(recordingHistory, /Previous call recordings/)
   assert.match(recordingHistory, /\.filter\(\(call\) => call\.opportunityId === opportunity\.id\)/)
@@ -2804,6 +2821,9 @@ test("navigation stays immediate while unresolved workspace data uses calm skele
   assert.match(app, /const workspaceRefreshRequestIdRef = React\.useRef\(0\)/)
   assert.match(app, /const isCurrentRequest = \(\) =>[\s\S]*workspaceRefreshRequestIdRef\.current === requestId[\s\S]*activeWorkspaceIdRef\.current === requestedWorkspaceId/)
   assert.match(app, /if \(!isCurrentRequest\(\)\) return/)
+  assert.match(app, /const canPreserveCurrentWorkspace =[\s\S]*if \(!canPreserveCurrentWorkspace\) setWorkspaceDataState\("loading"\)/)
+  assert.match(app, /handleConversationActionCompleted[\s\S]*getAssistantCreatedOpportunity\(artifact\)[\s\S]*setWorkspaceOpportunities/)
+  assert.match(app, /onActionCompleted=\{handleConversationActionCompleted\}/)
   assert.match(app, /const handleNavigate = React\.useCallback/)
   assert.match(app, /const completeNavigation = React\.useCallback\(\(view: string\) => \{[\s\S]*setActiveView\(view\)[\s\S]*requestNavigationScrollReset\(\)/)
   assert.match(app, /const handleNavigate = React\.useCallback\(\(view: string\) => \{[\s\S]*const navigate = \(\) => completeNavigation\(view\)[\s\S]*navigate\(\)/)
@@ -2864,8 +2884,10 @@ test("page and record navigation resets the main app scroll position", async () 
   assert.match(app, /setActiveView\("home"\)[\s\S]*requestNavigationScrollReset\(\)[\s\S]*setActiveWorkspaceId/)
   assert.match(app, /<AccountView[\s\S]*onScrollToTop=\{requestNavigationScrollReset\}/)
   assert.match(app, /<WorkspaceView[\s\S]*onScrollToTop=\{requestNavigationScrollReset\}/)
-  assert.match(app, /<Tabs[\s\S]*value=\{accountTab\}[\s\S]*onValueChange=\{\(value\) => \{[\s\S]*setAccountTab\(value as typeof accountTab\)[\s\S]*onScrollToTop\(\)[\s\S]*\}\}/)
-  assert.match(app, /<Tabs[\s\S]*value=\{defaultTab\}[\s\S]*onValueChange=\{\(value\) => \{[\s\S]*onNavigate\(value === "opportunity" \? "opportunity-record" : value === "post-call" \? "post-call" : "workspace"\)/)
+  assert.match(app, /const handleAccountSectionChange = \(value: string\) => \{[\s\S]*setAccountTab\(value as typeof accountTab\)[\s\S]*onScrollToTop\(\)/)
+  assert.match(app, /<Tabs[\s\S]*value=\{accountTab\}[\s\S]*onValueChange=\{handleAccountSectionChange\}/)
+  assert.match(app, /const handleOpportunityWorkspaceChange = \(value: string\) => \{[\s\S]*onScrollToTop\(\)[\s\S]*onNavigate\(value === "opportunity" \? "opportunity-record" : value === "post-call" \? "post-call" : "workspace"\)/)
+  assert.match(app, /<Tabs[\s\S]*value=\{defaultTab\}[\s\S]*onValueChange=\{handleOpportunityWorkspaceChange\}/)
   assert.doesNotMatch(app, /onValueChange=\{onScrollToTop\}/)
 })
 

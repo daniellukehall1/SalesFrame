@@ -9,12 +9,20 @@ import {
   ContactRoundIcon,
   FileTextIcon,
   MessageSquareTextIcon,
+  MoreHorizontalIcon,
   SearchIcon,
   SparklesIcon,
   TargetIcon,
 } from "lucide-react"
 
+import { AssistantActionChip } from "@/components/assistant-action-chip"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import type {
   AssistantArtifact,
@@ -31,9 +39,9 @@ type AssistantArtifactInteraction = (
 ) => void | Promise<void>
 
 export function assistantArtifactNeedsCanvas(artifact: AssistantArtifact) {
-  if (artifact.kind === "collection") return artifact.records.length > 3 || artifact.sections.length > 0
+  if (artifact.kind === "collection") return artifact.records.length > 2 || artifact.sections.length > 0
   if (["relationship", "evidence", "workflow", "form"].includes(artifact.kind)) return true
-  return artifact.sections.length > 1 || artifact.fields.length > 6
+  return artifact.sections.length > 1 || artifact.fields.length > 4
 }
 
 export function AssistantArtifactPreview({
@@ -47,25 +55,25 @@ export function AssistantArtifactPreview({
   onAction?: AssistantArtifactInteraction
   onOpen?: (artifact: AssistantArtifact) => void
 }) {
-  const records = artifact.records.slice(0, 3)
-  const fields = artifact.fields.slice(0, 4)
+  const records = artifact.records.slice(0, 2)
+  const fields = artifact.fields.slice(0, 2)
   const shouldOpen = assistantArtifactNeedsCanvas(artifact)
 
   return (
     <section
-      className="mt-3 min-w-0 overflow-hidden rounded-xl border bg-background"
+      className="mt-2 min-w-0 overflow-hidden rounded-lg border bg-background"
       aria-labelledby={`assistant-artifact-preview-${artifact.id}`}
       data-assistant-artifact-kind={artifact.kind}
     >
-      <div className="min-w-0 px-4 py-3.5">
-        <div className="flex min-w-0 items-start gap-3">
+      <div className="min-w-0 px-3 py-2.5">
+        <div className="flex min-w-0 items-start gap-2.5">
           <ArtifactIcon artifact={artifact} className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <h3 id={`assistant-artifact-preview-${artifact.id}`} className="break-words text-sm font-medium">
               {artifact.title}
             </h3>
             {artifact.description ? (
-              <p className="mt-1 line-clamp-2 text-sm leading-5 text-muted-foreground">
+              <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
                 {artifact.description}
               </p>
             ) : null}
@@ -74,19 +82,19 @@ export function AssistantArtifactPreview({
         </div>
 
         {artifact.summary ? (
-          <p className="mt-3 break-words text-sm leading-6 text-foreground/90">{artifact.summary}</p>
+          <p className="mt-2 line-clamp-2 break-words text-sm leading-5 text-foreground/90">{artifact.summary}</p>
         ) : null}
 
         {artifact.task ? <TaskProgress artifact={artifact} compact /> : null}
 
         {fields.length ? (
-          <dl className="mt-3 grid min-w-0 grid-cols-1 divide-y border-y sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+          <dl className="mt-2 grid min-w-0 grid-cols-1 divide-y border-y sm:grid-cols-2 sm:divide-x sm:divide-y-0">
             {fields.map((field) => <ArtifactField key={field.id} field={field} compact />)}
           </dl>
         ) : null}
 
         {records.length ? (
-          <div className="mt-3 grid min-w-0 divide-y border-y">
+          <div className="mt-2 grid min-w-0 divide-y border-y">
             {records.map((record) => (
               <ArtifactRecordRow
                 key={record.id}
@@ -115,7 +123,7 @@ export function AssistantArtifactPreview({
         <ArtifactActions
           artifact={artifact}
           actions={artifact.actions}
-          className="border-t px-3 py-2.5"
+          className="border-t px-2.5 py-1.5"
           includeOpen={shouldOpen}
           onAction={onAction}
           onOpen={onOpen}
@@ -145,16 +153,16 @@ export function AssistantArtifactCanvasView({
   searchValue?: string
 }) {
   return (
-    <div className="mx-auto grid w-full max-w-5xl min-w-0 gap-6" data-testid="assistant-artifact-canvas">
+    <div className="mx-auto grid w-full max-w-6xl min-w-0 gap-4" data-testid="assistant-artifact-canvas">
       {artifact.summary ? (
-        <p className="max-w-3xl break-words text-sm leading-6 text-foreground/90 sm:text-base">
+        <p className="max-w-3xl break-words text-sm leading-5 text-foreground/90">
           {artifact.summary}
         </p>
       ) : null}
 
       {artifact.kind === "collection" && onSearch && onSearchValueChange ? (
         <form
-          className="flex min-w-0 flex-col gap-2 sm:flex-row"
+          className="flex min-w-0 flex-col gap-1.5 sm:flex-row"
           role="search"
           onSubmit={(event) => {
             event.preventDefault()
@@ -193,7 +201,7 @@ export function AssistantArtifactCanvasView({
       {artifact.steps.length ? (
         <section className="min-w-0" aria-labelledby={`assistant-artifact-steps-${artifact.id}`}>
           <h3 id={`assistant-artifact-steps-${artifact.id}`} className="text-sm font-medium">What will happen</h3>
-          <ol className="mt-3 grid min-w-0 divide-y border-y">
+          <ol className="mt-2 grid min-w-0 divide-y border-y">
             {artifact.steps.map((step) => <ArtifactStep key={step.id} step={step} />)}
           </ol>
         </section>
@@ -202,7 +210,7 @@ export function AssistantArtifactCanvasView({
       {artifact.records.length ? (
         <section className="min-w-0" aria-labelledby={`assistant-artifact-records-${artifact.id}`}>
           {artifact.kind !== "record" ? (
-            <h3 id={`assistant-artifact-records-${artifact.id}`} className="mb-2 text-sm font-medium">
+            <h3 id={`assistant-artifact-records-${artifact.id}`} className="mb-1.5 text-sm font-medium">
               {artifact.kind === "evidence" ? "Evidence" : "Results"}
             </h3>
           ) : null}
@@ -225,15 +233,15 @@ export function AssistantArtifactCanvasView({
             <h3 id={`assistant-artifact-section-${section.id}`} className="text-sm font-medium">{section.title}</h3>
           ) : null}
           {section.description ? (
-            <p className="mt-1 max-w-3xl break-words text-sm leading-6 text-muted-foreground">{section.description}</p>
+            <p className="mt-1 max-w-3xl break-words text-sm leading-5 text-muted-foreground">{section.description}</p>
           ) : null}
           {section.fields.length ? (
-            <dl className="mt-3 grid min-w-0 grid-cols-1 divide-y border-y sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-3">
+            <dl className="mt-2 grid min-w-0 grid-cols-1 divide-y border-y sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-3">
               {section.fields.map((field) => <ArtifactField key={field.id} field={field} />)}
             </dl>
           ) : null}
           {section.records.length ? (
-            <div className="mt-3 grid min-w-0 divide-y border-y">
+            <div className="mt-2 grid min-w-0 divide-y border-y">
               {section.records.map((record) => (
                 <ArtifactRecordRow
                   key={record.id}
@@ -297,7 +305,7 @@ export function AssistantArtifactCanvasActions({
 
 function ArtifactField({ field, compact = false }: { field: AssistantArtifactField; compact?: boolean }) {
   return (
-    <div className={cn("min-w-0 px-3 py-3", compact ? "sm:px-3" : "sm:px-4 sm:py-4")}>
+    <div className={cn("min-w-0 px-3 py-2.5", compact ? "sm:px-3" : "sm:px-3.5 sm:py-3")}>
       <dt className="break-words text-xs font-medium uppercase tracking-wide text-muted-foreground">{field.label}</dt>
       <dd className={cn(
         "mt-1 min-w-0 whitespace-pre-wrap break-words text-sm leading-5",
@@ -325,7 +333,7 @@ function ArtifactRecordRow({
   const primaryAction = record.actions.find((action) =>
     action.behavior === "secure_handoff" || action.behavior === "open_artifact"
   )
-  const secondaryActions = record.actions.filter((action) => action !== primaryAction).slice(0, compact ? 1 : 3)
+  const secondaryActions = record.actions.filter((action) => action !== primaryAction).slice(0, 3)
   const content = (
     <>
       <RecordIcon kind={record.kind} />
@@ -349,11 +357,11 @@ function ArtifactRecordRow({
   )
 
   return (
-    <div className="flex min-w-0 flex-col gap-2 py-2 sm:flex-row sm:items-center">
+    <div className="flex min-w-0 items-center gap-1 py-1.5">
       {primaryAction ? (
         <button
           type="button"
-          className="flex min-h-11 min-w-0 flex-1 items-start gap-3 rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+          className="flex min-h-11 min-w-0 flex-1 items-start gap-2.5 rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
           disabled={primaryAction.disabled}
           onClick={() => void onAction?.(artifact, primaryAction)}
         >
@@ -363,21 +371,31 @@ function ArtifactRecordRow({
         <div className="flex min-h-11 min-w-0 flex-1 items-start gap-3 px-3 py-2">{content}</div>
       )}
       {secondaryActions.length ? (
-        <div className="flex min-w-0 flex-wrap gap-1 px-3 pb-1 sm:px-0 sm:pr-2">
-          {secondaryActions.map((action) => (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
-              key={action.id}
               type="button"
               variant="ghost"
-              size="sm"
-              className="min-h-11 max-w-full"
-              disabled={action.disabled}
-              onClick={() => void onAction?.(artifact, action)}
+              size="icon-sm"
+              className="mr-1 shrink-0"
+              aria-label={`Actions for ${record.label}`}
             >
-              <span className="truncate">{action.label}</span>
+              <MoreHorizontalIcon aria-hidden="true" />
             </Button>
-          ))}
-        </div>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            {secondaryActions.map((action) => (
+              <DropdownMenuItem
+                key={action.id}
+                disabled={action.disabled}
+                onSelect={() => void onAction?.(artifact, action)}
+              >
+                <span className="min-w-0 flex-1 truncate">{action.label}</span>
+                <ChevronRightIcon className="text-muted-foreground" aria-hidden="true" />
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : null}
     </div>
   )
@@ -449,29 +467,60 @@ function ArtifactActions({
   onAction?: AssistantArtifactInteraction
   onOpen?: (artifact: AssistantArtifact) => void
 }) {
+  const primaryAction = includeOpen ? undefined : actions[0]
+  const remainingActions = includeOpen ? actions.slice(0, 4) : actions.slice(1, 4)
+
   return (
-    <div className={cn("flex min-w-0 flex-wrap gap-2", className)} aria-label={`Actions for ${artifact.title}`}>
-      {actions.slice(0, 4).map((action, index) => (
-        <Button
-          key={action.id}
-          type="button"
-          variant={action.risk === "destructive" ? "destructive" : index === 0 && action.risk !== "none" ? "default" : "outline"}
-          size="sm"
-          className="min-h-11 max-w-full"
-          disabled={disabled || action.disabled}
-          onClick={() => void onAction?.(artifact, action)}
-        >
-          <span className="truncate">{action.label}</span>
-        </Button>
-      ))}
+    <div
+      className={cn("flex min-h-11 min-w-0 flex-wrap items-center gap-x-1.5 gap-y-3", className)}
+      aria-label={`Actions for ${artifact.title}`}
+    >
       {includeOpen ? (
-        <Button type="button" variant="ghost" size="sm" className="min-h-11 max-w-full" onClick={() => onOpen?.(artifact)}>
+        <AssistantActionChip icon="details" tone="primary" onClick={() => onOpen?.(artifact)} disabled={!onOpen}>
           View details
-          <ChevronRightIcon data-icon="inline-end" />
-        </Button>
+        </AssistantActionChip>
+      ) : primaryAction ? (
+        <AssistantActionChip
+          icon={artifactActionChipIcon(primaryAction)}
+          tone={primaryAction.risk === "destructive" ? "secondary" : "primary"}
+          disabled={disabled || primaryAction.disabled}
+          onClick={() => void onAction?.(artifact, primaryAction)}
+        >
+          {primaryAction.label}
+        </AssistantActionChip>
+      ) : null}
+      {remainingActions.length ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <AssistantActionChip icon="more" tone="quiet" disabled={disabled} aria-label={`More actions for ${artifact.title}`}>
+              More
+            </AssistantActionChip>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            {remainingActions.map((action) => (
+              <DropdownMenuItem
+                key={action.id}
+                disabled={disabled || action.disabled}
+                onSelect={() => void onAction?.(artifact, action)}
+              >
+                <SparklesIcon aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">{action.label}</span>
+                <ChevronRightIcon className="text-muted-foreground" aria-hidden="true" />
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : null}
     </div>
   )
+}
+
+function artifactActionChipIcon(action: AssistantArtifactAction) {
+  return action.behavior === "secure_handoff" || action.behavior === "open_artifact"
+    ? "open" as const
+    : action.behavior === "open_form"
+      ? "details" as const
+      : "ai" as const
 }
 
 function ArtifactStateText({ artifact }: { artifact: AssistantArtifact }) {

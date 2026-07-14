@@ -1,6 +1,6 @@
 import type { Config, Context } from "@netlify/functions"
 
-import { assertAssistantUuid } from "./_shared/assistant-core"
+import { assertAssistantUuid, assertAssistantUuidV4 } from "./_shared/assistant-core"
 import {
   createAssistantThread,
   ensureAssistantDefaultThread,
@@ -10,7 +10,12 @@ import {
 import { badRequest, dataResponse, errorResponse, methodNotAllowed, readJson } from "./_shared/http"
 import { requireUser } from "./_shared/supabase"
 
-type CreateThreadPayload = { ensureDefault?: unknown; title?: unknown; workspaceId?: unknown }
+type CreateThreadPayload = {
+  ensureDefault?: unknown
+  threadId?: unknown
+  title?: unknown
+  workspaceId?: unknown
+}
 
 export default async (request: Request, context: Context) => {
   try {
@@ -35,7 +40,7 @@ export default async (request: Request, context: Context) => {
         throw badRequest("Conversation bootstrap state is invalid.", "assistant_thread_bootstrap_invalid")
       }
       if (payload.ensureDefault === true) {
-        if (payload.title !== undefined) {
+        if (payload.title !== undefined || payload.threadId !== undefined) {
           throw badRequest("A default conversation cannot include a custom title.", "assistant_thread_bootstrap_invalid")
         }
         return dataResponse({ thread: await ensureAssistantDefaultThread({
@@ -47,6 +52,9 @@ export default async (request: Request, context: Context) => {
       return dataResponse({ thread: await createAssistantThread({
         options,
         supabase,
+        threadId: payload.threadId === undefined
+          ? undefined
+          : assertAssistantUuidV4(payload.threadId, "threadId"),
         title: payload.title,
         workspaceId,
       }) }, 201)

@@ -16,7 +16,7 @@ test("account contacts use the shared responsive record-management UI", async ()
   const accountRecordTab = accountView.slice(accountView.indexOf('<TabsContent value="record"'), accountView.indexOf('<TabsContent value="contacts"'))
   const accountContactsTab = accountView.slice(accountView.indexOf('<TabsContent value="contacts"'), accountView.indexOf('<TabsContent value="opportunities"'))
 
-  assert.match(app, /<TabsTrigger className="min-w-28" value="contacts">Contacts<\/TabsTrigger>/)
+  assert.match(accountView, /<ResponsiveSectionTabs[\s\S]*id="account-sections"[\s\S]*\{ value: "contacts", label: "Contacts" \}/)
   assert.match(app, /<ContactsPanel/)
   assert.match(contacts, /<Dialog open=\{open\}/)
   assert.match(contacts, /<Drawer open=\{open\}/)
@@ -196,7 +196,7 @@ test("opportunities expose the shared account directory beside deal-specific con
   )
 
   assert.match(app, /opportunities=\{workspaceOpportunities\.filter\(\(item\) => item\.accountId === activeAccount\.id\)\}/)
-  assert.match(opportunityWorkspace, /<TabsTrigger className="min-w-24" value="contacts">Contacts<\/TabsTrigger>/)
+  assert.match(opportunityWorkspace, /<ResponsiveSectionTabs[\s\S]*id="opportunity-sections"[\s\S]*\{ value: "contacts", label: "Contacts" \}/)
   assert.match(opportunityWorkspace, /<TabsContent forceMount value="contacts"/)
   assert.match(opportunityWorkspace, /<OpportunityContactsCard[\s\S]*<ContactsPanel/)
   assert.match(opportunityWorkspace, /relationship\.opportunityId === opportunity\.id/)

@@ -36,5 +36,6 @@ test("prepared handoffs return server-derived capability IDs and immutable targe
   assert.match(store, /capability:\s*\{[\s\S]*id: capability\.id,[\s\S]*target:/)
   assert.match(client, /normalizePreparedCapability\(rawCapability\)/)
   assert.match(shell, /onInvokeCapability\(prepared\.capability\.id, prepared\.capability\.target\)/)
-  assert.doesNotMatch(shell, /onInvokeCapability\(action\.capabilityId, action\.target\)/)
+  assert.match(shell, /action\.behavior === "secure_handoff"[\s\S]*action\.risk === "none"[\s\S]*\["read", "navigate"\]/)
+  assert.match(shell, /if \(canOpenImmediately\) \{[\s\S]*onInvokeCapability\(action\.capabilityId, action\.target\)[\s\S]*client\.prepareArtifactAction\(artifact\.id, action\.id\)/)
 })

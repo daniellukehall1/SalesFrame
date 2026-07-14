@@ -70,6 +70,17 @@ export function assertAssistantUuid(value: unknown, field: string) {
   return value.toLowerCase()
 }
 
+export function assertAssistantUuidV4(value: unknown, field: string) {
+  if (
+    typeof value !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  ) {
+    throw badRequest(`${field} is invalid.`, `assistant_${toSnakeCase(field)}_invalid`)
+  }
+
+  return value.toLowerCase()
+}
+
 export function assertAssistantOptionalUuid(value: unknown, field: string) {
   if (value === undefined || value === null || value === "") return undefined
   return assertAssistantUuid(value, field)
